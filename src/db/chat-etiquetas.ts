@@ -1,13 +1,17 @@
 /**
  * Las etiquetas de las conversaciones del dia en Chats (migraciones 013 y 014).
  *
- * Una fila por numero normalizado y dia: la etiqueta que puso la IA (o las
- * reglas, si la IA fallo), de donde salio, la huella de los mensajes que se
- * miraron y el estado de su envio a GSG. Ver src/chat/etiquetar.ts, que es
- * quien decide cuando reutilizarla y cuando mandarla.
+ * Una fila por numero normalizado y dia: la etiqueta que puso la IA (o una
+ * persona a mano), de donde salio y la huella de los mensajes que se miraron.
+ * GSG la lee como la nota del chat en el historial (GET /api/v1/historial):
+ * nada se le manda aparte. Ver src/chat/etiquetar.ts, que decide cuando
+ * reutilizarla.
  *
- * Tambien los lotes (cada «Etiquetar» y cada reintento de envios) y su
- * registro de eventos, para seguir el flujo y saber por que fallo algo.
+ * Tambien los lotes (cada «Etiquetar») y su registro de eventos, para seguir
+ * el flujo y saber por que fallo algo.
+ *
+ * Las columnas sync_* de la migracion 014 (y las sync_* de los lotes) son de
+ * cuando las etiquetas se empujaban a una ruta de GSG: ya no se usan.
  *
  * Aqui tambien vive la lectura de los mensajes del dia, porque es la unica
  * consulta que necesita el etiquetado y asi `messages.ts` no crece mas.
@@ -16,16 +20,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from './pool.js';
 import type { Direction, MessageKind } from './messages.js';
-
-/**
- * El envio a GSG de una etiqueta:
- *  - pendiente: hay que mandarla (nueva, cambiada, o no se llego a intentar).
- *  - enviado: GSG la acepto (2xx) con esta huella.
- *  - fallido: GSG la rechazo o no respondio; `syncError` dice por que. Solo
- *    estas (y las pendientes) se reintentan, sin volver a la IA.
- *  - no_aplica: no hay etiqueta que mandar (no se pudo clasificar).
- */
-export type EstadoSync = 'pendiente' | 'enviado' | 'fallido' | 'no_aplica';
+import type { Catalogo } from '../archive/clasificar.js';
 
 export interface EtiquetaChat {
   /** Numero normalizado (51987654321), no el `phone` tal cual de un contacto. */
@@ -34,22 +29,17 @@ export interface EtiquetaChat {
   dia: string;
   /** null = no se pudo clasificar. */
   etiqueta: string | null;
-  origen: 'ia' | 'reglas';
+  /** Quien la puso: la IA, las reglas (respaldo de antes) o una persona a mano. */
+  origen: 'ia' | 'reglas' | 'manual';
   huella: string;
   mensajes: number;
   motivo: string | null;
   updatedAt: Date;
   /** El lote que la clasifico por ultima vez. */
   loteId: string | null;
-  syncEstado: EstadoSync;
-  syncIntentos: number;
-  syncError: string | null;
-  syncAt: Date | null;
-  /** La huella con la que GSG la acepto (null = nunca enviada). */
-  syncHuella: string | null;
 }
 
-/** Lo que escribe la clasificacion; el estado del envio lo decide el repo. */
+/** Lo que escribe la clasificacion. */
 export type EtiquetaNueva = Pick<EtiquetaChat, 'phone' | 'dia' | 'etiqueta' | 'origen' | 'huella' | 'mensajes' | 'motivo'> & { loteId?: string | null };
 
 export interface MensajeDelDia {
@@ -69,11 +59,12 @@ export interface AlcanceMensajes {
   retenidosDesde: Date;
 }
 
+/** `reintento` solo aparece en lotes viejos, de cuando se reintentaban los envios a GSG. */
 export type TipoLote = 'completo' | 'reintento';
 /**
  * en_curso; completado (todo bien); completado_con_errores (termino, pero hay
- * conversaciones sin clasificar o envios fallidos/pendientes); fallido (el
- * lote entero no pudo hacerse: sin IA, error al leer...).
+ * conversaciones que la IA no pudo clasificar); fallido (el lote entero no
+ * pudo hacerse: sin IA, error al leer...).
  */
 export type EstadoLote = 'en_curso' | 'completado' | 'completado_con_errores' | 'fallido';
 
@@ -87,15 +78,13 @@ export interface LoteEtiquetas {
   clasificadas: number;
   porIA: number;
   sinClasificar: number;
-  syncEnviadas: number;
-  syncFallidas: number;
-  syncPendientes: number;
   error: string | null;
   iniciadoPor: string | null;
   empezoAt: Date;
   terminoAt: Date | null;
 }
 
+/** `sincronizacion` solo aparece en eventos viejos, de cuando se mandaba a GSG. */
 export type FaseEvento = 'lote' | 'analisis' | 'sincronizacion';
 export type NivelEvento = 'info' | 'aviso' | 'error';
 
@@ -105,10 +94,74 @@ export interface EventoEtiquetas {
   phone: string | null;
   fase: FaseEvento;
   nivel: NivelEvento;
-  /** Un codigo estable para filtrar (lote_inicio, ia_fallo, gsg_rechazo...). */
+  /** Un codigo estable para filtrar (lote_inicio, ia_fallo, etiqueta_manual...). */
   codigo: string;
   detalle: string | null;
   createdAt: Date;
+}
+
+/** Un mensaje tal como quedo copiado en el lote (lo que se le mando a la IA). */
+export interface MensajeCapturado {
+  id: number;
+  direction: Direction;
+  kind: MessageKind;
+  body: string | null;
+  /** ISO. */
+  createdAt: string;
+}
+
+/**
+ * Como le fue a un chat dentro de un lote: pendiente (copiado, aun sin mirar),
+ * reutilizada (no cambio: se uso la etiqueta de antes), clasificada (la IA
+ * puso una) o error (la IA fallo o contesto algo que no vale). `solo_envio`
+ * solo aparece en lotes viejos (reintentos de envio a GSG).
+ */
+export type EstadoChatLote = 'pendiente' | 'reutilizada' | 'clasificada' | 'error' | 'solo_envio';
+
+export interface ChatDeLote {
+  loteId: string;
+  phone: string;
+  dia: string;
+  nombre: string | null;
+  huella: string;
+  totalMensajes: number;
+  /** La copia de los mensajes; null si no se pidio o si ya paso la retencion. */
+  mensajes: MensajeCapturado[] | null;
+  estado: EstadoChatLote;
+  etiqueta: string | null;
+  error: string | null;
+  procesadoAt: Date | null;
+  createdAt: Date;
+}
+
+/**
+ * Un ejemplo de etiquetado que enseño el negocio (Entrenamiento IA): una
+ * conversacion escrita como «cliente: …» / «negocio: …» por linea y la
+ * etiqueta que le toca. `fuente` es «telefono|dia» si salio de corregir a la
+ * IA en un chat (para no ofrecer la misma correccion dos veces).
+ */
+export interface EjemploEtiquetado {
+  id: string;
+  texto: string;
+  etiqueta: string;
+  origen: 'manual' | 'correccion';
+  fuente: string | null;
+  creadoEn: string;
+  creadoPor: string | null;
+}
+
+/** Donde se guardan los ejemplos: en `settings`, como el uso de la IA (sin tabla ni migracion). */
+export const CLAVE_EJEMPLOS_ETIQUETADO = 'etiquetas.ejemplos';
+
+function ejemplosDe(valor: string | null | undefined): EjemploEtiquetado[] {
+  if (!valor) return [];
+  try {
+    const j = JSON.parse(valor) as unknown;
+    if (!Array.isArray(j)) return [];
+    return j.filter((e): e is EjemploEtiquetado => Boolean(e && typeof e === 'object' && typeof (e as EjemploEtiquetado).texto === 'string' && typeof (e as EjemploEtiquetado).etiqueta === 'string'));
+  } catch {
+    return [];
+  }
 }
 
 export interface ChatEtiquetasRepo {
@@ -119,18 +172,12 @@ export interface ChatEtiquetasRepo {
   mensajesDelDia(desde: Date, alcance: AlcanceMensajes, tope: number): Promise<MensajeDelDia[]>;
   /** Las etiquetas ya puestas ese dia a esos numeros (sin numeros: todas las del dia). */
   delDia(dia: string, phones?: string[]): Promise<EtiquetaChat[]>;
-  /**
-   * Guarda la clasificacion. Si la etiqueta y la huella son las que GSG ya
-   * acepto, el envio sigue 'enviado'; si cambiaron, vuelve a 'pendiente'; sin
-   * etiqueta, 'no_aplica'.
-   */
+  /** Guarda la clasificacion (pisa la de ese numero y dia). */
   guardar(e: EtiquetaNueva): Promise<void>;
   /** La mas reciente de cada numero (la de hoy si la hay). */
   ultimas(phones: string[]): Promise<Map<string, EtiquetaChat>>;
-  /** Las de ese dia con etiqueta y el envio en alguno de esos estados. */
-  porSincronizar(dia: string, estados: EstadoSync[]): Promise<EtiquetaChat[]>;
-  /** Apunta el resultado de un intento de envio (suma un intento). */
-  marcarSync(phone: string, dia: string, r: { estado: Exclude<EstadoSync, 'no_aplica'>; error?: string | null; huella?: string | null; contarIntento?: boolean }): Promise<void>;
+  /** Quita la etiqueta de ese dia (el chat vuelve a «sin etiquetar»). */
+  quitar(phone: string, dia: string): Promise<void>;
 
   crearLote(l: Pick<LoteEtiquetas, 'dia' | 'tipo'> & { iniciadoPor?: string | null }): Promise<LoteEtiquetas>;
   actualizarLote(id: string, patch: Partial<Omit<LoteEtiquetas, 'id' | 'dia' | 'tipo' | 'empezoAt'>>): Promise<void>;
@@ -139,6 +186,27 @@ export interface ChatEtiquetasRepo {
   lotes(limite: number): Promise<LoteEtiquetas[]>;
   /** Los lotes que quedaron 'en_curso' (un reinicio a mitad): se cierran como fallidos al arrancar. */
   cerrarLotesColgados(error: string): Promise<number>;
+
+  /** Guarda la copia de los chats de un lote al empezar (estado 'pendiente'). */
+  capturar(loteId: string, dia: string, chats: Array<{ phone: string; nombre: string | null; huella: string; mensajes: MensajeCapturado[] }>): Promise<void>;
+  /** Los chats de un lote, en orden de numero; con la copia de los mensajes solo si se pide. */
+  chatsDelLote(loteId: string, conMensajes?: boolean): Promise<ChatDeLote[]>;
+  chatDelLote(loteId: string, phone: string): Promise<ChatDeLote | null>;
+  marcarChatLote(loteId: string, phone: string, r: { estado: EstadoChatLote; etiqueta?: string | null; error?: string | null }): Promise<void>;
+  /** Vacia la copia de los mensajes de los lotes anteriores a `antes` (retencion del chat). Devuelve cuantas. */
+  vaciarCopiasAntes(antes: Date): Promise<number>;
+
+  /** El catalogo guardado por el negocio, en su orden; null = no guardo ninguno (vale el de fabrica). */
+  catalogo(): Promise<Catalogo | null>;
+  /** Sustituye el catalogo entero (ya validado con validarCatalogo). */
+  guardarCatalogo(catalogo: Catalogo): Promise<void>;
+  /** Vuelve al catalogo de fabrica. */
+  borrarCatalogo(): Promise<void>;
+
+  /** Los ejemplos de etiquetado del negocio, en su orden. */
+  ejemplos(): Promise<EjemploEtiquetado[]>;
+  /** Sustituye la lista entera. */
+  guardarEjemplos(ejemplos: EjemploEtiquetado[]): Promise<void>;
 
   registrar(e: Omit<EventoEtiquetas, 'id' | 'createdAt'>): Promise<void>;
   /** El registro, el mas reciente primero. */
@@ -155,33 +223,22 @@ interface Fila {
   motivo: string | null;
   updated_at: Date;
   lote_id: string | null;
-  sync_estado: string;
-  sync_intentos: number | string;
-  sync_error: string | null;
-  sync_at: Date | null;
-  sync_huella: string | null;
 }
 
 /** date llega como 'AAAA-MM-DD' (ver pool.ts); por si llegara como Date. */
 const diaDe = (v: string | Date): string => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
-const ESTADOS_SYNC = new Set<string>(['pendiente', 'enviado', 'fallido', 'no_aplica']);
 const corto = (t: string | null | undefined, n: number) => (t ? t.slice(0, n) : null);
 
 const deFila = (r: Fila): EtiquetaChat => ({
   phone: r.phone,
   dia: diaDe(r.dia),
   etiqueta: r.etiqueta ?? null,
-  origen: r.origen === 'reglas' ? 'reglas' : 'ia',
+  origen: r.origen === 'reglas' || r.origen === 'manual' ? r.origen : 'ia',
   huella: r.huella,
   mensajes: Number(r.mensajes),
   motivo: r.motivo ?? null,
   updatedAt: r.updated_at,
   loteId: r.lote_id ?? null,
-  syncEstado: (ESTADOS_SYNC.has(r.sync_estado) ? r.sync_estado : 'pendiente') as EstadoSync,
-  syncIntentos: Number(r.sync_intentos ?? 0),
-  syncError: r.sync_error ?? null,
-  syncAt: r.sync_at ?? null,
-  syncHuella: r.sync_huella ?? null,
 });
 
 interface FilaLote {
@@ -194,9 +251,6 @@ interface FilaLote {
   clasificadas: number | string;
   por_ia: number | string;
   sin_clasificar: number | string;
-  sync_enviadas: number | string;
-  sync_fallidas: number | string;
-  sync_pendientes: number | string;
   error: string | null;
   iniciado_por: string | null;
   empezo_at: Date;
@@ -213,13 +267,55 @@ const deFilaLote = (r: FilaLote): LoteEtiquetas => ({
   clasificadas: Number(r.clasificadas),
   porIA: Number(r.por_ia),
   sinClasificar: Number(r.sin_clasificar),
-  syncEnviadas: Number(r.sync_enviadas),
-  syncFallidas: Number(r.sync_fallidas),
-  syncPendientes: Number(r.sync_pendientes),
   error: r.error ?? null,
   iniciadoPor: r.iniciado_por ?? null,
   empezoAt: r.empezo_at,
   terminoAt: r.termino_at ?? null,
+});
+
+interface FilaChatLote {
+  lote_id: string;
+  phone: string;
+  dia: string | Date;
+  nombre: string | null;
+  huella: string;
+  total_mensajes: number | string;
+  mensajes?: unknown;
+  estado: string;
+  etiqueta: string | null;
+  error: string | null;
+  procesado_at: Date | null;
+  created_at: Date;
+}
+
+/** Una columna json llega ya leida (ver pool.ts); por si llegara como cadena, se aceptan las dos formas. */
+function mensajesDe(v: unknown): MensajeCapturado[] | null {
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v)) return v as MensajeCapturado[];
+  if (typeof v === 'string') {
+    try {
+      const j = JSON.parse(v) as unknown;
+      return Array.isArray(j) ? (j as MensajeCapturado[]) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+const deFilaChatLote = (r: FilaChatLote): ChatDeLote => ({
+  loteId: r.lote_id,
+  phone: r.phone,
+  dia: diaDe(r.dia),
+  nombre: r.nombre ?? null,
+  huella: r.huella,
+  totalMensajes: Number(r.total_mensajes),
+  mensajes: mensajesDe(r.mensajes),
+  estado: r.estado as EstadoChatLote,
+  etiqueta: r.etiqueta ?? null,
+  error: r.error ?? null,
+  procesadoAt: r.procesado_at ?? null,
+  createdAt: r.created_at,
 });
 
 const COLUMNAS_LOTE: Record<string, string> = {
@@ -229,9 +325,6 @@ const COLUMNAS_LOTE: Record<string, string> = {
   clasificadas: 'clasificadas',
   porIA: 'por_ia',
   sinClasificar: 'sin_clasificar',
-  syncEnviadas: 'sync_enviadas',
-  syncFallidas: 'sync_fallidas',
-  syncPendientes: 'sync_pendientes',
   error: 'error',
   iniciadoPor: 'iniciado_por',
   terminoAt: 'termino_at',
@@ -245,13 +338,6 @@ function ultimaDeCada(filas: EtiquetaChat[]): Map<string, EtiquetaChat> {
     if (!ya || f.dia > ya.dia || (f.dia === ya.dia && f.updatedAt > ya.updatedAt)) salida.set(f.phone, f);
   }
   return salida;
-}
-
-/** El estado del envio tras guardar una clasificacion (la misma regla en SQL y en memoria). */
-function syncTrasGuardar(antes: EtiquetaChat | undefined, e: EtiquetaNueva): EstadoSync {
-  if (!e.etiqueta) return 'no_aplica';
-  if (antes && antes.syncEstado === 'enviado' && antes.syncHuella === e.huella && antes.etiqueta === e.etiqueta) return 'enviado';
-  return 'pendiente';
 }
 
 export function crearChatEtiquetasRepo(pool: Pool): ChatEtiquetasRepo {
@@ -309,19 +395,13 @@ export function crearChatEtiquetasRepo(pool: Pool): ChatEtiquetasRepo {
     },
 
     async guardar(e) {
-      // MySQL aplica las asignaciones de izquierda a derecha y cada una ve lo
-      // ya cambiado: las del envio van ANTES de pisar etiqueta y huella.
-      const sigueEnviado = `sync_estado = 'enviado' and sync_huella <=> values(huella) and etiqueta <=> values(etiqueta)`;
       await pool.query(
-        `insert into chat_etiquetas (phone, dia, etiqueta, origen, huella, mensajes, motivo, lote_id, sync_estado, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(3))
+        `insert into chat_etiquetas (phone, dia, etiqueta, origen, huella, mensajes, motivo, lote_id, updated_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, now(3))
          on duplicate key update
-           sync_intentos = case when values(etiqueta) is null or ${sigueEnviado} then sync_intentos else 0 end,
-           sync_error = case when values(etiqueta) is null or ${sigueEnviado} then sync_error else null end,
-           sync_estado = case when values(etiqueta) is null then 'no_aplica' when ${sigueEnviado} then 'enviado' else 'pendiente' end,
            etiqueta = values(etiqueta), origen = values(origen), huella = values(huella),
            mensajes = values(mensajes), motivo = values(motivo), lote_id = values(lote_id), updated_at = now(3)`,
-        [e.phone, e.dia, e.etiqueta, e.origen, e.huella, e.mensajes, corto(e.motivo, 255), e.loteId ?? null, e.etiqueta ? 'pendiente' : 'no_aplica'],
+        [e.phone, e.dia, e.etiqueta, e.origen, e.huella, e.mensajes, corto(e.motivo, 255), e.loteId ?? null],
       );
     },
 
@@ -331,24 +411,8 @@ export function crearChatEtiquetasRepo(pool: Pool): ChatEtiquetasRepo {
       return ultimaDeCada(rows.map(deFila));
     },
 
-    async porSincronizar(dia, estados) {
-      if (!estados.length) return [];
-      const { rows } = await pool.query<Fila>(
-        'select * from chat_etiquetas where dia = $1 and etiqueta is not null and sync_estado in ($2) order by phone',
-        [dia, estados],
-      );
-      return rows.map(deFila);
-    },
-
-    async marcarSync(phone, dia, r) {
-      await pool.query(
-        `update chat_etiquetas
-            set sync_estado = $1, sync_error = $2, sync_at = now(3),
-                sync_intentos = sync_intentos + $3,
-                sync_huella = case when $1 = 'enviado' then coalesce($4, huella) else sync_huella end
-          where phone = $5 and dia = $6`,
-        [r.estado, corto(r.error, 500), r.contarIntento === false ? 0 : 1, r.huella ?? null, phone, dia],
-      );
+    async quitar(phone, dia) {
+      await pool.query('delete from chat_etiquetas where phone = $1 and dia = $2', [phone, dia]);
     },
 
     async crearLote(l) {
@@ -390,6 +454,92 @@ export function crearChatEtiquetasRepo(pool: Pool): ChatEtiquetasRepo {
         [corto(error, 500)],
       );
       return rowCount ?? 0;
+    },
+
+    async capturar(loteId, dia, chats) {
+      // De a 50 filas por sentencia: una conversacion larga ya pesa lo suyo.
+      for (let i = 0; i < chats.length; i += 50) {
+        const tanda = chats.slice(i, i + 50);
+        const valores: unknown[] = [];
+        const filas = tanda.map((c) => {
+          valores.push(loteId, c.phone, dia, corto(c.nombre, 191), c.huella, c.mensajes.length, JSON.stringify(c.mensajes), 'pendiente');
+          const n = valores.length;
+          return `($${n - 7}, $${n - 6}, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await pool.query(
+          `insert into chat_etiquetas_lote_chats (lote_id, phone, dia, nombre, huella, total_mensajes, mensajes, estado) values ${filas.join(', ')}`,
+          valores,
+        );
+      }
+    },
+
+    async chatsDelLote(loteId, conMensajes) {
+      const columnas = conMensajes ? '*' : 'lote_id, phone, dia, nombre, huella, total_mensajes, estado, etiqueta, error, procesado_at, created_at';
+      const { rows } = await pool.query<FilaChatLote>(`select ${columnas} from chat_etiquetas_lote_chats where lote_id = $1 order by phone`, [loteId]);
+      return rows.map(deFilaChatLote);
+    },
+
+    async chatDelLote(loteId, phone) {
+      const { rows } = await pool.query<FilaChatLote>('select * from chat_etiquetas_lote_chats where lote_id = $1 and phone = $2', [loteId, phone]);
+      return rows[0] ? deFilaChatLote(rows[0]) : null;
+    },
+
+    async marcarChatLote(loteId, phone, r) {
+      await pool.query(
+        'update chat_etiquetas_lote_chats set estado = $1, etiqueta = $2, error = $3, procesado_at = now(3) where lote_id = $4 and phone = $5',
+        [r.estado, r.etiqueta ?? null, corto(r.error, 500), loteId, phone],
+      );
+    },
+
+    async vaciarCopiasAntes(antes) {
+      const { rowCount } = await pool.query('update chat_etiquetas_lote_chats set mensajes = null where created_at < $1 and mensajes is not null', [antes]);
+      return rowCount ?? 0;
+    },
+
+    async catalogo() {
+      const { rows } = await pool.query<{ codigo: string; nombre: string; descripcion: string }>('select codigo, nombre, descripcion from chat_etiquetas_catalogo order by orden, codigo');
+      return rows.length ? rows.map((r) => ({ codigo: r.codigo, nombre: r.nombre, descripcion: r.descripcion })) : null;
+    },
+
+    async guardarCatalogo(catalogo) {
+      // Borrar y escribir en una conexion, en una transaccion: nadie lee un catalogo a medias.
+      const cliente = await pool.connect();
+      try {
+        await cliente.query('start transaction');
+        await cliente.query('delete from chat_etiquetas_catalogo');
+        const valores: unknown[] = [];
+        const filas = catalogo.map((e, i) => {
+          valores.push(e.codigo, e.nombre, e.descripcion, i);
+          const n = valores.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n}, now(3))`;
+        });
+        await cliente.query(`insert into chat_etiquetas_catalogo (codigo, nombre, descripcion, orden, updated_at) values ${filas.join(', ')}`, valores);
+        await cliente.query('commit');
+      } catch (error) {
+        await cliente.query('rollback').catch(() => undefined);
+        throw error;
+      } finally {
+        cliente.release();
+      }
+    },
+
+    async borrarCatalogo() {
+      await pool.query('delete from chat_etiquetas_catalogo');
+    },
+
+    async ejemplos() {
+      // `key` es palabra reservada en MySQL: siempre entre comillas invertidas.
+      const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [CLAVE_EJEMPLOS_ETIQUETADO]);
+      return ejemplosDe(rows[0]?.value);
+    },
+
+    async guardarEjemplos(ejemplos) {
+      await pool.query(
+        `insert into settings (\`key\`, value, encrypted, updated_at)
+         values ($1, $2, false, now(3))
+         on duplicate key update value = values(value), encrypted = false, updated_at = now(3)`,
+        [CLAVE_EJEMPLOS_ETIQUETADO, JSON.stringify(ejemplos)],
+      );
     },
 
     async registrar(e) {
@@ -435,6 +585,9 @@ export function crearChatEtiquetasEnMemoria(mensajes: () => MensajeDelDia[] = ()
   const filas = new Map<string, EtiquetaChat>();
   const lotes = new Map<string, LoteEtiquetas>();
   const eventos: EventoEtiquetas[] = [];
+  const chatsLote = new Map<string, ChatDeLote>();
+  let catalogoGuardado: Catalogo | null = null;
+  let ejemplosGuardados: EjemploEtiquetado[] = [];
   const clave = (phone: string, dia: string) => `${phone}|${dia}`;
   const repo: ChatEtiquetasRepo = {
     async mensajesDelDia(desde, _alcance, tope) {
@@ -447,9 +600,6 @@ export function crearChatEtiquetasEnMemoria(mensajes: () => MensajeDelDia[] = ()
       return [...filas.values()].filter((f) => f.dia === dia && (!phones || phones.includes(f.phone))).map((f) => ({ ...f }));
     },
     async guardar(e) {
-      const antes = filas.get(clave(e.phone, e.dia));
-      const sync = syncTrasGuardar(antes, e);
-      const sigue = sync === 'enviado' || sync === 'no_aplica';
       filas.set(clave(e.phone, e.dia), {
         phone: e.phone,
         dia: e.dia,
@@ -460,30 +610,16 @@ export function crearChatEtiquetasEnMemoria(mensajes: () => MensajeDelDia[] = ()
         motivo: corto(e.motivo, 255),
         updatedAt: new Date(),
         loteId: e.loteId ?? null,
-        syncEstado: sync,
-        syncIntentos: sigue ? antes?.syncIntentos ?? 0 : 0,
-        syncError: sigue ? antes?.syncError ?? null : null,
-        syncAt: antes?.syncAt ?? null,
-        syncHuella: antes?.syncHuella ?? null,
       });
     },
     async ultimas(phones) {
       return ultimaDeCada([...filas.values()].filter((f) => phones.includes(f.phone)));
     },
-    async porSincronizar(dia, estados) {
-      return [...filas.values()].filter((f) => f.dia === dia && f.etiqueta && estados.includes(f.syncEstado)).map((f) => ({ ...f }));
-    },
-    async marcarSync(phone, dia, r) {
-      const f = filas.get(clave(phone, dia));
-      if (!f) return;
-      f.syncEstado = r.estado;
-      f.syncError = corto(r.error, 500);
-      f.syncAt = new Date();
-      if (r.contarIntento !== false) f.syncIntentos++;
-      if (r.estado === 'enviado') f.syncHuella = r.huella ?? f.huella;
+    async quitar(phone, dia) {
+      filas.delete(clave(phone, dia));
     },
     async crearLote(l) {
-      const lote: LoteEtiquetas = { id: randomUUID(), dia: l.dia, tipo: l.tipo, estado: 'en_curso', total: 0, reutilizadas: 0, clasificadas: 0, porIA: 0, sinClasificar: 0, syncEnviadas: 0, syncFallidas: 0, syncPendientes: 0, error: null, iniciadoPor: l.iniciadoPor ?? null, empezoAt: new Date(), terminoAt: null };
+      const lote: LoteEtiquetas = { id: randomUUID(), dia: l.dia, tipo: l.tipo, estado: 'en_curso', total: 0, reutilizadas: 0, clasificadas: 0, porIA: 0, sinClasificar: 0, error: null, iniciadoPor: l.iniciadoPor ?? null, empezoAt: new Date(), terminoAt: null };
       lotes.set(lote.id, lote);
       return { ...lote };
     },
@@ -509,6 +645,48 @@ export function crearChatEtiquetasEnMemoria(mensajes: () => MensajeDelDia[] = ()
         n++;
       }
       return n;
+    },
+    async capturar(loteId, dia, chats) {
+      for (const c of chats) {
+        chatsLote.set(`${loteId}|${c.phone}`, { loteId, phone: c.phone, dia, nombre: c.nombre, huella: c.huella, totalMensajes: c.mensajes.length, mensajes: c.mensajes.map((m) => ({ ...m })), estado: 'pendiente', etiqueta: null, error: null, procesadoAt: null, createdAt: new Date() });
+      }
+    },
+    async chatsDelLote(loteId, conMensajes) {
+      return [...chatsLote.values()].filter((c) => c.loteId === loteId).sort((a, b) => a.phone.localeCompare(b.phone)).map((c) => ({ ...c, mensajes: conMensajes ? c.mensajes : null }));
+    },
+    async chatDelLote(loteId, phone) {
+      const c = chatsLote.get(`${loteId}|${phone}`);
+      return c ? { ...c } : null;
+    },
+    async marcarChatLote(loteId, phone, r) {
+      const c = chatsLote.get(`${loteId}|${phone}`);
+      if (!c) return;
+      Object.assign(c, { estado: r.estado, etiqueta: r.etiqueta ?? null, error: corto(r.error, 500), procesadoAt: new Date() });
+    },
+    async vaciarCopiasAntes(antes) {
+      let n = 0;
+      for (const c of chatsLote.values()) {
+        if (c.createdAt < antes && c.mensajes) {
+          c.mensajes = null;
+          n++;
+        }
+      }
+      return n;
+    },
+    async catalogo() {
+      return catalogoGuardado ? catalogoGuardado.map((e) => ({ ...e })) : null;
+    },
+    async guardarCatalogo(catalogo) {
+      catalogoGuardado = catalogo.map((e) => ({ ...e }));
+    },
+    async borrarCatalogo() {
+      catalogoGuardado = null;
+    },
+    async ejemplos() {
+      return ejemplosGuardados.map((e) => ({ ...e }));
+    },
+    async guardarEjemplos(ejemplos) {
+      ejemplosGuardados = ejemplos.map((e) => ({ ...e }));
     },
     async registrar(e) {
       eventos.push({ ...e, codigo: e.codigo.slice(0, 60), detalle: corto(e.detalle, 500), id: eventos.length + 1, createdAt: new Date() });

@@ -323,6 +323,18 @@ export interface Motor {
   proximoDespertarEn(): Promise<number | null>;
 }
 
+/**
+ * Sin socket de WhatsApp el motor no escribe. Excepcion: en una simulacion
+ * (NODE_ENV=test) lo siguiente es un cliente de prueba (51 000 0…), que nunca
+ * sale a WhatsApp (el sender lo guarda en el hilo): asi la demo enseña el
+ * primer mensaje aunque la tienda no tenga el numero vinculado.
+ */
+async function sigueSinSocketPorPrueba(repos: Repos, momento: Date): Promise<boolean> {
+  if (process.env.NODE_ENV !== 'test') return false;
+  const [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+  return Boolean(siguiente && esNumeroDePrueba(siguiente.phone));
+}
+
 export function crearMotor(deps: MotorDeps): Motor {
   const ahora = deps.ahora ?? (() => new Date());
   const azar = deps.azar ?? Math.random;
@@ -827,7 +839,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       await refrescarAjustes();
       // No inicia intentos ni escribe incidencias mientras no hay socket.
       // Al reconectarse continúa en la siguiente pasada, sin espera de 2 min.
-      if (deps.wa?.conectado?.() === false) {
+      if (deps.wa?.conectado?.() === false && !(await sigueSinSocketPorPrueba(repos, momento))) {
         const motivo = 'WhatsApp está desconectado; el envío continúa al reconectarse.';
         anotarEsperaGlobal(repos.rutas, { codigo: 'sin_conexion', motivo, hasta: null });
         return { accion: 'nada', motivo };
@@ -935,16 +947,19 @@ export function startMotorRutas(deps: MotorDeps): () => void {
   const programarDesconexion = () => {
     timer = setTimeout(() => {
       timer = null;
-      if (deps.wa?.conectado?.() === false) programarDesconexion();
-      else void despertar();
+      void (async () => {
+        if (deps.wa?.conectado?.() === false && !(await sigueSinSocketPorPrueba(deps.repos, new Date()).catch(() => false))) programarDesconexion();
+        else void despertar();
+      })();
     }, 30_000);
     timer.unref?.();
   };
 
   const dormirHastaProximaTarea = async () => {
     if (parado) return;
-    if (deps.wa?.conectado?.() === false) {
-      // Solo se comprueba el estado en memoria del socket: sin consultas SQL.
+    if (deps.wa?.conectado?.() === false && !(await sigueSinSocketPorPrueba(deps.repos, new Date()).catch(() => false))) {
+      // Solo se comprueba el estado en memoria del socket: sin consultas SQL
+      // (salvo en una simulacion, ver sigueSinSocketPorPrueba).
       programarDesconexion();
       return;
     }

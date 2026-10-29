@@ -21,9 +21,13 @@ import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
 import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
+import { archivoDeMensaje } from '../api/v1/archivos-gsg.js';
 import type { ServicioIA } from '../ia/servicio.js';
-import { nombreDeEtiqueta } from '../archive/clasificar.js';
-import { crearEtiquetador, numeroNormalizado, type Etiquetador } from '../chat/etiquetar.js';
+import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, TOPE_CATALOGO, clasificarConIA, nombreDeEtiqueta, validarCatalogo, type Catalogo } from '../archive/clasificar.js';
+import { casosParaCatalogo, evaluarClasificador, leerConversacionEscrita, type InformeEvaluacion } from '../archive/evaluacion.js';
+import { agregarEjemplo, correccionesRecientes, ejemplosParaIA, quitarEjemplo, TOPE_TEXTO_EJEMPLO } from '../chat/ejemplos-etiquetado.js';
+import { TOPE_EJEMPLOS_NEGOCIO } from '../archive/clasificar.js';
+import { catalogoVigente, crearEtiquetador, numeroNormalizado, type Etiquetador } from '../chat/etiquetar.js';
 import { fechaDelNegocio } from '../ajustes/generales.js';
 import type { EtiquetaChat } from '../db/chat-etiquetas.js';
 
@@ -44,10 +48,10 @@ export interface ChatDeps {
 }
 
 /** La etiqueta como la pinta la pantalla, junto al nombre del cliente. */
-export function etiquetaParaPantalla(e: EtiquetaChat | undefined, hoy: string) {
+export function etiquetaParaPantalla(e: EtiquetaChat | undefined, hoy: string, catalogo?: Catalogo) {
   if (!e) return null;
-  if (!e.etiqueta) return { id: null, nombre: 'Sin clasificar', dia: e.dia, hoy: e.dia === hoy, motivo: e.motivo };
-  return { id: e.etiqueta, nombre: nombreDeEtiqueta(e.etiqueta), dia: e.dia, hoy: e.dia === hoy, motivo: null };
+  if (!e.etiqueta) return { id: null, nombre: 'Sin clasificar', dia: e.dia, hoy: e.dia === hoy, motivo: e.motivo, origen: e.origen };
+  return { id: e.etiqueta, nombre: nombreDeEtiqueta(e.etiqueta, catalogo), dia: e.dia, hoy: e.dia === hoy, motivo: null, origen: e.origen };
 }
 
 /** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
@@ -151,7 +155,6 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       ? crearEtiquetador({
           repo,
           ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
-          gsg: () => deps.gsg ?? null,
           zonaHoraria,
           nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
           log: (mensaje, detalle) => app.log.warn({ ...detalle }, mensaje),
@@ -163,23 +166,26 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   const etiquetasDe = async (phones: string[]) => {
     const hoy = fechaDelNegocio(new Date(), zonaHoraria());
     const ultimas = repos.chatEtiquetas ? await repos.chatEtiquetas.ultimas([...new Set(phones.map(numeroNormalizado))]).catch(() => new Map<string, EtiquetaChat>()) : new Map<string, EtiquetaChat>();
-    return (phone: string) => etiquetaParaPantalla(ultimas.get(numeroNormalizado(phone)), hoy);
+    const catalogo = repos.chatEtiquetas && ultimas.size ? await catalogoVigente(repos.chatEtiquetas).catch(() => CATALOGO_POR_DEFECTO) : CATALOGO_POR_DEFECTO;
+    return (phone: string) => etiquetaParaPantalla(ultimas.get(numeroNormalizado(phone)), hoy, catalogo);
   };
 
   const SIN_ETIQUETAS = 'Esta instalación no guarda etiquetas de chats.';
   const quienEs = (u: { nombre?: string; usuario?: string } | null | undefined): string | null => u?.nombre || u?.usuario || null;
-  const diaValido = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'El día va como AAAA-MM-DD.');
 
   /**
-   * «Etiquetar los chats de hoy»: arranca el lote (analisis + envio a GSG) en
-   * segundo plano, o devuelve el que ya corre. La pantalla pregunta por el avance.
+   * «Etiquetar los chats de hoy»: arranca el lote en segundo plano, o devuelve
+   * el que ya corre. La pantalla pregunta por el avance. GSG ve cada etiqueta
+   * como la nota del chat en GET /api/v1/historial.
    */
   app.post('/admin/chat/etiquetar', async (request, reply) => {
     const etiquetador = etiquetadorDe();
     if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
     const alcance = alcanceChat(request.usuario);
+    // releer: tambien los ya etiquetados (por ejemplo tras cambiar el catalogo). Por defecto, solo lo que falta.
+    const { releer } = z.object({ releer: z.boolean().optional() }).parse(request.body ?? {});
     try {
-      return reply.code(202).send(etiquetador.iniciar(alcance, { iniciadoPor: quienEs(request.usuario) }));
+      return reply.code(202).send(etiquetador.iniciar(alcance, { iniciadoPor: quienEs(request.usuario), releer }));
     } catch (error) {
       return reply.code(409).send({ error: error instanceof Error ? error.message : String(error), ir: '/panel#ia' });
     }
@@ -189,50 +195,269 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   app.get('/admin/chat/etiquetar', async (_request, reply) => {
     const etiquetador = etiquetadorDe();
     if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
-    return { ...(await etiquetador.estado()), hayIA: etiquetador.hayIA(), destinoGsg: deps.gsg?.urlEtiquetas?.() ?? null };
+    return { ...(await etiquetador.estado()), hayIA: etiquetador.hayIA() };
   });
 
   /**
-   * Reintenta SOLO los envios a GSG que fallaron ese dia (por defecto hoy),
-   * con la etiqueta guardada: no vuelve a la IA. 202 con el lote de reintento;
-   * 200 con `nada: true` si no hay ninguno fallido.
+   * Poner o quitar a mano la etiqueta de hoy de un chat (`etiqueta: null` la
+   * quita). Queda como manual: la IA no la pisa. GSG la ve al momento en el
+   * historial del chat. No se le escribe nada al cliente.
    */
-  app.post('/admin/chat/etiquetar/reintentar', async (request, reply) => {
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/etiqueta', async (request, reply) => {
     const etiquetador = etiquetadorDe();
     if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
     alcanceChat(request.usuario);
-    const body = z.object({ dia: diaValido.optional() }).parse(request.body ?? {});
-    const r = await etiquetador.reintentar({ dia: body.dia, iniciadoPor: quienEs(request.usuario) });
-    if (!r) return { nada: true, detalle: 'No hay envíos a GSG fallidos que reintentar.' };
-    return reply.code(202).send(r);
+    const body = z.object({ etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').nullable() }).parse(request.body ?? {});
+    const contacto = await repos.contacts.getById(request.params.contactId);
+    if (!contacto) return reply.code(404).send({ error: 'Ese chat no existe.' });
+    if (contacto.tipo === 'grupo') return reply.code(400).send({ error: 'Los grupos no se etiquetan.' });
+    try {
+      await etiquetador.etiquetarAMano({ phone: contacto.phone, etiqueta: body.etiqueta, quien: quienEs(request.usuario) });
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+    return { ok: true, etiqueta: (await etiquetasDe([contacto.phone]))(contacto.phone) };
   });
 
-  /** Los ultimos lotes (completos y reintentos), el mas reciente primero. */
+  /**
+   * El embudo de chats de un dia (hoy por defecto): cuantos hay de cada
+   * etiqueta, cuantos los puso la IA y cuantos una persona y los que faltan;
+   * y la lista de chats con su etiqueta.
+   */
+  app.get('/admin/chat/etiquetas/embudo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    const q = z.object({ dia: z.string().regex(/^(hoy|ayer|\d{4}-\d{2}-\d{2})$/, 'El día va como hoy, ayer o AAAA-MM-DD.').default('hoy') }).parse(request.query ?? {});
+    const zona = zonaHoraria();
+    const hoy = fechaDelNegocio(new Date(), zona);
+    const dia = q.dia === 'hoy' ? hoy : q.dia === 'ayer' ? fechaDelNegocio(new Date(Date.now() - 86_400_000), zona) : q.dia;
+    const [filas, catalogo, bandeja] = await Promise.all([
+      repos.chatEtiquetas.delDia(dia),
+      catalogoVigente(repos.chatEtiquetas),
+      conversacionesConEtiqueta({ incluirApartados: true }, alcance),
+    ]);
+    const deBandeja = new Map(bandeja.map((c) => [numeroNormalizado(c.phone), c]));
+    const conEtiqueta = new Set(filas.map((f) => f.phone));
+    const chats = filas.map((f) => {
+      const c = deBandeja.get(f.phone);
+      return {
+        phone: f.phone,
+        contactId: c?.contactId ?? null,
+        nombre: c?.name ?? null,
+        ultimoMensaje: c?.lastMessage ? { body: c.lastMessage.body, direction: c.lastMessage.direction, at: c.lastMessage.createdAt } : null,
+        etiqueta: f.etiqueta,
+        nombreEtiqueta: f.etiqueta ? nombreDeEtiqueta(f.etiqueta, catalogo) : 'Sin clasificar',
+        origen: f.origen,
+        motivo: f.motivo,
+        en: f.updatedAt,
+      };
+    });
+    // Los chats de ese dia que aun no tienen etiqueta (los de la bandeja cuyo ultimo mensaje es de ese dia).
+    const sinEtiquetar = bandeja
+      .filter((c) => c.lastMessage && fechaDelNegocio(new Date(c.lastMessage.createdAt), zona) === dia && !conEtiqueta.has(numeroNormalizado(c.phone)))
+      .map((c) => ({ phone: numeroNormalizado(c.phone), contactId: c.contactId, nombre: c.name, ultimoMensaje: c.lastMessage ? { body: c.lastMessage.body, direction: c.lastMessage.direction, at: c.lastMessage.createdAt } : null }));
+    const etapas = new Map(catalogo.map((e) => [e.codigo, { codigo: e.codigo, nombre: e.nombre, ia: 0, manual: 0 }]));
+    for (const f of filas) {
+      if (!f.etiqueta) continue;
+      const e = etapas.get(f.etiqueta) ?? { codigo: f.etiqueta, nombre: nombreDeEtiqueta(f.etiqueta, catalogo), ia: 0, manual: 0 };
+      if (f.origen === 'manual') e.manual++;
+      else e.ia++;
+      etapas.set(f.etiqueta, e);
+    }
+    const etiquetadas = filas.filter((f) => f.etiqueta);
+    return {
+      dia,
+      hoy: dia === hoy,
+      resumen: {
+        chats: filas.length + sinEtiquetar.length,
+        etiquetados: etiquetadas.length,
+        porIA: etiquetadas.filter((f) => f.origen !== 'manual').length,
+        manual: etiquetadas.filter((f) => f.origen === 'manual').length,
+        sinClasificar: filas.length - etiquetadas.length,
+        sinEtiquetar: sinEtiquetar.length,
+      },
+      etapas: [...etapas.values()].map((e) => ({ ...e, total: e.ia + e.manual })).sort((a, b) => b.total - a.total),
+      chats,
+      sinEtiquetar,
+    };
+  });
+
+  /** Los ultimos lotes, el mas reciente primero. */
   app.get('/admin/chat/etiquetar/lotes', async (request, reply) => {
     if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
     const q = z.object({ limit: z.coerce.number().int().positive().max(100).default(20) }).parse(request.query ?? {});
     return { items: await repos.chatEtiquetas.lotes(q.limit) };
   });
 
-  /** Un lote con su registro de eventos y las conversaciones de ese dia con el estado de su envio. */
+  /** Un lote con su registro de eventos, sus chats y las conversaciones de ese dia. */
   app.get<{ Params: { id: string } }>('/admin/chat/etiquetar/lotes/:id', async (request, reply) => {
     if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
     const lote = await repos.chatEtiquetas.lote(request.params.id);
     if (!lote) return reply.code(404).send({ error: 'Ese lote no existe.' });
-    const [eventos, filas] = await Promise.all([repos.chatEtiquetas.eventos({ loteId: lote.id, limite: 500 }), repos.chatEtiquetas.delDia(lote.dia)]);
+    const [eventos, filas, chats, catalogo] = await Promise.all([
+      repos.chatEtiquetas.eventos({ loteId: lote.id, limite: 500 }),
+      repos.chatEtiquetas.delDia(lote.dia),
+      repos.chatEtiquetas.chatsDelLote(lote.id),
+      catalogoVigente(repos.chatEtiquetas),
+    ]);
     return {
       lote,
       eventos,
+      // Los chats de ESTE lote: como le fue a cada uno.
+      chats: chats.map((c) => ({
+        phone: c.phone,
+        nombre: c.nombre,
+        mensajes: c.totalMensajes,
+        estado: c.estado,
+        etiqueta: c.etiqueta,
+        nombreEtiqueta: c.etiqueta ? nombreDeEtiqueta(c.etiqueta, catalogo) : null,
+        error: c.error,
+        procesadoAt: c.procesadoAt,
+      })),
+      // Todas las conversaciones de ese dia, con su etiqueta vigente.
       conversaciones: filas.map((f) => ({
         phone: f.phone,
         etiqueta: f.etiqueta,
-        nombre: f.etiqueta ? nombreDeEtiqueta(f.etiqueta) : 'Sin clasificar',
+        nombre: f.etiqueta ? nombreDeEtiqueta(f.etiqueta, catalogo) : 'Sin clasificar',
         origen: f.origen,
         motivo: f.motivo,
         loteId: f.loteId,
-        sync: { estado: f.syncEstado, intentos: f.syncIntentos, error: f.syncError, en: f.syncAt },
       })),
     };
+  });
+
+  /** La copia de los mensajes que el lote le mando a la IA de un chat (mientras no pase la retencion). */
+  app.get<{ Params: { id: string; telefono: string } }>('/admin/chat/etiquetar/lotes/:id/chats/:telefono', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const chat = await repos.chatEtiquetas.chatDelLote(request.params.id, numeroNormalizado(request.params.telefono));
+    if (!chat) return reply.code(404).send({ error: 'Ese chat no está en ese lote.' });
+    return {
+      chat: { ...chat, nombreEtiqueta: chat.etiqueta ? nombreDeEtiqueta(chat.etiqueta, await catalogoVigente(repos.chatEtiquetas)) : null },
+      ...(chat.mensajes === null && chat.estado !== 'solo_envio' ? { aviso: 'La copia de los mensajes ya no se guarda: pasaron las 72 horas de retención del chat.' } : {}),
+    };
+  });
+
+  /** El catalogo de etiquetas del negocio: codigos, nombres y lo que lee la IA de cada una. */
+  app.get('/admin/chat/etiquetas/catalogo', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const propio = await repos.chatEtiquetas.catalogo();
+    return { items: propio ?? CATALOGO_POR_DEFECTO, propio: Boolean(propio), codigoOtro: CODIGO_OTRO, tope: TOPE_CATALOGO };
+  });
+
+  /** Guarda el catalogo entero. Solo un administrador. Lo ya etiquetado con otro catalogo se vuelve a mirar en el siguiente lote. */
+  app.put('/admin/chat/etiquetas/catalogo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'Solo un administrador cambia el catálogo de etiquetas.' });
+    const body = z.object({ items: z.array(z.object({ codigo: z.string().max(80), nombre: z.string().max(200), descripcion: z.string().max(400) })).max(100) }).parse(request.body ?? {});
+    const r = validarCatalogo(body.items);
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    await repos.chatEtiquetas.guardarCatalogo(r.catalogo);
+    return { ok: true, items: r.catalogo, propio: true };
+  });
+
+  /** Vuelve al catalogo de fabrica. Solo un administrador. */
+  app.delete('/admin/chat/etiquetas/catalogo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'Solo un administrador cambia el catálogo de etiquetas.' });
+    await repos.chatEtiquetas.borrarCatalogo();
+    return { ok: true, items: CATALOGO_POR_DEFECTO, propio: false };
+  });
+
+  // ------------------------------------------------------- «Probar la IA»
+  // El banco de conversaciones de src/archive/evaluacion.ts, por la IA del
+  // negocio y con su catalogo: el mismo clasificador del boton. Una prueba a la
+  // vez; lo ultimo queda en memoria del proceso (no toca ningun chat ni GSG).
+  const iaQueCompleta = () => (deps.ia?.estado().tieneToken ? { completar: deps.ia.completar.bind(deps.ia) } : null);
+  const modeloDeIA = () => {
+    const e = deps.ia?.estado();
+    return e ? `${e.modeloEfectivo || e.modelo}` : null;
+  };
+  const NO_HAY_IA_PRUEBA = 'Para probar la IA hace falta su clave: guárdala en Avanzado → Asistente IA. No hace falta activar el asistente.';
+  let evaluacion: {
+    enCurso: boolean;
+    hechos: number;
+    total: number;
+    modelo: string | null;
+    empezo: string;
+    termino: string | null;
+    error: string | null;
+    informe: InformeEvaluacion | null;
+  } | null = null;
+
+  /** Empieza a pasar el banco por la IA (o devuelve la prueba que ya corre). */
+  app.post('/admin/chat/etiquetas/evaluar', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const ia = iaQueCompleta();
+    if (!ia) return reply.code(409).send({ error: NO_HAY_IA_PRUEBA, ir: '/panel#ia' });
+    if (evaluacion?.enCurso) return reply.code(202).send(evaluacion);
+    const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const ejemplos = await ejemplosParaIA(repos.chatEtiquetas, catalogo);
+    const actual = (evaluacion = { enCurso: true, hechos: 0, total: casosParaCatalogo(catalogo).usar.length, modelo: modeloDeIA(), empezo: new Date().toISOString(), termino: null, error: null, informe: null });
+    void evaluarClasificador(ia, catalogo, deps.ajustes?.nombreNegocio() ?? config.businessName, {
+      alAvanzar: (hechos, total) => Object.assign(actual, { hechos, total }),
+      ejemplos,
+    })
+      .then((informe) => Object.assign(actual, { informe }))
+      .catch((error) => Object.assign(actual, { error: error instanceof Error ? error.message : String(error) }))
+      .finally(() => Object.assign(actual, { enCurso: false, termino: new Date().toISOString() }));
+    return reply.code(202).send(actual);
+  });
+
+  /** La prueba en marcha o la ultima de este proceso (null si no hubo). */
+  app.get('/admin/chat/etiquetas/evaluar', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    return { evaluacion, hayIA: Boolean(iaQueCompleta()), modelo: modeloDeIA() };
+  });
+
+  /**
+   * Una conversacion escrita a mano («cliente: ...» / «negocio: ...» por
+   * linea): que etiqueta le pone la IA. No se guarda nada ni sale nada a GSG.
+   */
+  app.post('/admin/chat/etiquetas/probar', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const ia = iaQueCompleta();
+    if (!ia) return reply.code(409).send({ error: NO_HAY_IA_PRUEBA, ir: '/panel#ia' });
+    const { texto } = z.object({ texto: z.string().max(8000) }).parse(request.body ?? {});
+    const mensajes = leerConversacionEscrita(texto);
+    if (!mensajes.some((m) => m.direction === 'in')) return reply.code(400).send({ error: 'Escribe al menos un mensaje del cliente (una línea que empiece por «cliente:»).' });
+    const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const ejemplos = await ejemplosParaIA(repos.chatEtiquetas, catalogo);
+    const r = await clasificarConIA(ia, mensajes, null, deps.ajustes?.nombreNegocio() ?? config.businessName, { catalogo, conReglas: false, ejemplos, uso: 'pruebas' });
+    if (r.estado !== 'clasificada') return { etiqueta: null, nombre: null, motivo: r.motivo, mensajes: mensajes.length, modelo: modeloDeIA() };
+    const e = catalogo.find((x) => x.codigo === r.etiqueta);
+    return { etiqueta: r.etiqueta, nombre: nombreDeEtiqueta(r.etiqueta, catalogo), descripcion: e?.descripcion ?? null, motivo: null, mensajes: mensajes.length, modelo: modeloDeIA() };
+  });
+
+  // ------------------------------------------ «Enséñale a etiquetar» (Entrenamiento IA)
+
+  /** Los ejemplos de etiquetado del negocio (van en cada llamada del clasificador). */
+  app.get('/admin/chat/etiquetas/ejemplos', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const items = (await repos.chatEtiquetas.ejemplos()).map((e) => ({ ...e, nombreEtiqueta: nombreDeEtiqueta(e.etiqueta, catalogo), enCatalogo: catalogo.some((c) => c.codigo === e.etiqueta) }));
+    return { items, tope: TOPE_EJEMPLOS_NEGOCIO, topeTexto: TOPE_TEXTO_EJEMPLO };
+  });
+
+  /** Enseña un ejemplo: `{ texto, etiqueta, fuente? }` (fuente = la corrección de la que sale). Lo personal se tapa. */
+  app.post('/admin/chat/etiquetas/ejemplos', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const body = z.object({ texto: z.string().max(4000), etiqueta: z.string().trim().max(60), fuente: z.string().trim().max(200).nullable().optional() }).parse(request.body ?? {});
+    const r = await agregarEjemplo(repos.chatEtiquetas, await catalogoVigente(repos.chatEtiquetas), { ...body, quien: quienEs(request.usuario) });
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    return { ok: true, ejemplo: r.ejemplo };
+  });
+
+  /** Quita un ejemplo. */
+  app.delete<{ Params: { id: string } }>('/admin/chat/etiquetas/ejemplos/:id', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (!(await quitarEjemplo(repos.chatEtiquetas, request.params.id))) return reply.code(404).send({ error: 'Ese ejemplo ya no existe.' });
+    return { ok: true };
+  });
+
+  /** Las correcciones de la etiqueta de la IA que hizo el equipo y aún no son ejemplo, con la conversación que leyó la IA. */
+  app.get('/admin/chat/etiquetas/correcciones', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    return { items: await correccionesRecientes(repos.chatEtiquetas, await catalogoVigente(repos.chatEtiquetas)) };
   });
 
   /** El registro de lo que paso al etiquetar y al mandar a GSG, filtrable. */
@@ -315,6 +540,33 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     };
   };
 
+  /**
+   * Todas las conversaciones de la bandeja (sin grupos) con su etiqueta, para
+   * filtrar y contar por etiqueta. La bandeja es la de las ultimas 72 horas:
+   * se leen de a 100 hasta un tope, que de sobra cubre un dia de reparto.
+   */
+  const TOPE_FILTRO_ETIQUETA = 3000;
+  const conversacionesConEtiqueta = async (filtro: { q?: string; incluirApartados?: boolean }, alcance: ReturnType<typeof alcanceChat>) => {
+    const todas: Awaited<ReturnType<typeof repos.messages.listConversations>> = [];
+    for (let offset = 0; offset < TOPE_FILTRO_ETIQUETA; offset += 100) {
+      const tanda = await repos.messages.listConversations({ ...filtro, limit: 100, offset, alcance });
+      todas.push(...tanda);
+      if (tanda.length < 100) break;
+    }
+    const personas = todas.filter((c) => c.tipo !== 'grupo');
+    const etiqueta = await etiquetasDe(personas.map((c) => c.phone));
+    return personas.map((c) => ({ ...c, etiqueta: etiqueta(c.phone) }));
+  };
+  /**
+   * Si una conversacion pasa el filtro de etiqueta: un codigo del catalogo,
+   * `sin_clasificar` (la IA no pudo) o `sin_etiquetar` (aun no se etiqueto).
+   */
+  const pasaEtiqueta = (e: ReturnType<typeof etiquetaParaPantalla>, filtro: string): boolean => {
+    if (filtro === 'sin_etiquetar') return !e;
+    if (filtro === 'sin_clasificar') return Boolean(e && !e.id);
+    return Boolean(e && e.id === filtro);
+  };
+
   app.get('/admin/chat/conversations', async (request, reply) => {
     const query = z
       .object({
@@ -323,9 +575,23 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         offset: z.coerce.number().int().nonnegative().default(0),
         /** Los chats apartados solo salen cuando se piden. */
         incluirApartados: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
+        /** Solo los de esa etiqueta (codigo del catalogo, sin_clasificar o sin_etiquetar). */
+        etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').optional(),
       })
       .parse(request.query ?? {});
     const alcance = alcanceChat(request.usuario);
+    const comun = {
+      unread: await repos.messages.unreadTotal(undefined, alcance),
+      scopeId: request.usuario?.chatSesion?.sid ?? 'api',
+      vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+    };
+    if (query.etiqueta) {
+      // Se filtra en el servidor sobre TODA la bandeja, no sobre la pagina cargada.
+      const filtradas = (await conversacionesConEtiqueta(query, alcance)).filter((c) => pasaEtiqueta(c.etiqueta, query.etiqueta!));
+      const pagina = filtradas.slice(query.offset, query.offset + query.limit);
+      const hay = filtradas.length > query.offset + query.limit;
+      return responderLectura(request, reply, { items: pagina, hasMore: hay, siguienteOffset: hay ? query.offset + query.limit : null, total: filtradas.length, ...comun });
+    }
     const items = await repos.messages.listConversations({ ...query, limit: query.limit + 1, alcance });
     const pagina = items.slice(0, query.limit);
     const etiqueta = await etiquetasDe(pagina.filter((c) => c.tipo !== 'grupo').map((c) => c.phone));
@@ -333,10 +599,33 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       items: pagina.map((c) => ({ ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) })),
       hasMore: items.length > query.limit,
       siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
-      unread: await repos.messages.unreadTotal(undefined, alcance),
-      scopeId: request.usuario?.chatSesion?.sid ?? 'api',
-      vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+      ...comun,
     });
+  });
+
+  /**
+   * Cuantas conversaciones de la bandeja hay con cada etiqueta, para el
+   * filtro: las del catalogo vigente (aunque tengan 0) y las de antes que aun
+   * se vean, mas sin clasificar y sin etiquetar.
+   */
+  app.get('/admin/chat/etiquetas/conteo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    const [todas, catalogo] = await Promise.all([conversacionesConEtiqueta({ incluirApartados: true }, alcance), catalogoVigente(repos.chatEtiquetas)]);
+    const porCodigo = new Map<string, { codigo: string; nombre: string; n: number }>(catalogo.map((e) => [e.codigo, { codigo: e.codigo, nombre: e.nombre, n: 0 }]));
+    let sinClasificar = 0;
+    let sinEtiquetar = 0;
+    for (const c of todas) {
+      const e = c.etiqueta;
+      if (!e) sinEtiquetar++;
+      else if (!e.id) sinClasificar++;
+      else {
+        const fila = porCodigo.get(e.id) ?? { codigo: e.id, nombre: e.nombre, n: 0 };
+        fila.n++;
+        porCodigo.set(e.id, fila);
+      }
+    }
+    return { total: todas.length, etiquetas: [...porCodigo.values()], sinClasificar, sinEtiquetar };
   });
 
   /**
@@ -388,7 +677,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     const messages = await repos.messages.listMessages(contact.id, query.limit + 1, query.before, undefined, alcance);
     const hasMore = messages.length > query.limit;
-    const pagina = messages.slice(-query.limit).map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + RETENCION_CHAT_MS).toISOString() }));
+    // Foto, audio o video del cliente: el mismo enlace firmado que recibe GSG en el historial
+    // (relativo, para que valga con el prefijo de la tienda), para verlo o escucharlo aquí.
+    const pagina = messages.slice(-query.limit).map(m => ({
+      ...m,
+      expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + RETENCION_CHAT_MS).toISOString(),
+      archivo: archivoDeMensaje(m, { publicBase: '.', secreto: config.TRACKING_SECRET }),
+    }));
     if (query.read) await repos.messages.markRead(contact.id, new Date());
     // La solicitud de reparto abierta, si la hay: el pedido y en que punto va,
     // para que quien atiende lo vea sin cambiar de pantalla (y para {pedido}).

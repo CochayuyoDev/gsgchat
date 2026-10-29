@@ -59,20 +59,21 @@ ${bandaDemo}
     <header>
       <h1>Chats</h1>
       <span id="unread" class="badge hidden" aria-label="mensajes sin leer"></span>
-      <button class="icon" id="etiquetar" title="Etiquetar con IA los chats de hoy" aria-label="Etiquetar con IA los chats de hoy"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.4"/></svg></button>
+      <button type="button" id="etiquetar" class="etiquetar-boton" title="Clasifica con la IA los chats de hoy que aún no tienen etiqueta. GSG ve cada etiqueta como la nota del chat.">Etiquetar chats con IA</button>
       <button class="icon" id="nuevo" title="Escribir a un número nuevo" aria-label="Escribir a un número nuevo">✚</button>
       <button class="icon" id="menu-lista" title="Más opciones" aria-label="Más opciones" aria-haspopup="menu" aria-expanded="false">⋮</button>
     </header>
     <div class="search"><input id="q" placeholder="Buscar por nombre o número" autocomplete="off" aria-label="Buscar un chat por nombre o número"></div>
-    <div class="filtros" id="filtros" role="tablist" aria-label="Filtrar conversaciones">
-      <button class="f activo" type="button" data-filtro="todos">Todos</button>
-      <button class="f" type="button" data-filtro="sin_leer">Sin leer</button>
-      <button class="f" type="button" data-filtro="esperan">Esperan respuesta</button>
-      <button class="f" type="button" data-filtro="ventana">Escribieron hoy</button>
-      <button class="f" type="button" data-filtro="grupos">Grupos</button>
-      <button class="f" type="button" data-filtro="apartados">Apartados</button>
+    <div class="selectores" id="selectores">
+      <button type="button" class="selector" id="sel-lista" aria-haspopup="listbox" aria-expanded="false" title="Qué chats ver">
+        <span class="sel-que">Mostrar</span><span class="sel-valor" id="sel-lista-valor">Todos</span><span class="sel-flecha" aria-hidden="true">▾</span>
+      </button>
+      <button type="button" class="selector" id="sel-etiqueta" aria-haspopup="listbox" aria-expanded="false" title="Ver solo los chats con una etiqueta">
+        <span class="sel-que">Etiqueta</span><span class="sel-valor" id="sel-etiqueta-valor">Todas</span><span class="sel-flecha" aria-hidden="true">▾</span>
+      </button>
     </div>
     <div class="etiquetado hidden" id="etiquetado" role="status" aria-live="polite"></div>
+    <div class="etiquetado-chats hidden" id="etiquetado-chats" aria-label="Chats del lote"></div>
     <div class="chats" id="chats"></div>
   </div>
 
@@ -307,21 +308,12 @@ function fundirHilo(contactId, nuevos, masAntiguos) {
 /* ------------------------------------------------------- lista de chats */
 
 function pasaFiltro(c) {
-  if (filtroLista === 'apartados') return Boolean(c.apartadoAt);
-  if (c.apartadoAt) return false;
-  if (filtroLista === 'grupos') return c.tipo === 'grupo';
+  /* «Apartar» ya no existe: los que quedaron apartados vuelven a la lista como los demas. */
   if (filtroLista === 'sin_leer') return c.unread > 0;
   if (filtroLista === 'esperan') return c.lastMessage && c.lastMessage.direction === 'in';
   if (filtroLista === 'ventana') return c.windowOpen;
   return true;
 }
-document.querySelectorAll('#filtros .f').forEach(function (b) {
-  b.onclick = function () {
-    filtroLista = b.getAttribute('data-filtro');
-    document.querySelectorAll('#filtros .f').forEach(function (x) { x.classList.toggle('activo', x === b); });
-    loadChats();
-  };
-});
 
 var peticionLista = 0, vistaActual = null, offsetChats = 0, hasMoreChats = false, cargandoMasChats = false;
 async function loadChats(keepScroll, anexar) {
@@ -329,7 +321,8 @@ async function loadChats(keepScroll, anexar) {
   try {
     var offset = anexar ? offsetChats : 0;
     if (anexar) cargandoMasChats = true;
-    var qs = '&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim());
+    var qs = '&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim()) +
+      (filtroEtiqueta ? '&etiqueta=' + encodeURIComponent(filtroEtiqueta) : '');
     var data = await api('/admin/chat/conversations?limit=30&offset=' + offset + qs);
     /* Al refrescar (no al anexar) se vuelve a pedir lo que ya estaba cargado: si solo
        se trajeran las primeras 30, la lista se acortaria y el scroll saltaria arriba. */
@@ -361,12 +354,18 @@ async function loadChats(keepScroll, anexar) {
     var box = document.getElementById('chats');
     var top = box.scrollTop;
     var visibles = conversations.filter(pasaFiltro);
+    /* Los filtros de estado miran lo cargado: con uno activo, se trae el resto para no dejar chats fuera
+       (tambien cuando en lo cargado aun no hay ninguno: suelen estar mas abajo). */
+    var faltanPaginas = filtroLista !== 'todos' && hasMoreChats && conversations.length < 2000;
+    if (faltanPaginas) setTimeout(function () { if (!cargandoMasChats) loadChats(true, true); }, 0);
     if (!conversations.length) {
-      pintarLista(box, '<div class="empty">Todavía no hay conversaciones.<br>En cuanto alguien te escriba, aparece aquí.</div>', top);
+      pintarLista(box, filtroEtiqueta
+        ? '<div class="empty">Ningún chat con esa etiqueta.</div>'
+        : '<div class="empty">Todavía no hay conversaciones.<br>En cuanto alguien te escriba, aparece aquí.</div>', top);
       return;
     }
     if (!visibles.length) {
-      pintarLista(box, '<div class="empty">Ninguna conversación con ese filtro.</div>', top);
+      pintarLista(box, faltanPaginas ? '<div class="empty">Buscando…</div>' : '<div class="empty">Ninguna conversación con ese filtro.</div>', top);
       return;
     }
     var html = visibles.map(filaDeChat).join('') + (hasMoreChats ? '<button class="cargar-chats" type="button" data-cargar-chats>Ver 30 conversaciones más</button>' : '');
@@ -381,16 +380,15 @@ function filaDeChat(c) {
   var texto = last ? (last.body || '') : 'Sin mensajes todavía';
   var grupo = c.tipo === 'grupo';
   var marcas = (c.fijadoAt ? '<span title="fijado arriba">📌</span>' : '') +
-    (c.silenciadoAt ? '<span title="silenciado">🔕</span>' : '') +
-    (c.apartadoAt ? '<span title="apartado de la lista">🗂</span>' : '');
+    (c.silenciadoAt ? '<span title="silenciado">🔕</span>' : '');
   return '<div class="chat' + (current && current.id === c.contactId ? ' active' : '') + (c.silenciadoAt ? ' silenciado' : '') + '" data-id="' + esc(c.contactId) + '">' +
     (grupo ? '<div class="avatar grupo" title="Grupo de WhatsApp">👥</div>'
            : '<div class="avatar ' + colorDe(c.phone) + '" aria-hidden="true">' + esc(inicial(c.name, c.phone)) + '</div>') +
     '<div class="body"><div class="top">' +
-      '<span class="name">' + esc(nombreDe(c)) + '</span>' + chipEtiqueta(c.etiqueta) +
+      '<span class="name">' + esc(nombreDe(c)) + '</span>' +
       (marcas ? '<span class="marcas">' + marcas + '</span>' : '') +
       '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
-    '</div><div class="last">' + prefijo + esc(texto.slice(0, 70)) +
+    '</div><div class="last"><span class="texto">' + prefijo + esc(texto.slice(0, 70)) + '</span>' + chipEtiqueta(c.etiqueta) +
       (c.unread ? '<span class="badge">' + c.unread + '</span>' : '') +
     '</div></div>' +
     '<button class="icon fila-menu" data-menu-fila="' + esc(c.contactId) + '" title="Opciones de esta conversación" aria-label="Opciones de esta conversación">⋮</button>' +
@@ -404,7 +402,7 @@ var TONO_ETIQUETA = {
   reclamo: 'rojo', cancelar_entrega: 'rojo', pedido_no_reconocido: 'rojo',
   reagendar_entrega: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
   horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
-  confirmar_recepcion: 'verde', otro: 'gris'
+  confirmar_recepcion: 'verde', sin_novedad: 'verde', otro: 'gris'
 };
 
 /* 'AAAA-MM-DD' -> 'DD/MM' sin pasar por Date (la medianoche UTC cae el dia anterior en Lima). */
@@ -413,24 +411,58 @@ function diaCorto(dia) { return dia ? String(dia).slice(8, 10) + '/' + String(di
 function chipEtiqueta(e) {
   if (!e) return '';
   var clase = e.id ? (TONO_ETIQUETA[e.id] || 'gris') : 'sin';
+  var manual = e.origen === 'manual';
   var titulo = e.id
-    ? 'Etiqueta puesta por la IA' + (e.hoy ? ' hoy' : ' el ' + diaCorto(e.dia))
+    ? (manual ? 'Etiqueta puesta a mano' : 'Etiqueta puesta por la IA') + (e.hoy ? ' hoy' : ' el ' + diaCorto(e.dia)) + '. GSG la ve como la nota del chat.'
     : 'No se pudo clasificar' + (e.motivo ? ' (' + e.motivo + ')' : '') + '. Vuelve a etiquetar los chats para intentarlo de nuevo.';
-  return '<span class="etq ' + clase + (e.hoy ? '' : ' vieja') + '" title="' + esc(titulo) + '">' + esc(e.nombre) + '</span>';
+  return '<span class="etq ' + clase + (e.hoy ? '' : ' vieja') + (manual ? ' manual' : '') + '" title="' + esc(titulo) + '">' + (manual ? '<span class="etq-mano" aria-hidden="true">✎</span>' : '') + esc(e.nombre) + '</span>';
+}
+
+/* --------------------------------------- etiquetar un chat a mano (cabecera) */
+
+var catalogoCache = null;
+async function catalogoEtiquetas() {
+  if (!catalogoCache) catalogoCache = (await api('/admin/chat/etiquetas/catalogo')).items;
+  return catalogoCache;
+}
+
+/* La etiqueta de la cabecera es un boton: abre el catalogo para ponerla o cambiarla a mano. */
+function pintarEtiquetaCabecera(e) {
+  var caja = document.getElementById('t-etiqueta');
+  /* Con la lista abierta no se repinta (el refresco del chat la dejaria colgando). */
+  if (listaAbierta && listaAbierta.boton && listaAbierta.boton.id === 'etq-cambiar') return;
+  if (!current || current.tipo === 'grupo') { caja.innerHTML = ''; return; }
+  caja.innerHTML = e
+    ? '<button type="button" class="etq-boton" id="etq-cambiar" aria-haspopup="listbox" aria-expanded="false" title="Cambiar la etiqueta a mano">' + chipEtiqueta(e) + '<span class="sel-flecha" aria-hidden="true">▾</span></button>'
+    : '<button type="button" class="etq-poner" id="etq-cambiar" aria-haspopup="listbox" aria-expanded="false" title="Ponerle una etiqueta a mano">+ Etiqueta</button>';
+  document.getElementById('etq-cambiar').onclick = function () { elegirEtiquetaAMano(this, e); };
+}
+
+async function elegirEtiquetaAMano(boton, actual) {
+  var cat;
+  try { cat = await catalogoEtiquetas(); } catch (error) { toast(error.message); return; }
+  var grupos = [{ titulo: 'Poner a mano', opciones: cat.map(function (c) { return { valor: c.codigo, texto: c.nombre, tono: TONO_ETIQUETA[c.codigo] || 'gris' }; }) }];
+  if (actual) grupos.push({ opciones: [{ valor: '__quitar', texto: 'Quitar la etiqueta' }] });
+  var contacto = current.id;
+  abrirListaFiltro(boton, grupos, actual && actual.id && actual.origen === 'manual' ? actual.id : '', async function (valor) {
+    /* Se ve al momento, antes de que conteste el servidor. */
+    var elegida = cat.filter(function (c) { return c.codigo === valor; })[0];
+    pintarEtiquetaCabecera(elegida ? { id: elegida.codigo, nombre: elegida.nombre, hoy: true, origen: 'manual' } : null);
+    try {
+      var r = await api('/admin/chat/' + encodeURIComponent(contacto) + '/etiqueta', { method: 'POST', body: { etiqueta: valor === '__quitar' ? null : valor } });
+      if (current && current.id === contacto) {
+        pintarEtiquetaCabecera(r.etiqueta);
+        /* Un refresco que salio antes del cambio traeria la etiqueta vieja: este, mas nuevo, lo deja atras. */
+        openChat(contacto, true);
+      }
+      toast(valor === '__quitar' ? 'Etiqueta quitada.' : 'Etiqueta puesta a mano: la IA no la cambiará.');
+      loadChats(true);
+      cargarConteoEtiquetas();
+    } catch (error) { toast(error.message); if (current && current.id === contacto) pintarEtiquetaCabecera(actual); }
+  });
 }
 
 var sondeoEtiquetado = null, hechasVistas = -1;
-
-function plural(n, uno, varios) { return n + ' ' + (n === 1 ? uno : varios); }
-
-/* Lo que paso con el envio a GSG, en una frase; vacio si no habia nada que mandar. */
-function textoEnvioGsg(e) {
-  if (!e.syncTotal) return '';
-  var partes = [];
-  if (e.syncEnviadas) partes.push(plural(e.syncEnviadas, 'enviada', 'enviadas'));
-  if (e.syncFallidas) partes.push(plural(e.syncFallidas, 'sin enviar', 'sin enviar'));
-  return ' GSG: ' + partes.join(' · ') + ' de ' + e.syncTotal + '.' + (e.syncMotivo ? ' ' + e.syncMotivo : '');
-}
 
 function pintarEtiquetado(e, error) {
   var box = document.getElementById('etiquetado');
@@ -439,34 +471,209 @@ function pintarEtiquetado(e, error) {
   boton.classList.toggle('girando', corriendo);
   boton.disabled = corriendo;
   var cerrar = '<button type="button" data-cerrar-etiquetado title="Cerrar el aviso" aria-label="Cerrar el aviso">✕</button>';
-  /* Solo se ofrece reintentar lo que no llego a GSG: no vuelve a pasar por la IA. */
-  var reintentar = e && !corriendo && e.syncFallidas ? '<button type="button" class="reintentar" data-reintentar-envios title="Vuelve a mandar a GSG solo lo que falló, con la etiqueta ya puesta (no vuelve a preguntar a la IA)">Reintentar envíos</button>' : '';
   if (!error && e && e.error) error = e.error;
-  if (error) { box.className = 'etiquetado error'; box.innerHTML = '<span class="que">' + esc(error) + '</span>' + reintentar + cerrar; return; }
+  if (error) { box.className = 'etiquetado error'; box.innerHTML = '<span class="que">' + esc(error) + '</span>' + cerrar; return; }
   if (!e || (!corriendo && !e.termino)) { box.className = 'etiquetado hidden'; box.innerHTML = ''; return; }
   var texto, pct = 0;
-  if (corriendo && e.fase === 'sincronizacion') {
-    var hechasGsg = e.syncEnviadas + e.syncFallidas;
-    texto = e.syncTotal ? 'Enviando a GSG: ' + hechasGsg + ' de ' + e.syncTotal + '…' : 'Enviando a GSG…';
-    pct = e.syncTotal ? Math.round((hechasGsg * 100) / e.syncTotal) : 0;
-  } else if (corriendo) {
+  if (corriendo) {
     texto = e.total ? 'Etiquetando con IA: ' + e.hechas + ' de ' + e.total + ' chats de hoy…' : 'Leyendo los chats de hoy…';
     pct = e.total ? Math.round((e.hechas * 100) / e.total) : 0;
-  } else if (e.tipo === 'reintento') {
-    texto = 'Reintento de envíos a GSG terminado.' + textoEnvioGsg(e);
   } else if (!e.total) {
     texto = 'Hoy todavía no hay chats que etiquetar.';
   } else {
     var partes = [];
     if (e.clasificadas) partes.push(e.clasificadas + ' etiquetado' + (e.clasificadas === 1 ? '' : 's'));
-    if (e.reutilizadas) partes.push(e.reutilizadas + ' sin cambios desde la última vez (no se volvió a preguntar a la IA)');
+    if (e.reutilizadas) partes.push(e.reutilizadas + ' ya tenían etiqueta (no se volvieron a leer)');
     if (e.sinClasificar) partes.push(e.sinClasificar + ' sin clasificar (se reintentan la próxima vez)');
     texto = 'Listo: ' + e.total + ' chat' + (e.total === 1 ? '' : 's') + ' de hoy. ' + partes.join(' · ') + '.' +
-      (e.recortado ? ' Hoy hay demasiados mensajes: se miraron los primeros.' : '') + textoEnvioGsg(e);
+      (e.recortado ? ' Hoy hay demasiados mensajes: se miraron los primeros.' : '') +
+      (e.clasificadas ? ' GSG ya las ve como la nota de cada chat.' : '');
   }
-  box.className = 'etiquetado' + (!corriendo && e.syncFallidas ? ' error' : '');
-  box.innerHTML = '<div class="que">' + esc(texto) + (corriendo ? '<div class="barra"><i style="width:' + pct + '%"></i></div>' : '') + '</div>' + reintentar + (corriendo ? '' : cerrar);
+  var verChats = e.loteId ? '<button type="button" class="ver-chats" data-ver-chats aria-expanded="' + (chatsDelLoteAbierto ? 'true' : 'false') + '">' + (chatsDelLoteAbierto ? 'Ocultar chats' : 'Ver chats del lote') + '</button>' : '';
+  box.className = 'etiquetado';
+  box.innerHTML = '<div class="que">' + esc(texto) + (corriendo ? '<div class="barra"><i style="width:' + pct + '%"></i></div>' : '') + '</div>' + verChats + (corriendo ? '' : cerrar);
+  loteMostrado = e.loteId || null;
+  if (chatsDelLoteAbierto) pintarChatsDelLote();
 }
+
+/* ------------------------------------------------- filtrar por etiqueta */
+
+/* Se filtra en el servidor, sobre toda la bandeja: no solo los chats ya cargados. */
+var filtroEtiqueta = '';
+
+async function cargarConteoEtiquetas() {
+  try {
+    conteoEtiquetas = await api('/admin/chat/etiquetas/conteo');
+  } catch (error) { conteoEtiquetas = null; }
+  pintarSelectores();
+}
+
+/* ------------------------------------------------ los dos desplegables */
+
+var FILTROS_LISTA = [
+  { valor: 'todos', texto: 'Todos los chats' },
+  { valor: 'sin_leer', texto: 'Sin leer' },
+  { valor: 'esperan', texto: 'Esperan respuesta' },
+  { valor: 'ventana', texto: 'Escribieron hoy' },
+];
+var conteoEtiquetas = null;
+
+/* Las opciones del desplegable de etiquetas: las que tienen chats (de mas a menos) y los estados. */
+function opcionesEtiqueta() {
+  var d = conteoEtiquetas;
+  if (!d) return [];
+  var con = d.etiquetas.filter(function (e) { return e.n > 0; }).sort(function (a, b) { return b.n - a.n; });
+  var estados = [];
+  if (d.sinEtiquetar) estados.push({ valor: 'sin_etiquetar', texto: 'Sin etiquetar', n: d.sinEtiquetar, tono: 'hueco' });
+  if (d.sinClasificar) estados.push({ valor: 'sin_clasificar', texto: 'Sin clasificar', n: d.sinClasificar, tono: 'sin' });
+  return [
+    { opciones: [{ valor: '', texto: 'Todas las etiquetas', n: d.total }] },
+    { titulo: 'Etiquetas', opciones: con.map(function (e) { return { valor: e.codigo, texto: e.nombre, n: e.n, tono: TONO_ETIQUETA[e.codigo] || 'gris' }; }) },
+    estados.length ? { titulo: 'Estado', opciones: estados } : null,
+  ].filter(Boolean);
+}
+
+function pintarSelectores() {
+  var lista = FILTROS_LISTA.filter(function (f) { return f.valor === filtroLista; })[0];
+  document.getElementById('sel-lista-valor').textContent = lista && lista.valor !== 'todos' ? lista.texto : 'Todos';
+  document.getElementById('sel-lista').classList.toggle('activo', filtroLista !== 'todos');
+  var elegida = null;
+  opcionesEtiqueta().forEach(function (g) { g.opciones.forEach(function (o) { if (o.valor === filtroEtiqueta) elegida = o; }); });
+  var valor = document.getElementById('sel-etiqueta-valor');
+  valor.innerHTML = filtroEtiqueta && elegida
+    ? '<i class="punto ' + esc(elegida.tono || 'gris') + '" aria-hidden="true"></i>' + esc(elegida.texto)
+    : (conteoEtiquetas && (conteoEtiquetas.total - conteoEtiquetas.sinEtiquetar) > 0 ? 'Todas' : 'Sin etiquetas aún');
+  document.getElementById('sel-etiqueta').classList.toggle('activo', Boolean(filtroEtiqueta));
+}
+
+/*
+ * Un desplegable propio (no el <select> del navegador): un clic lo abre con
+ * todas las opciones a la vista, otro elige. Con teclado: flechas, Intro, Esc.
+ */
+var listaAbierta = null;
+function cerrarListaFiltro() {
+  if (!listaAbierta) return;
+  listaAbierta.panel.remove();
+  listaAbierta.boton.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('pointerdown', listaAbierta.fuera, true);
+  document.removeEventListener('keydown', listaAbierta.teclas, true);
+  window.removeEventListener('resize', cerrarListaFiltro);
+  listaAbierta = null;
+}
+function abrirListaFiltro(boton, grupos, actual, elegir) {
+  if (listaAbierta && listaAbierta.boton === boton) { cerrarListaFiltro(); return; }
+  cerrarListaFiltro();
+  var panel = document.createElement('div');
+  panel.className = 'lista-filtro';
+  /* Va colgada del body: hereda la letra del boton, no la del navegador. */
+  panel.style.fontFamily = getComputedStyle(boton).fontFamily;
+  panel.setAttribute('role', 'listbox');
+  panel.innerHTML = grupos.map(function (g) {
+    return (g.titulo ? '<div class="lf-titulo">' + esc(g.titulo) + '</div>' : '') + g.opciones.map(function (o) {
+      var es = o.valor === actual;
+      return '<button type="button" class="lf-op' + (es ? ' activo' : '') + '" role="option" aria-selected="' + (es ? 'true' : 'false') + '" data-valor="' + esc(o.valor) + '">' +
+        '<span class="lf-marca" aria-hidden="true">' + (es ? '✓' : '') + '</span>' +
+        (o.tono ? '<i class="punto ' + esc(o.tono) + '" aria-hidden="true"></i>' : '') +
+        '<span class="lf-texto">' + esc(o.texto) + '</span>' +
+        (o.n !== undefined ? '<span class="lf-n">' + o.n + '</span>' : '') + '</button>';
+    }).join('');
+  }).join('');
+  document.body.appendChild(panel);
+  var r = boton.getBoundingClientRect();
+  var ancho = Math.min(Math.max(r.width, 290), window.innerWidth - 16);
+  panel.style.width = ancho + 'px';
+  panel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - ancho - 8)) + 'px';
+  panel.style.top = (r.bottom + 6) + 'px';
+  panel.style.maxHeight = Math.max(200, window.innerHeight - r.bottom - 20) + 'px';
+  boton.setAttribute('aria-expanded', 'true');
+  var ops = Array.prototype.slice.call(panel.querySelectorAll('.lf-op'));
+  (panel.querySelector('.lf-op.activo') || ops[0]).focus();
+  panel.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.lf-op');
+    if (!b) return;
+    cerrarListaFiltro();
+    boton.focus();
+    elegir(b.getAttribute('data-valor'));
+  });
+  var fuera = function (ev) { if (!panel.contains(ev.target) && !boton.contains(ev.target)) cerrarListaFiltro(); };
+  var teclas = function (ev) {
+    if (ev.key === 'Escape') { ev.preventDefault(); cerrarListaFiltro(); boton.focus(); return; }
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    ev.preventDefault();
+    var i = ops.indexOf(document.activeElement);
+    var j = ev.key === 'ArrowDown' ? Math.min(ops.length - 1, i + 1) : Math.max(0, i - 1);
+    ops[j].focus();
+  };
+  document.addEventListener('pointerdown', fuera, true);
+  document.addEventListener('keydown', teclas, true);
+  window.addEventListener('resize', cerrarListaFiltro);
+  listaAbierta = { panel: panel, boton: boton, fuera: fuera, teclas: teclas };
+}
+
+document.getElementById('sel-lista').onclick = function () {
+  abrirListaFiltro(this, [{ opciones: FILTROS_LISTA }], filtroLista, function (valor) {
+    filtroLista = valor;
+    pintarSelectores();
+    loadChats();
+  });
+};
+document.getElementById('sel-etiqueta').onclick = async function () {
+  if (!conteoEtiquetas) await cargarConteoEtiquetas();
+  var grupos = opcionesEtiqueta();
+  if (!grupos.length || (conteoEtiquetas.total - conteoEtiquetas.sinEtiquetar) === 0) { toast('Aún no hay chats etiquetados: pulsa «Etiquetar chats con IA».'); return; }
+  abrirListaFiltro(this, grupos, filtroEtiqueta, function (valor) {
+    filtroEtiqueta = valor;
+    pintarSelectores();
+    loadChats();
+  });
+};
+
+/* ---------------------------------------- los chats del lote, uno por uno */
+
+var chatsDelLoteAbierto = false, loteMostrado = null, pidiendoChatsLote = false;
+var ESTADO_ANALISIS = { pendiente: 'En cola', reutilizada: 'Ya etiquetado', clasificada: 'Clasificada', error: 'Error de IA', solo_envio: 'Solo envío' };
+
+/* 51 + 9 digitos, como lo guarda el servidor: para encontrar el chat de la bandeja. */
+function numeroComoServidor(tel) {
+  var d = String(tel || '').replace(/\D+/g, '');
+  return d.length === 9 && d.charAt(0) === '9' ? '51' + d : d;
+}
+
+async function pintarChatsDelLote() {
+  var caja = document.getElementById('etiquetado-chats');
+  if (!chatsDelLoteAbierto || !loteMostrado) { caja.classList.add('hidden'); caja.innerHTML = ''; return; }
+  if (pidiendoChatsLote) return;
+  pidiendoChatsLote = true;
+  try {
+    var d = await api('/admin/chat/etiquetar/lotes/' + encodeURIComponent(loteMostrado));
+    if (!chatsDelLoteAbierto) return;
+    caja.classList.remove('hidden');
+    if (!d.chats.length) { caja.innerHTML = '<div class="nada">Este lote no tiene chats.</div>'; return; }
+    caja.innerHTML = d.chats.map(function (c) {
+      var detalle = c.error || '';
+      return '<button type="button" class="chat-lote" data-telefono-lote="' + esc(c.phone) + '">' +
+        '<span class="quien"><b>' + esc(c.nombre || telefonoBonito(c.phone)) + '</b>' + (c.nombre ? ' <span class="tel">' + esc(telefonoBonito(c.phone)) + '</span>' : '') + '</span>' +
+        '<span class="estados">' +
+          '<span class="est est-' + esc(c.estado) + '">' + esc(ESTADO_ANALISIS[c.estado] || c.estado) + '</span>' +
+          (c.nombreEtiqueta ? chipEtiqueta({ id: c.etiqueta, nombre: c.nombreEtiqueta, hoy: true }) : '') +
+        '</span>' +
+        (detalle ? '<span class="detalle">' + esc(detalle) + '</span>' : '') +
+        '</button>';
+    }).join('');
+  } catch (error) {
+    caja.classList.remove('hidden');
+    caja.innerHTML = '<div class="nada error">' + esc(error.message) + '</div>';
+  } finally { pidiendoChatsLote = false; }
+}
+
+document.getElementById('etiquetado-chats').addEventListener('click', function (event) {
+  var fila = event.target.closest('[data-telefono-lote]');
+  if (!fila) return;
+  var tel = fila.getAttribute('data-telefono-lote');
+  var c = conversations.filter(function (x) { return numeroComoServidor(x.phone) === tel; })[0];
+  if (c) openChat(c.contactId);
+  else toast('Ese chat no está en la lista cargada: búscalo por su número.');
+});
 
 /* Pregunta por el avance mientras corre; al terminar, repinta la lista y la cabecera. */
 async function seguirEtiquetado(alArrancar) {
@@ -483,10 +690,310 @@ async function seguirEtiquetado(alArrancar) {
     }
     hechasVistas = -1;
     await loadChats(true);
+    cargarConteoEtiquetas();
     if (current) openChat(current.id, true);
   } catch (error) {
     if (!alArrancar) pintarEtiquetado(null, error.message);
   }
+}
+
+/* ------------------------------------------------ el catalogo de etiquetas */
+
+/*
+ * Los codigos, nombres y descripciones que usa la IA para etiquetar. El codigo
+ * es lo que guarda el sistema y lee GSG en la nota del chat; la descripcion, lo que lee la IA.
+ * «otro» siempre esta (se puede renombrar, no quitar).
+ */
+async function editarCatalogo() {
+  var datos;
+  try { datos = await api('/admin/chat/etiquetas/catalogo'); } catch (error) { toast(error.message); return; }
+  var filas = datos.items.map(function (e) { return { codigo: e.codigo, nombre: e.nombre, descripcion: e.descripcion }; });
+  var fondo = document.createElement('div');
+  fondo.className = 'dlg-fondo';
+  fondo.innerHTML = '<div class="dlg catalogo-dlg" role="dialog" aria-modal="true" aria-labelledby="cat-titulo">' +
+    '<h3 id="cat-titulo">Catálogo de etiquetas</h3>' +
+    '<p class="ayuda">La IA elige UNA de estas para cada chat. El <b>código</b> es lo que se guarda y lee GSG en la nota del chat (minúsculas y guion bajo); el <b>nombre</b> es lo que ves en Chats; la <b>descripción</b> es lo que lee la IA para decidir. ' +
+    (datos.propio ? 'Es el catálogo de tu negocio.' : 'Ahora mismo es el de fábrica.') + ' Al cambiarlo, el siguiente lote vuelve a clasificar los chats de hoy.</p>' +
+    '<div class="cat-tabla" id="cat-tabla"></div>' +
+    '<button type="button" class="sm" id="cat-mas">＋ Añadir etiqueta</button>' +
+    '<div class="mal" id="cat-mal" role="alert"></div>' +
+    '<div class="botones">' +
+      '<button type="button" id="cat-probar" title="Mide con conversaciones de prueba si la IA pone bien estas etiquetas (guarda antes los cambios)">Probar la IA…</button>' +
+      '<button type="button" id="cat-fabrica"' + (datos.propio ? '' : ' disabled') + '>Volver al de fábrica</button>' +
+      '<button type="button" id="cat-no">Cancelar</button>' +
+      '<button type="button" class="principal" id="cat-si">Guardar</button>' +
+    '</div></div>';
+  document.body.appendChild(fondo);
+  var tabla = fondo.querySelector('#cat-tabla');
+  var mal = fondo.querySelector('#cat-mal');
+
+  function pintar() {
+    tabla.innerHTML = '<div class="cat-fila cat-cab"><span>Código</span><span>Nombre</span><span>Descripción para la IA</span><span></span></div>' +
+      filas.map(function (f, i) {
+        var esOtro = f.codigo === datos.codigoOtro;
+        return '<div class="cat-fila">' +
+          '<input aria-label="Código" data-i="' + i + '" data-campo="codigo" value="' + esc(f.codigo) + '"' + (esOtro ? ' readonly title="«otro» no se puede quitar ni cambiar de código"' : '') + ' maxlength="40" spellcheck="false">' +
+          '<input aria-label="Nombre" data-i="' + i + '" data-campo="nombre" value="' + esc(f.nombre) + '" maxlength="60">' +
+          '<input aria-label="Descripción para la IA" data-i="' + i + '" data-campo="descripcion" value="' + esc(f.descripcion) + '" maxlength="200">' +
+          (esOtro ? '<span></span>' : '<button type="button" class="quitar" data-quitar="' + i + '" aria-label="Quitar ' + esc(f.codigo || 'esta etiqueta') + '">✕</button>') +
+        '</div>';
+      }).join('');
+  }
+  function cerrar() { fondo.remove(); document.removeEventListener('keydown', teclas); }
+  function teclas(ev) { if (ev.key === 'Escape') cerrar(); }
+  document.addEventListener('keydown', teclas);
+  tabla.addEventListener('input', function (ev) {
+    var i = ev.target.getAttribute('data-i');
+    if (i !== null) filas[Number(i)][ev.target.getAttribute('data-campo')] = ev.target.value;
+  });
+  tabla.addEventListener('click', function (ev) {
+    var q = ev.target.closest('[data-quitar]');
+    if (q) { filas.splice(Number(q.getAttribute('data-quitar')), 1); pintar(); }
+  });
+  fondo.querySelector('#cat-mas').onclick = function () {
+    if (filas.length >= datos.tope) { mal.textContent = 'Como mucho ' + datos.tope + ' etiquetas.'; return; }
+    filas.push({ codigo: '', nombre: '', descripcion: '' });
+    pintar();
+    var nuevas = tabla.querySelectorAll('input[data-campo="codigo"]');
+    nuevas[nuevas.length - 1].focus();
+  };
+  fondo.querySelector('#cat-no').onclick = cerrar;
+  fondo.querySelector('#cat-probar').onclick = async function () {
+    var original = JSON.stringify(datos.items.map(function (e) { return [e.codigo, e.nombre, e.descripcion]; }));
+    var ahora = JSON.stringify(filas.map(function (e) { return [e.codigo, e.nombre, e.descripcion]; }));
+    /* La prueba usa el catalogo guardado: lo que no se guardo se perderia sin avisar. */
+    if (original !== ahora && !(await confirmarDialogo({ titulo: 'Hay cambios sin guardar', texto: 'La prueba usa el catálogo guardado. Si sigues, se pierden los cambios que hiciste aquí. Para probarlos, pulsa antes «Guardar».', boton: 'Seguir sin guardar' }))) return;
+    cerrar();
+    probarIA();
+  };
+  fondo.querySelector('#cat-fabrica').onclick = async function () {
+    var ok = await confirmarDialogo({ titulo: 'Volver al catálogo de fábrica', texto: 'Se borra el catálogo de tu negocio y vuelven las etiquetas de fábrica. Las etiquetas ya puestas no se borran.', boton: 'Volver al de fábrica' });
+    if (!ok) return;
+    try { await api('/admin/chat/etiquetas/catalogo', { method: 'DELETE' }); toast('Catálogo de fábrica restablecido.'); cerrar(); }
+    catch (error) { mal.textContent = error.message; }
+  };
+  fondo.querySelector('#cat-si').onclick = async function () {
+    mal.textContent = '';
+    this.disabled = true;
+    try {
+      await api('/admin/chat/etiquetas/catalogo', { method: 'PUT', body: { items: filas } });
+      catalogoCache = null;
+      toast('Catálogo guardado. Para aplicarlo a los chats ya etiquetados: ⋮ → «Volver a etiquetar todo».');
+      cerrar();
+    } catch (error) { mal.textContent = error.message; this.disabled = false; }
+  };
+  pintar();
+}
+
+/* ------------------------------------------------------ probar la IA */
+
+/*
+ * «Probar la IA»: pasa el banco de conversaciones de prueba por la IA del
+ * negocio (con su catalogo) y dice cuantas etiqueta bien, como usa «Otro» y
+ * en cuales falla. La otra pestaña prueba una conversacion escrita a mano. No
+ * toca ningun chat ni cambia ninguna nota.
+ */
+var EJEMPLOS_PRUEBA = [
+  { t: 'Pide otro día', c: 'negocio: ¿Nos mandas tu ubicación para llevarte tu pedido hoy?\ncliente: Hoy no voy a estar, ¿lo pueden traer mañana?' },
+  { t: 'Todo va bien', c: 'negocio: ¿Nos mandas tu ubicación para llevarte tu pedido hoy?\ncliente: [ubicación]\nnegocio: Ubicación registrada correctamente.\ncliente: Gracias!' },
+  { t: 'Recibe otra persona', c: 'negocio: ¿Nos mandas tu ubicación?\ncliente: [ubicación]\ncliente: No voy a estar, déjenlo con el portero por favor' },
+  { t: 'Nada que ver con la entrega', c: 'negocio: ¿Nos mandas tu ubicación?\ncliente: ¿Venden también zapatillas?' },
+];
+
+function lineaDeCaso(l) {
+  if (l[0] === 'ubicacion') return '<div class="m cli adj">📍 Ubicación</div>';
+  if (l[0] === 'foto') return '<div class="m cli adj">📷 Foto</div>';
+  if (l[0] === 'audio') return '<div class="m cli adj">🎤 Audio</div>';
+  return '<div class="m' + (l[0] === 'cliente' ? ' cli' : '') + '">' + esc(l[1]) + '</div>';
+}
+
+function chipDeCodigo(codigo, nombre) {
+  return codigo ? chipEtiqueta({ id: codigo, nombre: nombre || codigo, hoy: true }) : '<span class="etq sin">Sin respuesta</span>';
+}
+
+async function probarIA() {
+  var fondo = document.createElement('div');
+  fondo.className = 'dlg-fondo';
+  fondo.innerHTML = '<div class="dlg prueba-dlg" role="dialog" aria-modal="true" aria-labelledby="pr-titulo">' +
+    '<div class="pr-cab"><h3 id="pr-titulo">Probar la IA</h3><p class="sub" id="pr-sub">Comprueba si tu IA pone bien las etiquetas antes de fiarte de ella. No toca ningún chat ni cambia ninguna nota.</p></div>' +
+    '<div class="pr-pestanas" role="tablist">' +
+      '<button type="button" role="tab" id="pr-tab-banco" aria-selected="true">Prueba completa</button>' +
+      '<button type="button" role="tab" id="pr-tab-una" aria-selected="false">Probar una conversación</button>' +
+    '</div>' +
+    '<div class="pr-cuerpo" id="pr-cuerpo"></div>' +
+    '<div class="pr-pie" id="pr-pie"></div>' +
+  '</div>';
+  document.body.appendChild(fondo);
+  var cuerpo = fondo.querySelector('#pr-cuerpo');
+  var pie = fondo.querySelector('#pr-pie');
+  var pestana = 'banco', sondeo = null, verTodos = false, ultimo = null, textoUna = '';
+
+  function cerrar() { clearTimeout(sondeo); fondo.remove(); document.removeEventListener('keydown', teclas); }
+  function teclas(ev) { if (ev.key === 'Escape' && !document.querySelector('.lista-filtro')) cerrar(); }
+  document.addEventListener('keydown', teclas);
+  fondo.addEventListener('click', function (ev) { if (ev.target === fondo) cerrar(); });
+
+  function elegirPestana(p) {
+    pestana = p;
+    fondo.querySelector('#pr-tab-banco').setAttribute('aria-selected', p === 'banco' ? 'true' : 'false');
+    fondo.querySelector('#pr-tab-una').setAttribute('aria-selected', p === 'una' ? 'true' : 'false');
+    if (p === 'banco') pintarBanco(ultimo); else pintarUna();
+  }
+  fondo.querySelector('#pr-tab-banco').onclick = function () { elegirPestana('banco'); };
+  fondo.querySelector('#pr-tab-una').onclick = function () { elegirPestana('una'); };
+
+  function errorConEnlace(mensaje, ir) {
+    return '<div class="pr-error" role="alert">' + esc(mensaje) + (ir ? ' <a href="' + esc(ir) + '">Ir a Asistente IA</a>' : '') + '</div>';
+  }
+
+  /* ---- la prueba completa */
+  function pintarBanco(d) {
+    if (pestana !== 'banco') return;
+    ultimo = d;
+    var ev = d && d.evaluacion;
+    var modelo = (ev && ev.modelo) || (d && d.modelo);
+    fondo.querySelector('#pr-sub').textContent = 'Comprueba si tu IA' + (modelo ? ' (' + modelo + ')' : '') + ' pone bien las etiquetas antes de fiarte de ella. No toca ningún chat ni cambia ninguna nota.';
+    pie.innerHTML = '<button type="button" id="pr-cerrar">Cerrar</button>';
+    if (d && !d.hayIA && !(ev && ev.enCurso)) {
+      cuerpo.innerHTML = errorConEnlace('Para probar la IA hace falta su clave: guárdala en Avanzado → Asistente IA. No hace falta activar el asistente.', '/panel#ia');
+    } else if (ev && ev.enCurso) {
+      var pct = ev.total ? Math.round((ev.hechos * 100) / ev.total) : 0;
+      cuerpo.innerHTML = '<div class="pr-avance" aria-live="polite"><div>Probando <b>' + ev.hechos + ' de ' + ev.total + '</b> conversaciones…</div><div class="barra"><i style="width:' + pct + '%"></i></div><div class="pr-intro" style="margin:0">Tarda uno o dos minutos. Puedes cerrar esta ventana: la prueba sigue y al volver verás el resultado.</div></div>';
+    } else if (ev && ev.error) {
+      cuerpo.innerHTML = errorConEnlace('La prueba no terminó: ' + ev.error);
+      pie.insertAdjacentHTML('afterbegin', '<button type="button" class="principal" id="pr-empezar">Probar otra vez</button>');
+    } else if (ev && ev.informe) {
+      cuerpo.innerHTML = pintarInforme(ev.informe, ev.termino);
+      pie.insertAdjacentHTML('afterbegin', '<button type="button" id="pr-catalogo">Mejorar descripciones…</button><button type="button" class="principal" id="pr-empezar">Probar otra vez</button>');
+    } else {
+      cuerpo.innerHTML = '<p class="pr-intro">Se le pasan a tu IA <b>' + (d && d.total ? d.total : 'unas 50') + ' conversaciones típicas</b> del reparto, cada una con la etiqueta que le toca: una o más de cada etiqueta, chats donde todo va bien, temas que no tienen que ver con la entrega (los únicos que van a «Otro»), peticiones ya resueltas seguidas de otra pendiente y mensajes que intentan engañar a la IA.</p>' +
+        '<p class="pr-intro">Al terminar verás cuántas acertó, si usa «Otro» solo cuando corresponde y en cuáles se equivocó, con la conversación a la vista.</p>' +
+        '<div class="pr-vacio"><b>Lista para probar</b>Usa la IA y el catálogo de etiquetas de tu negocio.</div>';
+      pie.insertAdjacentHTML('afterbegin', '<button type="button" class="principal" id="pr-empezar">Empezar la prueba</button>');
+    }
+    var b = pie.querySelector('#pr-empezar'); if (b) b.onclick = empezar;
+    var c = pie.querySelector('#pr-catalogo'); if (c) c.onclick = function () { cerrar(); editarCatalogo(); };
+    pie.querySelector('#pr-cerrar').onclick = cerrar;
+    var t = cuerpo.querySelector('#pr-ver-todos'); if (t) t.onclick = function () { verTodos = !verTodos; pintarBanco(ultimo); };
+  }
+
+  function pintarInforme(inf, termino) {
+    var tono = inf.precision >= 90 ? 'verde' : inf.precision >= 75 ? 'ambar' : 'rojo';
+    var titular = inf.precision >= 90 ? 'Tu IA etiqueta bien' : inf.precision >= 75 ? 'Tu IA etiqueta aceptable: revisa en qué falla' : 'Tu IA se equivoca demasiado';
+    var consejo = inf.precision >= 90
+      ? 'Puedes fiarte de las etiquetas. Si alguna etiqueta falla, mejora su descripción en el catálogo.'
+      : inf.precision >= 75
+        ? 'Mira los fallos de abajo: si se repiten en una etiqueta, mejora su descripción en el catálogo. Un modelo más capaz en Asistente IA también ayuda.'
+        : 'Prueba un modelo más capaz en Asistente IA y mejora las descripciones del catálogo de las etiquetas que fallan.';
+    var hora = termino ? new Date(termino).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
+    var otroTexto = inf.otro.casos ? inf.otro.bien + ' de ' + inf.otro.casos : '—';
+    var html = '<div class="pr-nota ' + tono + '"><div class="cifra">' + inf.precision + '%</div><div class="que"><b>' + esc(titular) + '</b>' +
+      inf.aciertos + ' de ' + inf.total + ' conversaciones bien etiquetadas' + (hora ? ' · prueba de las ' + esc(hora) : '') + '. ' + esc(consejo) + '</div></div>';
+    html += '<div class="pr-kpis">' +
+      '<div class="pr-kpi' + (inf.otro.deMas ? ' malo' : '') + '"><b>' + inf.otro.deMas + '</b>veces puso «Otro» cuando había una etiqueta</div>' +
+      '<div class="pr-kpi' + (inf.otro.casos && inf.otro.bien < inf.otro.casos ? ' malo' : '') + '"><b>' + otroTexto + '</b>temas ajenos que sí mandó a «Otro»</div>' +
+      '<div class="pr-kpi' + (inf.sinRespuesta ? ' malo' : '') + '"><b>' + inf.sinRespuesta + '</b>sin respuesta válida (código que no existe o error)</div>' +
+    '</div>';
+    if (inf.saltados) html += '<p class="pr-intro">' + inf.saltados + ' conversación(es) no se probaron porque su etiqueta no está en tu catálogo.</p>';
+    html += '<h4>Por etiqueta</h4><div class="pr-etiquetas">' + inf.porEtiqueta.map(function (e) {
+      var falla = e.aciertos < e.casos;
+      return '<span class="pe' + (falla ? ' falla' : '') + '" title="' + esc(e.aciertos + ' de ' + e.casos + ' bien') + '">' + chipDeCodigo(e.codigo, e.nombre) + '<span class="n">' + e.aciertos + '/' + e.casos + '</span></span>';
+    }).join('') + '</div>';
+    var malos = inf.resultados.filter(function (r) { return !r.acierto; });
+    var lista = verTodos ? inf.resultados : malos;
+    html += '<div class="pr-conmutador"><h4>' + (verTodos ? 'Todas las conversaciones' : malos.length ? 'En qué se equivocó (' + malos.length + ')' : 'Sin fallos') + '</h4>' +
+      '<button type="button" id="pr-ver-todos">' + (verTodos ? 'Ver solo los fallos' : 'Ver las ' + inf.total) + '</button></div>';
+    if (!lista.length) html += '<div class="pr-vacio"><b>Acertó todas</b>Ninguna conversación quedó con una etiqueta equivocada.</div>';
+    html += '<div class="pr-casos">' + lista.map(function (r) {
+      return '<div class="pr-caso ' + (r.acierto ? 'bien' : 'mal') + '"><div class="t">' + (r.acierto ? '✓ ' : '✗ ') + esc(r.titulo) + '</div>' +
+        '<div class="comp"><span>Tocaba ' + chipDeCodigo(r.esperada, r.esperadaNombre) + '</span>' +
+        (r.acierto && r.obtenida === r.esperada ? '' : '<span>Puso ' + chipDeCodigo(r.obtenida, r.obtenidaNombre) + '</span>') +
+        (r.fallo ? '<span>' + esc(r.fallo) + '</span>' : '') + '</div>' +
+        '<details><summary>Ver la conversación</summary><div class="pr-conv">' + r.conversacion.map(lineaDeCaso).join('') + '</div></details></div>';
+    }).join('') + '</div>';
+    return html;
+  }
+
+  async function consultar() {
+    clearTimeout(sondeo);
+    if (!document.body.contains(fondo)) return;
+    try {
+      var d = await api('/admin/chat/etiquetas/evaluar');
+      pintarBanco(d);
+      if (d.evaluacion && d.evaluacion.enCurso) sondeo = setTimeout(consultar, 1200);
+    } catch (error) { if (pestana === 'banco') cuerpo.innerHTML = errorConEnlace(error.message); }
+  }
+
+  async function empezar() {
+    verTodos = false;
+    var b = pie.querySelector('#pr-empezar'); if (b) b.disabled = true;
+    try {
+      var ev = await api('/admin/chat/etiquetas/evaluar', { method: 'POST', body: {} });
+      pintarBanco({ evaluacion: ev, hayIA: true, modelo: ev.modelo });
+      sondeo = setTimeout(consultar, 800);
+    } catch (error) {
+      cuerpo.innerHTML = errorConEnlace(error.message, error.ir || (/clave/.test(error.message) ? '/panel#ia' : ''));
+      if (b) b.disabled = false;
+    }
+  }
+
+  /* ---- una conversacion a mano */
+  function pintarUna(resultado) {
+    clearTimeout(sondeo);
+    cuerpo.innerHTML = '<p class="pr-intro">Escribe o pega una conversación y mira qué etiqueta le pondría la IA. Nada se guarda.</p>' +
+      '<div class="pr-ejemplos">' + EJEMPLOS_PRUEBA.map(function (e, i) { return '<button type="button" data-ejemplo="' + i + '">' + esc(e.t) + '</button>'; }).join('') + '</div>' +
+      '<textarea id="pr-texto" aria-label="Conversación para probar" spellcheck="false" placeholder="negocio: ¿Nos mandas tu ubicación para llevarte tu pedido hoy?\ncliente: [ubicación]\ncliente: Que lo reciba mi mamá, por favor">' + esc(textoUna) + '</textarea>' +
+      '<div class="pr-guia">Una línea por mensaje: <code>cliente:</code> o <code>negocio:</code> delante. Para un pin, una foto o un audio del cliente escribe <code>[ubicación]</code>, <code>[foto]</code> o <code>[audio]</code>.</div>' +
+      '<div id="pr-resultado">' + (resultado || '') + '</div>';
+    pie.innerHTML = '<button type="button" id="pr-cerrar">Cerrar</button><button type="button" class="principal" id="pr-probar">Ver qué etiqueta pone</button>';
+    var area = cuerpo.querySelector('#pr-texto');
+    area.addEventListener('input', function () { textoUna = area.value; });
+    area.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); probarUna(); } });
+    cuerpo.querySelector('.pr-ejemplos').onclick = function (ev) {
+      var b = ev.target.closest('[data-ejemplo]');
+      if (!b) return;
+      textoUna = EJEMPLOS_PRUEBA[Number(b.getAttribute('data-ejemplo'))].c;
+      area.value = textoUna;
+      cuerpo.querySelector('#pr-resultado').innerHTML = '';
+      area.focus();
+    };
+    pie.querySelector('#pr-cerrar').onclick = cerrar;
+    pie.querySelector('#pr-probar').onclick = probarUna;
+  }
+
+  async function probarUna() {
+    var caja = cuerpo.querySelector('#pr-resultado');
+    var boton = pie.querySelector('#pr-probar');
+    if (!textoUna.trim()) { caja.innerHTML = errorConEnlace('Escribe primero la conversación.'); return; }
+    boton.disabled = true;
+    boton.textContent = 'Preguntando a la IA…';
+    caja.innerHTML = '';
+    try {
+      var r = await api('/admin/chat/etiquetas/probar', { method: 'POST', body: { texto: textoUna } });
+      if (pestana !== 'una') return;
+      caja.innerHTML = r.etiqueta
+        ? '<div class="pr-resultado" aria-live="polite">La IA' + (r.modelo ? ' (' + esc(r.modelo) + ')' : '') + ' le pondría ' + chipDeCodigo(r.etiqueta, r.nombre) + (r.descripcion ? '<div class="desc">' + esc(r.descripcion.charAt(0).toUpperCase() + r.descripcion.slice(1)) + '</div>' : '') + '</div>'
+        : errorConEnlace('La IA no dio una etiqueta válida: ' + (r.motivo || 'sin respuesta') + '. En los chats quedaría «Sin clasificar».');
+    } catch (error) {
+      caja.innerHTML = errorConEnlace(error.message, error.ir || (/clave/.test(error.message) ? '/panel#ia' : ''));
+    } finally {
+      boton.disabled = false;
+      boton.textContent = 'Ver qué etiqueta pone';
+    }
+  }
+
+  cuerpo.innerHTML = '<div class="pr-vacio">Cargando…</div>';
+  consultar();
+}
+
+/* Vuelve a leer TODOS los chats de hoy, tambien los ya etiquetados (p. ej. tras cambiar el catalogo). */
+async function releerTodo() {
+  var ok = await confirmarDialogo({ titulo: 'Volver a etiquetar todo', texto: 'La IA vuelve a leer todos los chats de hoy, también los que ya tienen etiqueta, y les pone la que corresponda con el catálogo actual. Sirve tras cambiar el catálogo. No se le manda nada a ningún cliente.', boton: 'Volver a etiquetar' });
+  if (!ok) return;
+  try {
+    pintarEtiquetado(await api('/admin/chat/etiquetar', { method: 'POST', body: { releer: true } }));
+    seguirEtiquetado();
+  } catch (error) { pintarEtiquetado(null, error.message); }
 }
 
 document.getElementById('etiquetar').onclick = async function () {
@@ -496,16 +1003,15 @@ document.getElementById('etiquetar').onclick = async function () {
   } catch (error) { pintarEtiquetado(null, error.message); }
 };
 document.getElementById('etiquetado').addEventListener('click', async function (event) {
-  if (event.target.closest('[data-cerrar-etiquetado]')) { pintarEtiquetado(null); return; }
-  var boton = event.target.closest('[data-reintentar-envios]');
-  if (!boton) return;
-  boton.disabled = true;
-  try {
-    var r = await api('/admin/chat/etiquetar/reintentar', { method: 'POST', body: {} });
-    if (r.nada) { toast(r.detalle || 'No hay envíos fallidos que reintentar.'); pintarEtiquetado(null); return; }
-    pintarEtiquetado(r);
-    seguirEtiquetado();
-  } catch (error) { pintarEtiquetado(null, error.message); }
+  if (event.target.closest('[data-cerrar-etiquetado]')) { chatsDelLoteAbierto = false; pintarChatsDelLote(); pintarEtiquetado(null); return; }
+  var ver = event.target.closest('[data-ver-chats]');
+  if (ver) {
+    chatsDelLoteAbierto = !chatsDelLoteAbierto;
+    ver.textContent = chatsDelLoteAbierto ? 'Ocultar chats' : 'Ver chats del lote';
+    ver.setAttribute('aria-expanded', chatsDelLoteAbierto ? 'true' : 'false');
+    pintarChatsDelLote();
+    return;
+  }
 });
 
 /* Solo se repinta si de verdad cambio algo: antes se reescribia la lista
@@ -542,7 +1048,6 @@ function menuDeConversacion(boton, contactId, x, y) {
   var ops = [
     { icono: '📌', texto: c.fijadoAt ? 'Quitar de arriba' : 'Fijar arriba', accion: function () { ajustarLista(contactId, { fijado: !c.fijadoAt }); } },
     { icono: c.silenciadoAt ? '🔔' : '🔕', texto: c.silenciadoAt ? 'Volver a avisar' : 'Silenciar', accion: function () { ajustarLista(contactId, { silenciado: !c.silenciadoAt }); } },
-    { icono: '🗂', texto: c.apartadoAt ? 'Devolver a la lista' : 'Apartar de la lista', accion: function () { ajustarLista(contactId, { apartado: !c.apartadoAt }); } },
     { icono: '●', texto: c.unread ? 'Marcar como leído' : 'Marcar como no leído', accion: function () { ajustarLista(contactId, { noLeido: !c.unread }); } },
   ];
   if (c.tipo !== 'grupo') ops.push({ hr: true }, { icono: '⟲', texto: 'Volver a empezar', accion: function () { volverAEmpezar(contactId); } }, { icono: '🗑', texto: 'Eliminar cliente', accion: function () { eliminarUnCliente(c); } });
@@ -629,7 +1134,7 @@ async function openChat(contactId, silent) {
     avatar.classList.toggle('grupo', esGrupo);
     avatar.className = 'avatar ' + (esGrupo ? 'grupo' : colorDe(current.phone));
     document.getElementById('t-name').textContent = nombreDe(current);
-    document.getElementById('t-etiqueta').innerHTML = esGrupo ? '' : chipEtiqueta(data.etiqueta);
+    pintarEtiquetaCabecera(esGrupo ? null : data.etiqueta);
     pintarSubtitulo(data);
 
     renderMessages(mensajesHilo, nuevo);
@@ -719,7 +1224,7 @@ document.getElementById('bajar').onclick = function () {
  * arriba, un refresco no le tira la vista al final.
  */
 function renderMessages(messages, scrollToEnd, mantenerVista) {
-  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive'].indexOf(m.kind) >= 0; });
+  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive', 'image', 'audio', 'video'].indexOf(m.kind) >= 0; });
   messages = messages.filter(function (m) { return !m.expiresAt || Date.parse(m.expiresAt) > Date.now(); });
   pintados = messages;
   clearTimeout(expiryTimer);
@@ -769,11 +1274,12 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       citaHtml(m) +
       anuncioHtml(m) +
       ubicacionHtml(m) +
+      adjuntoHtml(m) +
       resaltar(withLinks(cuerpoVisible(m))) +
       borradoHtml(m) +
       '<span class="meta">' +
         (m.payload && m.payload.editadoAt ? '<span class="editado" title="Se editó después de enviarlo">editado</span>' : '') +
-        (m.direction === 'out' && m.payload && m.payload.origen === 'ia' ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') +
+        (m.direction === 'out' && m.payload && m.payload.origen === 'ia' && !m.payload.textoFijo ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') +
         esc(hhmm(m.createdAt)) + (m.direction === 'out' ? ' ' + tick(m.status) : '') +
       '</span>' +
       reaccionesHtml(m) +
@@ -847,9 +1353,28 @@ function borradoHtml(m) {
  */
 function cuerpoVisible(m) {
   if (m.kind === 'location' && m.payload && m.payload.location) return '';
-  var cuerpo = (m.body || '').trim();
+  /* La nota de voz se escucha: su transcripcion no se enseña (regla del dueño, 28/10). */
+  if (m.kind === 'audio') return '';
+  /* «(se pidio la ubicacion)» es una marca interna del hilo: el cliente ve el texto con el botón de ubicación. */
+  var cuerpo = (m.body || '').replace(/\n\n\(se pidio la ubicacion\)$/, '').trim();
   var relleno = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)'];
-  return relleno.indexOf(cuerpo) === -1 ? (m.body || '') : '';
+  if (relleno.indexOf(cuerpo) !== -1) return '';
+  return m.payload && m.payload.interactive && m.payload.interactive.locationRequest ? cuerpo + '\n\n📍 [Enviar ubicación]' : cuerpo;
+}
+
+/**
+ * La foto, el audio o el video que mando el cliente, para verlo o escucharlo
+ * aqui. El enlace es el mismo que recibe GSG en el historial (firmado). Si el
+ * archivo ya no esta guardado, el navegador lo dice en su sitio.
+ */
+function adjuntoHtml(m) {
+  var a = m.archivo;
+  if (!a || !a.url) return '';
+  var url = esc(a.url);
+  if (m.kind === 'image') return '<a class="adjunto adjunto-foto" href="' + url + '" target="_blank" rel="noopener" title="Abrir la foto"><img src="' + url + '" alt="Foto del cliente" loading="lazy"></a>';
+  if (m.kind === 'audio') return '<div class="adjunto adjunto-audio"><span>🎤 Nota de voz</span><audio controls preload="none" src="' + url + '"></audio></div>';
+  if (m.kind === 'video') return '<div class="adjunto adjunto-video"><video controls preload="metadata" src="' + url + '"></video></div>';
+  return '';
 }
 
 /**
@@ -1059,7 +1584,6 @@ document.getElementById('menu-chat').onclick = function () {
   ops.push({ hr: true });
   ops.push({ icono: '📌', texto: c.fijadoAt ? 'Quitar de arriba' : 'Fijar arriba', accion: function () { ajustarLista(current.id, { fijado: !c.fijadoAt }); } });
   ops.push({ icono: c.silenciadoAt ? '🔔' : '🔕', texto: c.silenciadoAt ? 'Volver a avisar' : 'Silenciar', accion: function () { ajustarLista(current.id, { silenciado: !c.silenciadoAt }); } });
-  ops.push({ icono: '🗂', texto: c.apartadoAt ? 'Devolver a la lista' : 'Apartar de la lista', accion: function () { ajustarLista(current.id, { apartado: !c.apartadoAt }); } });
   ops.push({ hr: true });
   if (!esGrupo) ops.push({ icono: '🗑', texto: 'Eliminar cliente', accion: function () { eliminarUnCliente({ contactId: current.id, name: current.name, phone: current.phone }); } });
   menuDeBoton(this, ops);
@@ -1075,6 +1599,9 @@ document.getElementById('abrir-busqueda').onclick = function () {
 document.getElementById('menu-lista').onclick = function () {
   var ops = [
     { icono: '⭐', texto: 'Todos los mensajes destacados', accion: function () { verDestacados(false); } },
+    { icono: '🏷', texto: 'Catálogo de etiquetas…', accion: editarCatalogo },
+    { icono: '🧪', texto: 'Probar la IA…', accion: probarIA },
+    { icono: '↻', texto: 'Volver a etiquetar todo', accion: releerTodo },
     { hr: true },
     { icono: '🗑', texto: 'Eliminar clientes…', accion: eliminarClientes },
     { hr: true },
@@ -1413,6 +1940,16 @@ window.sondearPanel(revisarConexion, 30000, true);
 
 loadChats().then(abrirDesdeUrl);
 seguirEtiquetado(true);
+cargarConteoEtiquetas();
+/* Los enlaces de Asistente IA y Entrenamiento IA: /chat#probar-ia y /chat#catalogo abren su ventana
+   (al entrar, o si ya se estaba en Chats y solo cambia el #). */
+function abrirSegunHash() {
+  if (location.hash !== '#probar-ia' && location.hash !== '#catalogo') return;
+  if (location.hash === '#probar-ia') probarIA(); else editarCatalogo();
+  history.replaceState(null, '', location.pathname + location.search);
+}
+abrirSegunHash();
+window.addEventListener('hashchange', abrirSegunHash);
 `;
 
   const script =

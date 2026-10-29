@@ -20,6 +20,7 @@ export type CoordSource =
   | 'dms' // 19 grados 25' 57.4" N
   | 'plus_code' // 76F2XCJ8+9M (Open Location Code completo)
   | 'at_viewport' // @lat,lng,17z : centro del viewport, ultimo recurso
+  | 'address_geocoded' // el enlace solo traia una direccion (?q=Av. ... 865): se encontro en el mapa con su numero de puerta
   | 'bare_text'; // "19.4326, -99.1332" suelto en el texto
 
 export type Confidence = 'exact' | 'high' | 'medium' | 'low';
@@ -73,6 +74,12 @@ export interface BoundingBox {
 }
 
 export interface ExtractOptions {
+  /**
+   * El pais donde tiene sentido la coordenada (p. ej. PERU_BBOX). Una
+   * coincidencia fuera se descarta y se prueba la siguiente del mismo patron;
+   * es aparte de `bbox` (la zona que se cubre).
+   */
+  pais?: BoundingBox;
   /** Resolver acortadores (maps.app.goo.gl) haciendo peticion HTTP. Default true. */
   resolveShortLinks?: boolean;
   /** Timeout por salto de redireccion, en ms. Default 5000. */
@@ -83,6 +90,11 @@ export interface ExtractOptions {
   bbox?: BoundingBox;
   /** Inyectable para tests: sustituye a fetch global. */
   fetchImpl?: typeof fetch;
+  /**
+   * Un enlace que solo trae una direccion (un lugar compartido, sin coordenadas):
+   * donde cae esa direccion en el mapa, o null si no se encuentra con seguridad.
+   */
+  porDireccion?: (direccion: string) => Promise<Coordinates | null>;
 }
 
 /** Candidato crudo emitido por un parser, antes de validar. */

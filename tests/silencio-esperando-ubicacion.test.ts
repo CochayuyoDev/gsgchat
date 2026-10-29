@@ -62,6 +62,33 @@ describe('solo la ubicación recibe respuesta mientras se espera el pin', () => 
     } finally { await e.cerrar(); }
   });
 
+  it.each([
+    ['ya no lo quiero, cancelen el pedido por favor', 'cancelar'],
+    ['hoy no puedo, mejor tráiganlo mañana', 'otro día'],
+  ])('«%s»: no se le contesta y ya no le llegan recordatorios (%s)', async (texto) => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: new Date('2026-10-14T15:00:00Z') });
+    try {
+      await e.repos.rutas.ajustes.set({ esperaRespuestaMinutos: 15, maxIntentos: 3 }, ajustesPorDefecto(OPCIONES_POR_DEFECTO));
+      await e.api.post('/api/v1/entregas', pedido);
+      await e.trabajar();
+      expect(e.mensajesA(tel)).toHaveLength(1);
+      await e.contesta(tel, { texto });
+      for (let i = 0; i < 6; i++) {
+        e.avanzar(15);
+        await e.trabajar();
+      }
+      expect(e.mensajesA(tel)).toHaveLength(1);
+      const s = e.repos.rutas._solicitudes[0]!;
+      expect(s.estado).toBe('supervision');
+      expect(s.requiereHumano).toBe(true);
+      expect(s.incidencia).toBe('respondio_sin_ubicacion');
+      expect(e.ia.llamadas).toHaveLength(0);
+      // Si luego manda el pin, se registra como siempre.
+      await e.contesta(tel, { pin: PIN_LIMA });
+      expect((await e.entrega('SILENCIO-1'))?.ubicacionEstado).toBe('recibida');
+    } finally { await e.cerrar(); }
+  });
+
   it.each(['pin', 'mapa'] as const)('sigue registrando y confirmando la ubicación por %s', async (tipo) => {
     const e = await crearEscenarioEntregas({ agente: true });
     try {

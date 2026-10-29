@@ -50,8 +50,9 @@ const msgs = (lineas: Linea[]): Message[] =>
 const reglas = (...lineas: Linea[]) => clasificarConReglas(msgs(lineas));
 
 describe('el catalogo', () => {
-  it('son las 16 etiquetas pedidas, sin entrega_recibida, y otro existe', () => {
-    expect(ETIQUETAS).toHaveLength(16);
+  it('son las 16 etiquetas pedidas mas sin_novedad (el flujo feliz), sin entrega_recibida, y otro existe', () => {
+    expect(ETIQUETAS).toHaveLength(17);
+    expect(ETIQUETAS).toContain('sin_novedad');
     expect(ETIQUETAS).not.toContain('entrega_recibida' as never);
     expect(ETIQUETAS).toContain('otro');
     // Cada una con nombre visible.

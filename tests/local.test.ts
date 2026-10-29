@@ -199,11 +199,14 @@ describe('conectar sin importar el WhatsApp personal', () => {
     fake.emitir('messaging-history.set', { messages: Array.from({length: 3000}, (_,i) => mensaje('51987603222', 'h'+i)), syncType: 3, progress: 100 });
     fake.emitir('messages.upsert', { type: 'notify', messages: ['audioMessage', 'videoMessage', 'stickerMessage', 'imageMessage', 'documentMessage'].map((type,i) => ({ ...mensaje('51987603111', 'archivo'+i), message: { [type]: { url: 'https://archivo.invalid', mimetype: 'audio/ogg' } } })) });
     fake.emitir('messages.upsert', { type: 'notify', messages: [mensaje('51987603222', 'personal'), mensaje('51987603222', 'propio', true), mensaje('51987603111', 'cliente')] });
-    await vi.waitFor(() => expect(onChange).toHaveBeenCalledOnce());
-    expect(onChange.mock.calls[0]?.[0].messages[0].from).toBe('51987603111');
+    // Fotos, audios y videos se reciben (regla del dueño, 28/10); stickers y documentos no.
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(4));
+    const tipos = onChange.mock.calls.map((c) => c[0].messages[0].type);
+    expect(tipos.sort()).toEqual(['audio', 'image', 'text', 'video']);
+    expect(onChange.mock.calls.every((c) => c[0].messages[0].from === '51987603111')).toBe(true);
     expect(onPropio).not.toHaveBeenCalled();
     expect(onSincronizacionInicial).not.toHaveBeenCalled();
-    expect(aceptarEntrante).toHaveBeenCalledTimes(2);
+    expect(aceptarEntrante).toHaveBeenCalledTimes(5);
     resetLocalForTests();
   });
 });

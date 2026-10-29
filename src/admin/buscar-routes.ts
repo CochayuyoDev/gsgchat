@@ -138,7 +138,8 @@ function motivoEnPalabras(errorTitle: string | null): string {
 function quienLoMando(m: Message): string {
   const origen = String(m.payload?.origen ?? '');
   const autor = m.payload?.autorNombre ? String(m.payload.autorNombre) : '';
-  if (origen === 'ia') return 'Lo escribió el asistente IA.';
+  if (origen === 'ia' && !m.payload?.textoFijo) return 'Lo escribió el asistente IA.';
+  if (origen === 'ia') return 'Lo mandó el sistema solo (un texto fijo del negocio).';
   if (origen === 'persona') return autor ? `Lo mandó ${autor} desde el chat.` : 'Lo mandó una persona desde el chat.';
   if (origen === 'sistema') return 'Lo mandó el sistema solo (reparto, entregas, un aviso o una regla).';
   return 'No quedó apuntado quién lo mandó.';

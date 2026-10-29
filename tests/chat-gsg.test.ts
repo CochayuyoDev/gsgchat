@@ -51,6 +51,22 @@ describe('GET /api/v1/historial?tracking=… (el historial)', () => {
     expect(cuerpo.mensajes.some((m: any) => m.texto === 'Hola, ya estoy en casa' && m.direccion === 'entrante')).toBe(true);
   });
 
+  it('trae la nota automatica del chat (la etiqueta de la IA): null sin etiqueta, y la ultima cuando la hay', async () => {
+    expect((await consultar({ tracking: 'CHAT-2' })).json().nota).toBeNull();
+    const repo = e.repos.chatEtiquetas!;
+    await repo.guardar({ phone: '51987654322', dia: '2026-10-27', etiqueta: 'consultar_entrega', origen: 'ia', huella: 'h1', mensajes: 2, motivo: null, loteId: null });
+    await repo.guardar({ phone: '51987654322', dia: '2026-10-28', etiqueta: 'reagendar_entrega', origen: 'ia', huella: 'h2', mensajes: 3, motivo: null, loteId: null });
+    const nota = (await consultar({ tracking: 'CHAT-2' })).json().nota;
+    expect(nota).toMatchObject({ codigo: 'reagendar_entrega', nombre: 'Reagendar entrega', dia: '2026-10-28', origen: 'ia', descripcion: expect.stringMatching(/otro día/) });
+    expect(typeof nota.actualizadaEn).toBe('string');
+    // Lo mismo por el alias del diagrama de integracion.
+    const alias = await e.app.inject({ method: 'GET', url: '/api/v1/messages?chat_id=CHAT-2', headers: { 'x-api-key': clave } });
+    expect(alias.json().nota).toMatchObject({ codigo: 'reagendar_entrega' });
+    // Un chat que la IA no pudo clasificar no tiene nota; y la de un cliente no sale en el de otro.
+    await repo.guardar({ phone: '51987654321', dia: '2026-10-28', etiqueta: null, origen: 'ia', huella: 'h3', mensajes: 1, motivo: 'la IA no respondió', loteId: null });
+    expect((await consultar({ tracking: 'Chat-1' })).json().nota).toBeNull();
+  });
+
   it('cada tracking abre solo su chat', async () => {
     const r = await consultar({ tracking: 'CHAT-2' });
     expect(r.statusCode).toBe(200);

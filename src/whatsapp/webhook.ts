@@ -167,7 +167,7 @@ export async function processChange(
           if (seen.get(message.id)) continue;
           seen.set(message.id, true);
         }
-        await handleInboundMessage({ ...message, provider: message.provider ?? 'meta' }, profileName, deps);
+        await handleInboundMessage(conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' }), profileName, deps);
       }
       return;
     }
@@ -347,4 +347,25 @@ export async function processChange(
     default:
       return;
   }
+}
+
+/**
+ * La API de Meta trae el adjunto como `image: { id, mime_type, caption }` (o
+ * `audio`, `video`): solo el id, el fichero se baja aparte cuando alguien lo
+ * abre (ver src/api/v1/archivos-gsg.ts). Aqui se pasa a `media`, la forma
+ * comun con la que se guarda en el chat.
+ */
+export function conMediaDeMeta<T extends { type?: string; media?: unknown }>(message: T): T {
+  if (message.media || !message.type || !['image', 'audio', 'video'].includes(message.type)) return message;
+  const crudo = (message as Record<string, unknown>)[message.type] as { id?: unknown; mime_type?: unknown; caption?: unknown; voice?: unknown } | undefined;
+  if (!crudo || typeof crudo.id !== 'string') return message;
+  return {
+    ...message,
+    media: {
+      id: crudo.id,
+      mimeType: typeof crudo.mime_type === 'string' ? crudo.mime_type : 'application/octet-stream',
+      ...(typeof crudo.caption === 'string' && crudo.caption ? { caption: crudo.caption } : {}),
+      ...(crudo.voice === true ? { voice: true } : {}),
+    },
+  };
 }

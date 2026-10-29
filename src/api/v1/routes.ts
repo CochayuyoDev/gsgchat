@@ -420,7 +420,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           ? null
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
       mensajes: messages.map((m) => {
-        const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; media?: { voz?: unknown } };
+        const p = (m.payload ?? {}) as { origen?: unknown; textoFijo?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; media?: { voz?: unknown } };
         return {
           id: m.id,
           mensajeId: m.wamid,
@@ -428,7 +428,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           tipo: m.kind,
           texto: m.body,
           // Quien lo mando (solo salientes): persona | ia | sistema. Y lo que dijo en una nota de voz (solo entrantes transcritos).
-          autor: m.direction === 'out' ? (p.origen === 'persona' || p.origen === 'ia' ? p.origen : 'sistema') : null,
+          autor: m.direction === 'out' ? (p.origen === 'persona' || (p.origen === 'ia' && !p.textoFijo) ? p.origen : 'sistema') : null,
           autorNombre: m.direction === 'out' && typeof p.autorNombre === 'string' ? p.autorNombre : null,
           transcripcion: typeof p.transcripcion === 'string' ? p.transcripcion : null,
           anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,

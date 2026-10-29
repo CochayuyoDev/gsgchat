@@ -94,6 +94,16 @@ export interface SendJob {
   confirmacionUbicacion?: boolean;
   /** Respuesta a lo que el cliente contesto con el bot callado (ubicacion pedida, boton de entrega): sale igual. */
   traspasaPausa?: boolean;
+  /**
+   * La respuesta del bot a «cambiar ubicación» (regla del dueño, 28/10: el
+   * cambio lo atiende el bot): sale también con el bot callado de «Solo lo de GSG».
+   */
+  cambioUbicacion?: boolean;
+  /**
+   * La respuesta del bot a un enlace de mapa del que no sale una ubicación segura
+   * (se le pide el pin): sale también con el bot callado, como la de cambiar ubicación.
+   */
+  respuestaUbicacion?: boolean;
   /** Huella de coordenadas normalizadas para distinguir una corrección del mismo pedido. */
   confirmationScope?: string;
   /**
@@ -148,6 +158,8 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
     ...(payload ?? {}),
     origen,
     ...(job.confirmacionUbicacion ? { confirmacionUbicacion: true } : {}),
+    // Un texto fijo del negocio que manda el asistente: en el chat y para GSG es del sistema, no de la IA.
+    ...(job.textoFijo ? { textoFijo: true } : {}),
     ...(nombre ? { autorNombre: nombre } : {}),
     ...(job.emisor ? { emisor: job.emisor } : {}),
     // La cita se guarda con lo justo para pintarla: de quien era y que decia.

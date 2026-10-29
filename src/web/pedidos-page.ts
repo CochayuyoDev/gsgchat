@@ -78,7 +78,10 @@ function pintarContadores() {
 function envioGsg(e) {
   if (e.lat == null || e.lng == null) return '';
   var r = envios[(e.datosEnvio && e.datosEnvio.tracking) || e.referencia];
-  var linea = !r ? '<span class="chip">Sin enviar a GSG</span> <span class="muted">Tiene ubicación pero no salió hacia GSG: usa «Enviar a GSG».</span>'
+  /* Un cliente de prueba (51 000 0…) nunca se manda a la API real de GSG: no es un fallo. */
+  var dePrueba = r && r.estado === 'fallido' && /^Reporte de prueba/.test(r.error || '');
+  var linea = dePrueba ? '<span class="chip">Prueba: no se manda a GSG</span> <span class="muted">Es un cliente de prueba: lo suyo solo va al simulador de GSG, nunca a la API real.</span>'
+    : !r ? '<span class="chip">Sin enviar a GSG</span> <span class="muted">Tiene ubicación pero no salió hacia GSG: usa «Enviar a GSG».</span>'
     : r.estado === 'enviado' ? '<span class="chip">Enviado a GSG</span> <span class="muted">'+esc(new Date(r.enviadoEn||r.en).toLocaleString('es-PE'))+'</span>'
     : '<span class="chip">'+(r.estado === 'fallido' ? 'Falló el envío a GSG' : 'Pendiente de enviar a GSG')+'</span>'+(r.error?' <span class="muted">Error: '+esc(r.error)+'</span>':'');
   return '<p id="gsg-'+e.id+'">'+linea+'</p>';
@@ -92,10 +95,19 @@ function historialUbicacion(e) {
     (!recibida && e.solicitud.esperaEnvio ? '<p class="muted">' + esc(e.solicitud.esperaEnvio.motivo) +
       (e.solicitud.esperaEnvio.hasta ? ' · ' + esc(new Date(e.solicitud.esperaEnvio.hasta).toLocaleTimeString()) : '') + '</p>' : '');
 }
+/* Todas las ubicaciones que tuvo el pedido (la primera y cada cambio), con su hora y su mapa; la vigente marcada. */
+function ubicacionesGuardadas(lista) {
+  if (!lista || !lista.length) return '';
+  return '<div class="ubis"><b>' + (lista.length === 1 ? 'Ubicación guardada' : 'Ubicaciones guardadas (' + lista.length + ')') + '</b><ol>' + lista.map(function (u) {
+    var hora = new Date(u.en).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    var que = u.n === 1 ? 'Primera ubicación' : 'Cambio ' + (u.n - 1);
+    return '<li class="' + (u.vigente ? 'vigente' : '') + '"><span>' + esc(que) + ' · ' + esc(hora) + '</span> <a href="' + esc(u.mapa) + '" target="_blank" rel="noopener">ver en el mapa</a>' + (u.vigente ? ' <span class="chip chip-cambio">la que vale</span>' : '') + '</li>';
+  }).join('') + '</ol></div>';
+}
 function marcaCambio(e) {
   if (!e.ubicacionCambiadaAt) return '';
   var texto = e.cambioUbicacion || 'cambió su ubicación';
-  return '<span class="chip chip-cambio" title="El cliente pidió cambiar su ubicación y mandó otra">'+esc(texto.charAt(0).toUpperCase()+texto.slice(1))+'</span>';
+  return '<span class="chip chip-cambio" title="El cliente dijo «cambiar ubicación» y mandó otra. Abre «Detalle» para ver todas sus ubicaciones">'+esc(texto.charAt(0).toUpperCase()+texto.slice(1))+'</span>';
 }
 /* El mismo tracking ya vino otro dia: es una reprogramacion. Lo de ese dia es solo un dato: el cliente vuelve a mandar o confirmar la ubicacion. */
 function marcaReprogramado(e) {
@@ -117,9 +129,9 @@ function pintar() {
       '<div class="p-acciones">'+(k==='falta_escribir'?'<button class="btn sm" disabled title="Todavía no se le ha escrito: el chat se abre cuando salga el primer mensaje">Chat</button>':'<a class="btn sm" href="/chat?phone='+encodeURIComponent(e.phone)+'">Chat</a>')+(mapa?'<a class="btn sm" href="'+esc(mapa)+'" target="_blank" rel="noopener">Ver ubicación</a>':'')+'<button class="btn sm" data-detalle="'+e.id+'">Detalle</button>'+(e.lat!=null&&e.lng!=null?'<button class="btn sm" data-gsg="'+e.id+'">Enviar a GSG</button>':'')+(k==='por_confirmar_envio'?'<button class="btn sm primario" data-enviar="'+e.id+'">Confirmar y enviar</button>':'')+(k==='falta_confirmar'?'<button class="btn sm" data-confirmar="'+e.id+'">Confirmar</button>':'')+((e.acciones||[]).indexOf('volver_a_pedir_ubicacion')>=0?'<button class="btn sm" data-repedir="'+e.id+'" title="Volver a solicitar la ubicación">Pedir de nuevo</button>':'')+(e.estado!=='cancelada'&&e.estado!=='entregada'?'<button class="btn sm peligro p-peligro" data-cancelar="'+e.id+'">Cancelar</button>':'')+'</div>'+
       '<div id="detalle-'+e.id+'" class="detalle"></div></article>';
   }).join(''):'<div class="vacio"><h3>No hay pedidos en este filtro</h3><p>Prueba con otro estado o borra la búsqueda.</p></div>';$('lista-pedidos').removeAttribute('aria-busy');
-  document.querySelectorAll('[data-gsg]').forEach(function(b){b.onclick=async function(){b.disabled=true;var caja=$('gsg-'+b.dataset.gsg);try{var r=await api('/admin/entregas/'+b.dataset.gsg+'/enviar-gsg',{method:'POST',body:{}});var txt=r.ok?'Enviado a GSG: '+JSON.stringify(r.cuerpo):'No se pudo enviar a GSG. Error: '+(r.error||'desconocido');if(caja)caja.textContent=txt;toast(txt);}catch(e){toast('No se pudo enviar a GSG. Error: '+e.message);}finally{b.disabled=false;}};});
+  document.querySelectorAll('button[data-gsg]').forEach(function(b){b.onclick=async function(){b.disabled=true;var caja=$('gsg-'+b.dataset.gsg);try{var r=await api('/admin/entregas/'+b.dataset.gsg+'/enviar-gsg',{method:'POST',body:{}});var txt=r.ok?'Enviado a GSG: '+JSON.stringify(r.cuerpo):'No se pudo enviar a GSG. Error: '+(r.error||'desconocido');if(caja)caja.textContent=txt;toast(txt);}catch(e){toast('No se pudo enviar a GSG. Error: '+e.message);}finally{b.disabled=false;}};});
   document.querySelectorAll('[data-enviar]').forEach(function(b){b.onclick=function(){confirmarEnvio(b,{ids:[Number(b.dataset.enviar)]});};});
-  document.querySelectorAll('[data-detalle]').forEach(function(b){b.onclick=async function(){try { var d=await api('/admin/entregas/'+b.dataset.detalle); var caja=$('detalle-'+b.dataset.detalle); caja.classList.add('abierto'); caja.innerHTML='<ol>'+((d.eventos||[]).map(function(ev){return '<li>'+esc(ev.detalle)+'</li>';}).join('')||'<li>Sin actividad adicional.</li>')+'</ol>'; } catch(e){toast(e.message, e);} };});
+  document.querySelectorAll('[data-detalle]').forEach(function(b){b.onclick=async function(){try { var d=await api('/admin/entregas/'+b.dataset.detalle); var caja=$('detalle-'+b.dataset.detalle); caja.classList.add('abierto'); caja.innerHTML=ubicacionesGuardadas(d.ubicaciones)+'<ol>'+((d.eventos||[]).map(function(ev){return '<li>'+esc(ev.detalle)+'</li>';}).join('')||'<li>Sin actividad adicional.</li>')+'</ol>'; } catch(e){toast(e.message, e);} };});
   document.querySelectorAll('[data-confirmar]').forEach(function(b){b.onclick=function(){accionIndividual(b.dataset.confirmar,'confirmar',{confirmada:true});};});
   document.querySelectorAll('[data-repedir]').forEach(function(b){b.onclick=async function(){b.disabled=true;try{var r=await api('/admin/entregas/'+b.dataset.repedir+'/volver-a-pedir-ubicacion',{method:'POST',body:{}});toast(r.detalle||'Se le vuelve a pedir la ubicación.');await cargar();}catch(e){toast(e.message, e);b.disabled=false;}};});
   document.querySelectorAll('[data-cancelar]').forEach(function(b){b.onclick=async function(){var motivo=await pedirDato({titulo:'Cancelar pedido',etiqueta:'Motivo',boton:'Cancelar pedido'}); if(motivo)accionIndividual(b.dataset.cancelar,'cancelar',{motivo:motivo});};});
@@ -205,7 +217,7 @@ ${PESTANAS_PEDIDOS_CSS}
 .p-acciones .btn.sm{box-shadow:none}
 @media (min-width:961px) and (pointer:fine){.p-acciones .btn.sm{min-height:32px;padding:5px 11px}}
 .p-acciones .p-peligro{margin-left:6px}
-.detalle{grid-column:1/-1}.detalle.abierto{margin-top:6px;padding:10px 14px;background:var(--superficie-2);border-radius:var(--radio-sm);font-size:13px;padding-left:18px;display:grid;gap:4px}
+.detalle{grid-column:1/-1}.detalle.abierto{margin-top:6px;padding:10px 14px;background:var(--superficie-2);border-radius:var(--radio-sm);font-size:13px;padding-left:18px;display:grid;gap:4px}.detalle .ubis{padding-bottom:8px;border-bottom:1px solid var(--borde);margin-bottom:4px}.detalle .ubis ol{margin:4px 0 0;padding-left:18px;display:grid;gap:3px}.detalle .ubis li.vigente span{font-weight:600}
 @media (max-width:680px){.pp-contadores{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -14px;padding:0 14px}.pp-contadores::-webkit-scrollbar{display:none}.pp-contador{flex:none}}
 @media (max-width:900px){.pedido{grid-template-columns:1fr;gap:8px}.p-acciones{justify-content:flex-start}.p-acciones .p-peligro{margin-left:auto}.pp-sep{display:none}}
 ` });

@@ -70,8 +70,6 @@ const conexionSchema = z.object({
   rutaEstado: z.string().trim().max(300).default(''),
   /** La ruta, relativa a la base, del POST de cada incidencia ('' = la de siempre, /incidencias). */
   rutaIncidencias: z.string().trim().max(300).default(''),
-  /** La ruta, relativa a la base, del POST con la etiqueta de cada chat ('' = no se mandan). */
-  rutaEtiquetas: z.string().trim().max(300).default(''),
   /** La ruta, relativa a la base, del webhook de GSG ('' = sin webhook). */
   rutaWebhook: z.string().trim().max(300).default(''),
   /** Los nombres de los parametros de ese GET (los da GSG). */
@@ -104,9 +102,6 @@ export interface EstadoConexionGsg {
   /** La ruta de las incidencias ('' = la de siempre) y a donde salen de verdad. */
   rutaIncidencias: string;
   destinoIncidencias: string | null;
-  /** La ruta de las etiquetas de los chats ('' = no se mandan) y a donde salen de verdad. */
-  rutaEtiquetas: string;
-  destinoEtiquetas: string | null;
   /** La ruta del webhook de GSG ('' = sin webhook) y su URL completa (base + ruta), o null. */
   rutaWebhook: string;
   destinoWebhook: string | null;
@@ -140,7 +135,7 @@ export interface ServicioConexionGsg {
    * había; sin ruta conserva la guardada (o `sendLocation`). `urlUbicacion`
    * (la URL completa antigua) se acepta solo si se convierte sin adivinar.
    */
-  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaEstado?: string | null; paramTracking?: string | null; paramTelefono?: string | null; rutaIncidencias?: string | null; rutaEtiquetas?: string | null; rutaWebhook?: string | null }): Promise<EstadoConexionGsg>;
+  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaEstado?: string | null; paramTracking?: string | null; paramTelefono?: string | null; rutaIncidencias?: string | null; rutaWebhook?: string | null }): Promise<EstadoConexionGsg>;
   /** Apunta al simulador de este servidor. */
   usarSimulador(): Promise<EstadoConexionGsg>;
   /** Quita la conexión de la pantalla; si el `.env` tenía una, vuelve a mandar esa. */
@@ -236,7 +231,7 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       vigente = null;
       return enEspera;
     }
-    const consulta = e.origen === 'pantalla' ? { rutaEstado: guardada.rutaEstado, paramTracking: guardada.paramTracking, paramTelefono: guardada.paramTelefono, rutaIncidencias: guardada.rutaIncidencias || undefined, rutaEtiquetas: guardada.rutaEtiquetas || undefined } : {};
+    const consulta = e.origen === 'pantalla' ? { rutaEstado: guardada.rutaEstado, paramTracking: guardada.paramTracking, paramTelefono: guardada.paramTelefono, rutaIncidencias: guardada.rutaIncidencias || undefined } : {};
     const firma = JSON.stringify([e.url, e.rutaUbicacion, e.ubicacionUrl, e.token, consulta]);
     if (!vigente || vigente.firma !== firma) {
       vigente = { firma, puerto: crearPuertoHttp({ url: e.url, token: e.token, rutaUbicacion: e.rutaUbicacion || undefined, ubicacionUrl: e.ubicacionUrl || undefined, fetchImpl: deps.fetchImpl, idempotenciaUbicacion: deps.config.GSG_IDEMPOTENCY_SUPPORTED === 'true', ...consulta }) };
@@ -310,9 +305,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     firma: () => actual().firma?.() ?? actual().descripcion(),
     urlEstado: () => actual().urlEstado?.() ?? null,
     urlIncidencias: () => actual().urlIncidencias?.() ?? null,
-    urlEtiquetas: () => actual().urlEtiquetas?.() ?? null,
-    enviarEtiqueta: (etiqueta): Promise<ResultadoEnvio> =>
-      actual().enviarEtiqueta?.(etiqueta) ?? Promise.resolve({ ok: false, error: 'GSG no está conectado: las etiquetas se guardan y salen al conectarlo.', reintentable: true, configuracion: true }),
     consultarEstado: (c) => actual().consultarEstado?.(c) ?? Promise.resolve({ decision: 'desconocido', motivo: 'GSG no está conectado: no se consulta el estado.', configurada: false }),
   };
 
@@ -336,8 +328,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       destinoEstado: proxy.urlEstado?.() ?? null,
       rutaIncidencias: e.origen === 'pantalla' ? guardada.rutaIncidencias : '',
       destinoIncidencias: proxy.urlIncidencias?.() ?? null,
-      rutaEtiquetas: e.origen === 'pantalla' ? guardada.rutaEtiquetas : '',
-      destinoEtiquetas: proxy.urlEtiquetas?.() ?? null,
       rutaWebhook: e.origen === 'pantalla' ? guardada.rutaWebhook : '',
       destinoWebhook: destinoWebhook(e.origen === 'pantalla' ? e.url : '', guardada.rutaWebhook),
       tieneToken: Boolean(e.token),
@@ -454,11 +444,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
         const u = unirUrlGsg(urlBase, rutaIncidencias);
         if (!u.ok) throw new Error(`La ruta de las incidencias no vale: ${u.error}`);
       }
-      const rutaEtiquetas = input.rutaEtiquetas !== undefined && input.rutaEtiquetas !== null ? input.rutaEtiquetas.trim().replace(/^\/+/, '') : antes.rutaEtiquetas;
-      if (rutaEtiquetas) {
-        const u = unirUrlGsg(urlBase, rutaEtiquetas);
-        if (!u.ok) throw new Error(`La ruta de las etiquetas no vale: ${u.error}`);
-      }
       const rutaWebhook = input.rutaWebhook !== undefined && input.rutaWebhook !== null ? input.rutaWebhook.trim().replace(/^\/+/, '') : antes.rutaWebhook;
       if (rutaWebhook) {
         const u = unirUrlGsg(urlBase, rutaWebhook);
@@ -468,7 +453,6 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
         modo: 'real', url: urlBase, rutaUbicacion: ruta, urlUbicacion: '', conectadoEn: new Date().toISOString(),
         rutaEstado,
         rutaIncidencias,
-        rutaEtiquetas,
         rutaWebhook,
         paramTracking: param(input.paramTracking, antes.paramTracking, 'trackingCode'),
         paramTelefono: param(input.paramTelefono, antes.paramTelefono, 'phone'),

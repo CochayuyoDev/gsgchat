@@ -244,12 +244,17 @@ async function corregirUbicacion(
         : [];
       const trackings = [...new Set(ligadas.map((e) => e.datosEnvio?.tracking ?? e.referencia).filter(Boolean))];
       if (!trackings.length && resuelta.referencia) trackings.push(resuelta.referencia);
-      const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se cambió, se queda la registrada`;
-      for (const tracking of trackings) {
-        await encolarProblemaGsg(deps.repos.rutas, { tracking, referencia: resuelta.referencia, codigo: 'cambio_ubicacion', telefono: resuelta.phone, titulo: 'El cliente pidió cambiar su ubicación', detalle }, { solicitudId: resuelta.id, loteId: lote.id, en: momento }).catch(() => false);
+      // Con pedidos del día, el cambio lo atienden las entregas (regla del dueño,
+      // 28/10: hasta 2 cambios antes de la hora límite) y ellas reportan a GSG
+      // lo que no se pudo cambiar. Sin pedidos del día, como siempre: se reporta aquí.
+      if (!ligadas.length) {
+        const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se cambió, se queda la registrada`;
+        for (const tracking of trackings) {
+          await encolarProblemaGsg(deps.repos.rutas, { tracking, referencia: resuelta.referencia, codigo: 'cambio_ubicacion', telefono: resuelta.phone, titulo: 'El cliente pidió cambiar su ubicación', detalle }, { solicitudId: resuelta.id, loteId: lote.id, en: momento }).catch(() => false);
+        }
       }
     }
-    await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `mandó otra ubicación (${ubicacion.fuente ?? 'whatsapp'}): no se cambia, se le reporta a GSG como cambio de ubicación`).catch(() => undefined);
+    await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `mandó otra ubicación (${ubicacion.fuente ?? 'whatsapp'}): la atienden las entregas del día (cambio de ubicación)`).catch(() => undefined);
     return { atendida: true, resultado: 'cambio_reportado', solicitud: resuelta, ubicacionNueva: { lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl: ubicacion.mapsUrl ?? null, fuente: ubicacion.fuente ?? 'whatsapp' } };
   }
 }

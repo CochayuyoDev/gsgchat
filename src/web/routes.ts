@@ -64,6 +64,7 @@ import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { entregasPage } from './entregas-page.js';
+import { embudoPage } from './embudo-page.js';
 
 import { fiabilidadPage } from './fiabilidad-page.js';
 import { fijarModoVigente } from './shell.js';
@@ -291,6 +292,12 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   });
 
   app.get('/envio-automatico', async (_request, reply) => reply.redirect('/automatizacion-gsg'));
+
+  // Pedidos GSG → Embudo de chats: los chats del dia por etiqueta (IA y a mano).
+  app.get('/embudo-chats', async (_request, reply) => {
+    const page = html(embudoPage({ demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
 
   // Hoy es la portada de GSGchat; /entregas es el mismo sitio con su nombre viejo.
   for (const ruta of ['/hoy', '/entregas']) {

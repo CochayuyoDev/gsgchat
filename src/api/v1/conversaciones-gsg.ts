@@ -2,7 +2,8 @@
  * Los chats de GSG: lo que usa el motorizado desde la web de GSG.
  *
  *  GET  /api/v1/historial?tracking=…  el historial de mensajes del WhatsApp de ese tracking (conversaciones:leer).
- *                                 GSG lo pide al abrir un chat y GSGchat responde en esa misma llamada.
+ *                                 GSG lo pide al abrir un chat y GSGchat responde en esa misma llamada, con
+ *                                 la nota automatica del chat (`nota`: la etiqueta que le puso la IA).
  *  POST /api/v1/chat              un usuario de GSG escribe: GSGchat lo manda por WhatsApp al numero de ese
  *                                 tracking, lo apunta con quien lo escribio y calla al bot (mensajes:enviar).
  *
@@ -18,11 +19,20 @@ import { z } from 'zod';
 import type { Repos } from '../../db/repos.js';
 import type { Sender } from '../../outbound/sender.js';
 import { respuestaDeEnvio } from './routes.js';
+import { archivoDeMensaje } from './archivos-gsg.js';
 import { trackingDeEntrega } from '../../entregas/repo.js';
+import { nombreDeEtiqueta } from '../../archive/clasificar.js';
+import { catalogoVigente, numeroNormalizado } from '../../chat/etiquetar.js';
 
 export interface ApiConversacionesGsgDeps {
   repos: Repos;
   sender: Sender;
+  /**
+   * Para los enlaces de los archivos del chat (`archivo.url`): la direccion
+   * publica de la tienda y la clave que los firma. Sin ellos el historial sale
+   * sin enlaces. Ver src/api/v1/archivos-gsg.ts.
+   */
+  archivos?: { publicBase: string; secreto: string };
 }
 
 /** Un token del chat embebido solo abre la conversacion para la que se emitio. */
@@ -70,24 +80,62 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
   const trackingDe = trackingDeEntrega;
 
   const mensajeDeChat = (m: Awaited<ReturnType<Repos['messages']['listMessages']>>[number]) => {
-    const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; emisor?: unknown; media?: { voz?: unknown } };
+    const p = (m.payload ?? {}) as { origen?: unknown; textoFijo?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; emisor?: unknown; media?: { voz?: unknown; transcripcion?: unknown } };
+    // GSG no recibe la transcripción de los audios (regla del dueño, 28/10): el
+    // audio se escucha con `archivo.url`. Un audio transcrito se guarda con lo que
+    // dijo como cuerpo; aquí sale como «(audio)» y sin la transcripción en `datos`.
+    const audio = m.kind === 'audio';
+    let datos = m.payload;
+    if (audio && datos) {
+      const { transcripcion: _t, ...resto } = datos as Record<string, unknown>;
+      const media = resto.media && typeof resto.media === 'object' ? (({ transcripcion: _mt, ...r }) => r)(resto.media as Record<string, unknown>) : resto.media;
+      datos = { ...resto, ...(media !== undefined ? { media } : {}) };
+    }
     return {
       id: m.wamid,
       cursor: m.id,
       direccion: m.direction === 'in' ? 'entrante' : 'saliente',
       tipo: m.kind,
-      texto: m.body,
-      transcripcion: typeof p.transcripcion === 'string' ? p.transcripcion : null,
+      texto: audio && typeof p.transcripcion === 'string' ? '(audio)' : m.body,
       anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,
-      datos: m.payload,
+      datos,
       fecha: m.createdAt,
       // Quien lo mando (solo salientes): persona | ia | sistema. Si lo escribio un usuario de GSG, `emisor` dice cual.
-      autor: m.direction === 'out' ? (p.origen === 'persona' || p.origen === 'ia' ? p.origen : 'sistema') : null,
+      autor: m.direction === 'out' ? (p.origen === 'persona' || (p.origen === 'ia' && !p.textoFijo) ? p.origen : 'sistema') : null,
       autorNombre: m.direction === 'out' && typeof p.autorNombre === 'string' ? p.autorNombre : null,
       emisor: m.direction === 'out' && p.emisor && typeof p.emisor === 'object' ? p.emisor : null,
       voz: p.media?.voz === true,
+      // La foto, el video, el audio o el documento: un enlace firmado que abre el fichero tal cual.
+      archivo: deps.archivos ? archivoDeMensaje(m, deps.archivos) : null,
       estado: m.status,
     };
+  };
+
+  /**
+   * La nota automatica del chat: la ultima etiqueta que le puso la IA (o una
+   * persona a mano) a ese WhatsApp, con su nombre del catalogo del negocio.
+   * Viaja en el historial que GSG ya pide al abrir el chat: GSG no necesita
+   * otro endpoint. null si el chat aun no tiene etiqueta.
+   */
+  const notaDe = async (phone: string) => {
+    const repo = repos.chatEtiquetas;
+    if (!repo) return null;
+    try {
+      const e = (await repo.ultimas([numeroNormalizado(phone)])).get(numeroNormalizado(phone));
+      if (!e?.etiqueta) return null;
+      const catalogo = await catalogoVigente(repo);
+      return {
+        codigo: e.etiqueta,
+        nombre: nombreDeEtiqueta(e.etiqueta, catalogo),
+        descripcion: catalogo.find((x) => x.codigo === e.etiqueta)?.descripcion ?? null,
+        dia: e.dia,
+        origen: e.origen,
+        actualizadaEn: e.updatedAt,
+      };
+    } catch {
+      // La nota es un extra: si falla, el historial sale igual.
+      return null;
+    }
   };
 
   // --- GET: el historial -----------------------------------------------------
@@ -107,6 +155,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     return {
       tracking,
       contacto: { id: contact.id, telefono: contact.phone, nombre: contact.name },
+      nota: await notaDe(contact.phone),
       mensajes: messages.map(mensajeDeChat),
       hayMas: messages.length === q.limite,
     };

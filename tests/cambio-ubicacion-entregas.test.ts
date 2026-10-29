@@ -29,9 +29,12 @@ function hoyALas9(): Date {
 }
 
 /** «Claro, {nombre}, por favor mándeme su nueva ubicación…» (pedido del dueño, 10/10). */
-const pideLaNueva = (nombre: string): string => `Claro, ${nombre}, por favor mándeme su nueva ubicación por WhatsApp (el botón de ubicación) para registrarla.`;
+// Desde el 28/10 el texto es fijo, sin nombre: «Por favor, comparta su nueva ubicación 📍».
+const pideLaNueva = (_nombre: string): string => 'Por favor, comparta su nueva ubicación 📍';
 const PIDE_LA_NUEVA = pideLaNueva('Ana');
-const AVISO_1PM = /Si por algún motivo deseas cambiar tu ubicación, avísanos antes de la 1:00 PM para tenerla en cuenta el mismo día\./;
+// Desde el 28/10: cómo cambiarla, con la hora límite.
+// La hora límite sigue mandando, pero el texto ya no la dice (pedido del dueño, 29/10).
+const AVISO_1PM = /Si desea cambiar su ubicación, solo diga: \*cambiar ubicación\*\.$/m;
 const MOTO = '999888777';
 
 // ------------------------------------------------------------------ reglas
@@ -183,6 +186,7 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     const gracias = r.find((t) => t.includes('Ubicación registrada correctamente'));
     expect(gracias, r.join('\n---\n')).toBeTruthy();
     expect(gracias).toMatch(AVISO_1PM);
+    expect(gracias).not.toMatch(/\(hasta la /);
   });
 
   it('2. «me equivoqué de ubicación» → que mande la nueva; nada de «No reconocí» ni menú', async () => {
@@ -192,15 +196,15 @@ describe('la conversación de Ana Quispe con «Todo el sistema» (tienda nueva d
     expect(e.botonesA(ANA).length).toBe(antes);
   });
 
-  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
-  it.skip('3. el pin nuevo → «Tu nueva ubicación se ha registrado»', async () => {
+  // De vuelta (regla del dueño, 28/10): tras «cambiar ubicación», el pin nuevo es su cambio (hasta 2 al día).
+  it('3. el pin nuevo → «Su nueva ubicación se registró», y cómo volver a cambiarla', async () => {
     const r = await nuevos(ANA, () => e.contesta(ANA, { pin: { lat: -12.079, lng: -77.088 } }));
-    expect(r.some((t) => /Tu nueva ubicación se ha registrado correctamente/.test(t)), r.join('\n---\n')).toBe(true);
+    expect(r.some((t) => /Su nueva ubicación se registró correctamente/.test(t) && /Le queda 1 cambio más/.test(t)), r.join('\n---\n')).toBe(true);
     expect((await e.entrega('GSG-A-1001'))?.lat).toBeCloseTo(-12.079, 5);
   });
 
-  // Retirada (regla del dueño, 16/10): sin pregunta SÍ/NO, cada pedido pide su ubicación, se acepta cualquier ubicación y otro pin no la cambia (se reporta a GSG). Ver tests/bot-callado-gsg.test.ts.
-  it.skip('4. las variantes (sin tildes, con faltas) también piden la nueva', async () => {
+  // De vuelta (regla del dueño, 28/10): le queda un cambio, así que cada variante le pide la nueva.
+  it('4. las variantes (sin tildes, con faltas) también piden la nueva', async () => {
     for (const texto of ['me equivoque de ubicacion', 'esa no es mi ubicación', 'mande mal la ubicacion', 'la ubicación está mal', 'me equiboque de ubicasion']) {
       const antes = e.botonesA(ANA).length;
       expect(await nuevos(ANA, () => e.contesta(ANA, { texto })), texto).toEqual([PIDE_LA_NUEVA]);

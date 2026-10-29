@@ -37,6 +37,7 @@ import { startScheduler } from './automation/engine.js';
 import { ventanaDeEntrega } from './entregas/horario-distrito.js';
 
 import { startArchiveSweeper } from './archive/service.js';
+import { catalogoVigente } from './chat/etiquetar.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
 import { crearPuertoGsg, despacharReportes, paradaPorClave } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
@@ -113,6 +114,8 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
       repos,
       dir: config.ARCHIVE_DIR,
       ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
+      // El mismo catalogo de etiquetas que Chats (el de fabrica si el negocio no guardo uno).
+      catalogo: repos.chatEtiquetas ? () => catalogoVigente(repos.chatEtiquetas!) : undefined,
       pedidoDe: entregas ? (phone) => entregas.pedidoDe(phone) : undefined,
       nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
       log: info,
