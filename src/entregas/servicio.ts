@@ -541,6 +541,11 @@ export interface ServicioEntregas {
    */
   alDireccionEscrita(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, como: string): Promise<RespuestaDireccionEscrita | null>;
   /**
+   * La dirección que trae un enlace de lugar compartido (sin coordenadas), en el
+   * mapa: solo si se encuentra con su número de puerta. null = no se usa.
+   */
+  ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null>;
+  /**
    * El primer mensaje que le pide la ubicacion a un cliente con entrega (la
    * plantilla «solicitudUbicacion» con los datos del envio de GSG). null =
    * ese telefono no tiene entrega viva: el reparto usa su texto de siempre.
@@ -548,7 +553,7 @@ export interface ServicioEntregas {
   textoSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<string | null>;
   plantillaSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<{ name: string; variables: string[] } | null>;
   /** Los textos del agente operativo (por qué la ubicación, el cierre), con los datos de la entrega viva de ese teléfono si hay. */
-  textoAgente(clave: 'porQueUbicacion' | 'cierreAgente' | 'enlaceSinUbicacion' | 'variosEnlaces', phone: string, nombre?: string | null): Promise<string>;
+  textoAgente(clave: 'porQueUbicacion' | 'cierreAgente', phone: string, nombre?: string | null): Promise<string>;
   /**
    * El cliente, con su ubicación ya registrada, pide cambiarla («me equivoqué
    * de ubicación»). Antes de la hora límite: que mande la nueva. Después:
@@ -2398,6 +2403,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   }
 
   // ------------------------------------------------ la dirección escrita
+
+  async function ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null> {
+    if (!deps.geocodificador || !ajustes.buscarDireccionEnMapa) return null;
+    const lugar = await deps.geocodificador.buscar(direccion, distritoEnDireccion(direccion)).catch(() => null);
+    // Solo con la puerta: «la calle» o «el distrito» mandaría al motorizado a otro sitio.
+    return lugar && lugar.precision === 'alta' ? { lat: lugar.lat, lng: lugar.lng } : null;
+  }
 
   async function alDireccionEscrita(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, como: string): Promise<RespuestaDireccionEscrita | null> {
     const vivas = await esperandoUbicacionDe(contact.phone);
@@ -5193,6 +5205,7 @@ ${lista}
     },
     responderPinLejos,
     alDireccionEscrita,
+    ubicarDireccionDeEnlace,
     alTexto,
     alAdjuntoDeMotorizado: async () => ({ atendida: false }),
     nombreNegocio: () => deps.nombreNegocio(),

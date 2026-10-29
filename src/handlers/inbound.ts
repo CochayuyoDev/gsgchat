@@ -69,6 +69,10 @@ import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
 import { soltarSolicitudes } from '../entregas/ubicacion-unica.js';
 import { clasificarConReglas } from '../archive/clasificar.js';
+
+/** Un enlace que solo trae una dirección: se busca en el mapa (solo vale con número de puerta). */
+const porDireccionDe = (deps: { entregas?: { ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null> } | null }) =>
+  deps.entregas ? (direccion: string) => deps.entregas!.ubicarDireccionDeEnlace(direccion) : undefined;
 import { horaEnPalabras, horarioEnPalabras, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 import type { Solicitud } from '../db/rutas.js';
 import { ventanaDeEntrega } from '../entregas/horario-distrito.js';
@@ -1282,24 +1286,22 @@ async function handleInboundMessageEnFila(
 
   // --- un enlace de mapa sin ubicación segura -----------------------------
   // El cliente con una entrega en curso manda un enlace de mapa en vez del pin.
-  // Si de ese enlace sale su ubicación, la registra el camino de siempre (abajo).
-  // Si no sale (un lugar o una dirección compartida, sin coordenadas) o manda
-  // dos enlaces distintos, no se adivina: se le pide el pin con el botón, en la
-  // misma conversación (como GSG, 26/10). Sale también con el bot callado.
+  // Si de ese enlace sale su ubicación (sus coordenadas, o la dirección que
+  // trae encontrada en el mapa con su número de puerta), la registra el camino
+  // de siempre (abajo). Si no sale o manda dos enlaces distintos, no se adivina
+  // y el bot NO contesta: solo salen los mensajes del bot (regla del dueño,
+  // 29/10). Se apunta en el pedido y siguen los recordatorios de siempre.
   if (message.type === 'text' && deps.entregas && !(await deps.entregas.esMotorizado(phone).catch(() => false))) {
     const enlaces = enlacesDeMapa(message.text?.body ?? '');
     if (enlaces.length && (await deps.entregas.tieneEntregaEnCurso(phone).catch(() => false))) {
-      const leida = enlaces.length === 1 ? await extractLocation(enlaces[0]!, { pais: deps.config.pais }).catch(() => null) : null;
+      const leida = enlaces.length === 1 ? await extractLocation(enlaces[0]!, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }).catch(() => null) : null;
       // Fuera del país (o de la zona) lo atiende el camino de fuera de zona, más abajo.
       const sinUbicacion = enlaces.length > 1 || !leida || (!leida.ok && leida.reason !== 'outside_bbox');
       if (sinUbicacion) {
-        const clave = enlaces.length > 1 ? 'variosEnlaces' : 'enlaceSinUbicacion';
-        const texto = await deps.entregas.textoAgente(clave, phone, contact.name);
-        await sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: texto, locationRequest: true }, respuestaUbicacion: true });
         const motivo = enlaces.length > 1 ? `mandó ${enlaces.length} enlaces de mapa distintos` : `mandó un enlace de mapa sin la ubicación exacta (${leida && !leida.ok ? leida.reason : 'no se pudo leer'})`;
-        await deps.entregas.anotarAgente(phone, `${motivo}: se le pidió el pin (${enlaces[0]!.slice(0, 120)})`).catch(() => undefined);
+        await deps.entregas.anotarAgente(phone, `${motivo}: no se le contesta (${enlaces[0]!.slice(0, 120)})`).catch(() => undefined);
         const abierta = (await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ?? (await repos.rutas.abiertaPorTelefono(phone).catch(() => null));
-        if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `${motivo}: se le pidió el pin`).catch(() => undefined);
+        if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `${motivo}: no se le contesta, siguen los recordatorios`).catch(() => undefined);
         return;
       }
     }
@@ -1317,7 +1319,7 @@ async function handleInboundMessageEnFila(
       const escrito = message.text?.body ?? message.media?.transcripcion ?? message.button?.text ?? message.interactive?.button_reply?.title ?? '';
       const boton = message.interactive?.button_reply?.id ?? message.button?.payload ?? null;
       const ubicacion = escrito && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(escrito)
-        ? await extractLocation(escrito, { pais: deps.config.pais }).catch(() => null) : null;
+        ? await extractLocation(escrito, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }).catch(() => null) : null;
       const confirmaPin = Boolean(deps.entregas && clasificarPinLejos(escrito, boton) !== 'otra' && await deps.entregas.pinLejosPendiente(phone).catch(() => false));
       if (!ubicacion?.ok && !confirmaPin) {
         // Un número equivocado se reporta por dentro, sin contestarle al cliente.
@@ -1349,7 +1351,7 @@ async function handleInboundMessageEnFila(
     const cuerpo = message.text?.body ?? '';
     const escrito = cuerpo || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.media?.transcripcion || '';
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
-    const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, { pais: deps.config.pais }).catch(() => null) : null;
+    const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }).catch(() => null) : null;
     if (!esPin && !enlace?.ok) {
       await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1, citaId: message.context?.id ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
@@ -1549,7 +1551,7 @@ async function handleInboundMessageEnFila(
   const [rules, prefs, result] = await Promise.all([
     repos.automation.listRules(),
     repos.automation.getPrefs(),
-    extractLocation(text, { pais: deps.config.pais }),
+    extractLocation(text, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }),
   ]);
 
   // Las entregas del dia: la respuesta a "¿confirmas tu pedido?" y lo que

@@ -249,6 +249,29 @@ export async function extractLocation(
     }
   }
 
+  // El enlace es un lugar compartido como direccion (?q=Av. Jorge Chavez 865,
+  // Santiago de Surco), sin coordenadas: se busca esa direccion en el mapa.
+  // Solo vale si quien busca la encuentra con seguridad (pedido del dueño, 29/10).
+  if (!result.ok && opts.porDireccion) {
+    const direccion = direccionDelEnlace(resolvedUrl ?? url?.toString());
+    const punto = direccion ? await opts.porDireccion(direccion).catch(() => null) : null;
+    if (punto && Number.isFinite(punto.lat) && Number.isFinite(punto.lng) && (!opts.pais || dentroDe(punto, opts.pais)) && (!opts.bbox || dentroDe(punto, opts.bbox))) {
+      result = {
+        ok: true,
+        lat: punto.lat,
+        lng: punto.lng,
+        source: 'address_geocoded',
+        confidence: 'high',
+        precisionMeters: 30,
+        originalUrl: url?.toString(),
+        resolvedUrl,
+        mapsUrl: canonicalMapsUrl(punto.lat, punto.lng),
+        warnings: [...warnings, `direccion del enlace encontrada en el mapa: ${direccion}`],
+        needsConfirmation: false,
+      };
+    }
+  }
+
   // Un acortador que no se pudo abrir merece un motivo mas util que "no encontre nada".
   if (!result.ok && url && needsResolution(url) && !resolvedUrl) {
     return { ...result, reason: 'short_link_unresolved' };
@@ -297,4 +320,27 @@ export function fromWhatsAppLocation(
     warnings: check.warnings,
     needsConfirmation: false,
   };
+}
+
+const dentroDe = (p: { lat: number; lng: number }, caja: { minLat: number; maxLat: number; minLng: number; maxLng: number }): boolean =>
+  p.lat >= caja.minLat && p.lat <= caja.maxLat && p.lng >= caja.minLng && p.lng <= caja.maxLng;
+
+/**
+ * La direccion que trae un enlace de lugar compartido (?q= o ?query=) cuando no
+ * son coordenadas: «Av. Jorge Chávez 865, Santiago de Surco 15049». Tiene que
+ * llevar un numero (de puerta): «Miraflores» a secas no es una direccion.
+ */
+export function direccionDelEnlace(enlace: string | undefined): string | null {
+  if (!enlace) return null;
+  let u: URL;
+  try {
+    u = new URL(enlace);
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)google\.[a-z.]+$|^maps\.app\.goo\.gl$|^goo\.gl$/i.test(u.hostname)) return null;
+  const texto = (u.searchParams.get('q') ?? u.searchParams.get('query') ?? '').trim();
+  if (!texto || texto.length > 200 || !/[a-záéíóúñ]{3}/i.test(texto) || !/\d/.test(texto)) return null;
+  if (/^-?\d{1,3}(\.\d+)?\s*,\s*-?\d{1,3}(\.\d+)?$/.test(texto)) return null;
+  return texto;
 }
