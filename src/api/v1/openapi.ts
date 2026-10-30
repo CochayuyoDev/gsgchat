@@ -217,6 +217,7 @@ export function openApi(baseUrl: string): Json {
         get: {
           tags: ['conversaciones'],
           summary: 'El hilo con un contacto, y si se le puede escribir ahora',
+          description: 'Cada mensaje con foto, video o audio trae `archivo` (url firmada, tipo, mimeType, segundos): el enlace no cambia durante el dia, asi que un <img>, <video> o <audio> no se vuelve a cargar en cada consulta.',
           ...permiso('conversaciones:leer'),
           parameters: [
             { name: 'telefono', in: 'path', required: true, schema: { type: 'string' }, description: 'con codigo de pais, sin +' },
@@ -894,7 +895,7 @@ export function openApi(baseUrl: string): Json {
             media: {
               type: 'object',
               required: ['url'],
-              description: 'Una foto, un video, un audio o un documento: se baja de `url` (hasta 16 MB) y se manda',
+              description: 'Una foto, un video, un audio o un documento: se baja de `url` (hasta 16 MB) y se manda. Se mira el contenido, no la cabecera: fotos jpeg, png o webp; videos mp4 o 3gp; audios ogg, mp3, m4a, aac o amr; otro formato o un `tipo` que no es el del fichero da 400. Para no mandarlo dos veces al reintentar, manda `Idempotency-Key`. El fichero queda guardado y el hilo lo devuelve en `archivo.url`.',
               properties: {
                 url: { type: 'string', example: 'https://mitienda.com/fotos/zapato.png' },
                 tipo: { type: 'string', enum: ['imagen', 'video', 'audio', 'documento'], description: 'sin el, se deduce del tipo del fichero' },
