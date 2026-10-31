@@ -7,7 +7,7 @@
  * en un <img>, un <video> o un <audio>. Como los enlaces de evidencia (ver
  * src/archive/enlace.ts): dentro del token va el mensaje y hasta cuando vale;
  * no se guarda nada en la base porque la firma ya dice si el enlace es nuestro.
- * Caduca a los 7 dias: GSG pide el historial cada vez que abre el chat y
+ * Caduca entre 7 y 8 dias (se redondea al dia, para que el enlace no cambie en cada consulta): GSG pide el historial cada vez que abre el chat y
  * recibe enlaces nuevos.
  *
  * El fichero sale del disco (lo que llega por QR ya se guarda al recibirlo).
@@ -104,7 +104,12 @@ export function archivoDeMensaje(m: Message, opts: { publicBase: string; secreto
   const tipo = TIPOS[m.kind];
   if (!media || !tipo) return null;
   const ahora = opts.ahora ?? new Date();
-  const caduca = new Date(ahora.getTime() + DIAS_ENLACE_ARCHIVO * 24 * 60 * 60 * 1000);
+  // La caducidad se redondea al dia: el mismo mensaje da el mismo enlace en cada
+  // consulta del dia. Con la hora exacta cada sondeo traia una `url` distinta y
+  // el navegador volvia a cargar la foto, el video o el audio (parpadeo, y la
+  // reproduccion volvia a cero).
+  const DIA = 24 * 60 * 60 * 1000;
+  const caduca = new Date(Math.ceil((ahora.getTime() + DIAS_ENLACE_ARCHIVO * DIA) / DIA) * DIA);
   const token = firmarArchivo({ c: m.contactId, m: m.id, exp: Math.floor(caduca.getTime() / 1000) }, opts.secreto);
   return {
     url: `${opts.publicBase.replace(/\/$/, '')}/archivos/${token}`,

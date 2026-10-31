@@ -42,7 +42,9 @@ import { ErrorApi, registrarCatalogoErrores } from '../errores.js';
 import type { ServicioPlan } from '../../plan/servicio.js';
 import type { ServicioVoz } from '../../voz/servicio.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
-import { MAX_BYTES_ADJUNTO, tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
+import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
+import { bajarMedia } from './media-saliente.js';
+import { archivoDeMensaje } from './archivos-gsg.js';
 import { crearIdempotencia } from './idempotencia.js';
 
 export interface ApiV1Deps {
@@ -69,6 +71,8 @@ export interface ApiV1Deps {
   plan?: ServicioPlan;
   /** La voz del asistente (ver src/voz): `voz: true` en POST /mensajes manda el texto como nota de voz. Sin ella, sale por escrito y se dice. */
   voz?: ServicioVoz;
+  /** Para el `archivo.url` de cada mensaje con foto, video o audio en el hilo (ver archivos-gsg.ts). Sin esto, el hilo sale sin enlaces. */
+  archivos?: { publicBase: string; secreto: string };
   /** Donde se guardan los ficheros que llegan por URL (`media`), para que el chat los pinte. */
   mediaDir?: string;
   /** Con que se bajan los ficheros de `media.url`. Para pruebas. */
@@ -141,29 +145,6 @@ const mensajeSchema = z
   .refine((b) => b.texto || b.plantilla || b.ubicacion || b.pedirUbicacion || b.media, {
     message: 'hace falta texto, plantilla, ubicacion, pedirUbicacion o media',
   });
-
-/** Baja el fichero de `media.url`: como mucho 16 MB, y en 30 s. */
-async function bajarMedia(url: string, fetchImpl: typeof fetch): Promise<{ ok: true; datos: Buffer; mimeType: string } | { ok: false; error: string }> {
-  if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'media.url tiene que empezar por http:// o https://' };
-  const controlador = new AbortController();
-  const temporizador = setTimeout(() => controlador.abort(), 30_000);
-  try {
-    const r = await fetchImpl(url, { signal: controlador.signal, redirect: 'follow' });
-    if (!r.ok) return { ok: false, error: `no se pudo bajar media.url: respondio ${r.status}` };
-    const largo = Number(r.headers.get('content-length') ?? 0);
-    if (largo > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
-    const datos = Buffer.from(await r.arrayBuffer());
-    if (!datos.length) return { ok: false, error: 'media.url devolvio un fichero vacio' };
-    if (datos.length > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
-    const mimeType = (r.headers.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim().toLowerCase();
-    return { ok: true, datos, mimeType };
-  } catch (error) {
-    const abortado = error instanceof Error && error.name === 'AbortError';
-    return { ok: false, error: abortado ? 'media.url tardo mas de 30 s en responder' : `no se pudo bajar media.url: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    clearTimeout(temporizador);
-  }
-}
 
 /** Lo que devuelve un envio, con nombres que no cambian. */
 export function respuestaDeEnvio(outcome: SendOutcome) {
@@ -315,7 +296,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     } else if (body.media) {
       const kindPedido = body.media.tipo ? TIPOS_MEDIA[body.media.tipo] : undefined;
       if (body.media.tipo && !kindPedido) return reply.code(400).send({ error: 'media.tipo tiene que ser imagen, video, audio o documento' });
-      const bajado = await bajarMedia(body.media.url, deps.fetchImpl ?? fetch);
+      const bajado = await bajarMedia(body.media.url, kindPedido, deps.fetchImpl ?? fetch);
       if (!bajado.ok) return reply.code(400).send({ error: bajado.error });
       const kind = kindPedido ?? tipoDeAdjuntoSaliente(bajado.mimeType);
       // Un tipo generico (octet-stream) con nombre: la extension del nombre manda.
@@ -433,6 +414,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           transcripcion: typeof p.transcripcion === 'string' ? p.transcripcion : null,
           anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,
           voz: p.media?.voz === true,
+          archivo: deps.archivos ? archivoDeMensaje(m, deps.archivos) : null,
           datos: m.payload,
           estado: m.status,
           fecha: m.createdAt,
