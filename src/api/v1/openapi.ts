@@ -238,7 +238,7 @@ export function openApi(baseUrl: string): Json {
             'Trae tambien `nota`: la nota automatica del chat, es decir la etiqueta que la IA (o una persona, `origen: manual`) le puso a ese WhatsApp con «Etiquetar chats con IA» (codigo y nombre del catalogo del negocio, el dia y cuando se puso); null si aun no tiene. Es la ultima: si se vuelve a etiquetar, cambia.',
             'La respuesta trae `tracking` (lista), `contacto` {id, telefono, nombre} y los mensajes (id de WhatsApp, tipo, texto, anuncio, datos, `archivo` (el enlace para ver la foto o el video y escuchar el audio, si lo lleva; los audios no traen transcripcion), fecha, direccion, autor, emisor, estado y `cursor`, que es lo que se manda en `antesDe`).',
             'Esta llamada solo lee el chat. Para escribirle al cliente desde GSG, `POST /chat`.',
-            'Los mismos handlers responden tambien en `GET /messages?chat_id=` y `POST /send-message` (con `chat_id` en lugar de `tracking`): `chat_id` es el tracking. Los webhooks `mensaje.recibido` y `mensaje.enviado` traen `chatId` y `trackings` para saber a que chat van.',
+            'Los mismos handlers responden tambien en `GET /messages?chat_id=` y `POST /send-message` (con `chat_id` en lugar de `tracking`): `chat_id` es el tracking. Los webhooks `mensaje.recibido` y `mensaje.enviado` traen `chatId` y `trackings` para saber a que chat van, y `mensaje.archivo` cuando el mensaje lleva una foto, un video, un audio o un documento: el mismo `archivo` del historial (`url` firmada que abre el fichero sin clave, `tipo`, `mimeType`, `bytes`, `caducaEn`); sin archivo, null. Las fotos, videos y audios que llegan por Meta se guardan en cuanto llegan, asi que no se pierden aunque Meta los borre.',
           ].join(' '),
           ...permiso('conversaciones:leer'),
           parameters: [
@@ -323,10 +323,22 @@ export function openApi(baseUrl: string): Json {
           ...permiso('mensajes:enviar'),
           requestBody: { required: true, content: { 'application/json': { schema: {
             type: 'object',
-            required: ['tracking', 'texto', 'idExterno', 'usuario'],
+            required: ['tracking', 'idExterno', 'usuario'],
+            description: 'Hace falta `texto`, `media` o los dos.',
             properties: {
               tracking: { type: 'string', description: 'El tracking del pedido, el mismo que GSG mando en POST /entregas' },
-              texto: { type: 'string', maxLength: 4000, description: 'Lo que se le escribe al cliente' },
+              texto: { type: 'string', maxLength: 4000, description: 'Lo que se le escribe al cliente. Con `media` es el pie de la foto, el video o el documento (un audio no lleva texto)' },
+              media: {
+                type: 'object',
+                required: ['url'],
+                description: 'Una foto, un video, un audio o un documento. GSGchat baja el fichero de la URL (hasta 16 MB), comprueba que es lo que dice ser y lo manda por WhatsApp.',
+                properties: {
+                  url: { type: 'string', description: 'Direccion http(s) de donde se baja el fichero' },
+                  tipo: { type: 'string', enum: ['imagen', 'video', 'audio', 'documento'], description: 'Sin el, se deduce del fichero. Fotos: jpeg, png, webp. Videos: mp4, 3gp. Audios: ogg, mp3, m4a, aac, amr' },
+                  nombre: { type: 'string', maxLength: 200, description: 'El nombre con el que se ensena un documento' },
+                  voz: { type: 'boolean', description: 'Un audio como nota de voz' },
+                },
+              },
               idExterno: { type: 'string', maxLength: 191, description: 'El id que GSG le puso a este mensaje: evita duplicados en los reintentos' },
               usuario: {
                 type: 'object',
@@ -342,7 +354,7 @@ export function openApi(baseUrl: string): Json {
           responses: {
             200: json(ref('EnvioOk'), 'Salio por WhatsApp (o ya habia salido: `duplicado: true`)'),
             202: json(ref('EnvioBloqueado'), 'Una guarda lo freno; el motivo dice cual (p. ej. la ventana de 24 h esta cerrada)'),
-            400: error('Falta el tracking, el texto, el idExterno o el usuario'),
+            400: error('Falta el tracking, el idExterno, el usuario o el texto/media; o el fichero de media no se pudo bajar, pesa mas de 16 MB o no es del tipo que dice'),
             404: error('No hay ningun pedido con ese tracking'),
             409: error('El idExterno ya se uso con otro tracking, o ese mensaje se esta enviando ahora mismo'),
             502: json(ref('EnvioError'), 'El proveedor de WhatsApp lo rechazo'),
@@ -476,7 +488,7 @@ export function openApi(baseUrl: string): Json {
           tags: ['entregas'],
           summary: 'GSG empuja: uno o varios pedidos de hoy (sin esperar a que se le pregunte)',
           description: [
-            'Obligatorios en cada pedido (lo que GSG manda siempre): `tracking`, `cliente`, `telefono`, `empresa`, `metodoPago` y `montoCobrar`. Opcionales: `distrito`, `direccion`, `fecRuta`, `telefono2`, `producto` y `cantBultos`. Si falta uno, 400 con `detalles` campo por campo y no se guarda ninguno de la llamada. Con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
+            'Obligatorios en cada pedido (lo que GSG manda siempre): `tracking`, `cliente`, `telefono`, `empresa`, `metodoPago` y `montoCobrar`. Opcionales: `distrito`, `direccion`, `fecRuta`, `telefono2`, `producto` y `cantBultos`. Cada pedido se valida por su cuenta: si falta uno o un dato no vale (p. ej. `producto` de mas de 200 caracteres), ese pedido no se guarda y vuelve en `rechazados` campo por campo, y los demas de la llamada se guardan (201). Si ninguno vale, 400 con `detalles`. Con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
             'La clave decide la tienda: 401 sin clave, con una que no existe o revocada; 403 si es valida pero sin `entregas:gestionar`; 404 si se usa la ruta con nombre de tienda; 409 si la clave esta en dos tiendas.',
             'Cada pedido creado vuelve con su `id` (el de este sistema, leido de la base tras guardarlo; el de GSG va en `idExterno`) y su `mensaje` (el primer mensaje al cliente: retenido, encolado, enviado, reintentando, fallido o incierto). Si el pedido se guardo pero su mensaje no salio, la respuesta sigue siendo 201 y lo cuenta en `avisosMensaje`.',
             '`faltaUbicacion` (por defecto true) y `faltaConfirmar` (por defecto true) dicen que le falta a cada uno; `urgente` lo pone primero hacia el motorizado.',
