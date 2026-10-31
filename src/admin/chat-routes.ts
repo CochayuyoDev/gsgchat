@@ -12,7 +12,7 @@ import type { Config } from '../config.js';
 import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
-import { extractLocation } from '../geo/extract.js';
+import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { alcanceChat } from '../web/alcance-chat.js';
 import { esperaDeEnvio } from '../rutas/espera-envio.js';
@@ -757,7 +757,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const goneIds = body.knownIds.filter(id => !conocidasActualizadas.some(m => String(m.id) === id));
     const nextAfterId = visiblesNuevos.length ? String(visiblesNuevos.at(-1)!.id) : body.afterId;
     return responderLectura(request, reply, {
-      messages: visibles.map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString() })),
+      // Con el mismo `archivo` que el hilo completo: si faltara, la pantalla sustituye el mensaje
+      // que ya pintaba por esta version y la foto, el audio o el video desaparecen hasta recargar.
+      messages: visibles.map(m => ({
+        ...m,
+        expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        archivo: archivoDeMensaje(m, { publicBase: '.', secreto: config.TRACKING_SECRET }),
+      })),
       goneIds,
       hasMoreNew: nuevos.length > limite,
       nextAfterId,
@@ -1030,7 +1036,12 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     }
 
     if (body.location) {
-      const result = await extractLocation(body.location, { bbox: config.bbox });
+      // Quien atiende (o el asistente) puede mandar unas coordenadas escritas «lat,lng»; el cliente, no:
+      // lo que entra del cliente solo vale como pin o enlace de mapa (ver src/geo/extract.ts).
+      const escritas = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(body.location);
+      const result = escritas
+        ? fromWhatsAppLocation({ latitude: Number(escritas[1]), longitude: Number(escritas[2]) }, { bbox: config.bbox })
+        : await extractLocation(body.location, { bbox: config.bbox });
       if (!result.ok) {
         return reply.code(400).send({ error: `no se encontraron coordenadas: ${result.reason}` });
       }

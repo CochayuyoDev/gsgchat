@@ -532,8 +532,6 @@ export interface ServicioEntregas {
   revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas>;
   /** Si ese cliente tiene un pin lejano esperando su SÍ o su NO. */
   pinLejosPendiente(phone: string): Promise<boolean>;
-  /** Mandó su ubicación en tiempo real: el texto que le pide la actual. null = no se le estaba pidiendo ubicación. */
-  alUbicacionEnVivo(phone: string): Promise<string | null>;
   /** Su respuesta a «¿es ahí donde recibes tu pedido?». null = no tenía nada por confirmar. */
   responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string, boton?: string, citaId?: string | null): Promise<RespuestaPinLejos | null>;
   /**
@@ -5230,12 +5228,6 @@ ${lista}
     revisarPin,
     async pinLejosPendiente(phone) {
       return (await esperandoUbicacionDe(phone)).some((x) => Boolean(x.pinPropuestoAt) && x.pinPropuestoLat != null);
-    },
-    async alUbicacionEnVivo(phone) {
-      const vivas = await esperandoUbicacionDe(phone);
-      if (!vivas.length) return null;
-      for (const x of vivas) await evento(x, 'nota', 'mandó su ubicación en tiempo real: no se registra, se le pide la ubicación actual');
-      return textoDe('ubicacionEnVivo', ajustes, contexto(vivas[0]!));
     },
     responderPinLejos,
     alDireccionEscrita,
