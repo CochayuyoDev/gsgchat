@@ -291,7 +291,6 @@ export const ajustesEntregasSchema = z.object({
       porQueConfirmar: z.string().max(1000).default(''),
       pinLejos: z.string().max(1000).default(''),
       pinLejosNo: z.string().max(1000).default(''),
-      ubicacionEnVivo: z.string().max(1000).default(''),
       direccionTomada: z.string().max(1000).default(''),
       direccionAnotada: z.string().max(1000).default(''),
     })
@@ -635,8 +634,6 @@ export const TEXTOS_POR_DEFECTO: Record<keyof AjustesEntregas['textos'], string>
   // El pin tiene que tener sentido: si cae lejos de su distrito, se le pregunta UNA vez.
   pinLejos: 'Recibimos tu ubicación, pero queda lejos de {distrito}. ¿Es ahí donde recibes tu pedido? Responde SÍ o NO',
   pinLejosNo: 'Por favor, envíanos la ubicación correcta desde el clip 📎 → Ubicación → Enviar tu ubicación actual',
-  // La ubicación en tiempo real no se registra: se pide la actual.
-  ubicacionEnVivo: 'Esa es tu ubicación en tiempo real. Por favor, compártenos tu UBICACIÓN ACTUAL desde el clip 📎 → Ubicación → Enviar tu ubicación actual.',
   // La dirección escrita: va debajo de «Ubicación registrada» cuando se ubicó en el mapa.
   direccionTomada: 'Tomamos tu dirección: {direccion}. Si puedes, mándanos también el pin para llegar exacto.',
   direccionAnotada: 'Gracias, anotamos: {direccion}. Para llegar exacto, ¿nos mandas tu ubicación desde el clip 📎 → Ubicación?',
@@ -757,7 +754,6 @@ export const VARIABLES_TEXTOS: Record<keyof AjustesEntregas['textos'], string[]>
   porQueConfirmar: ['{nombre}', '{pedido}', '{empresa}', '{negocio}', '{tienda}'],
   pinLejos: ['{nombre}', '{pedido}', '{distrito}', '{negocio}'],
   pinLejosNo: ['{nombre}', '{pedido}', '{negocio}'],
-  ubicacionEnVivo: ['{nombre}', '{pedido}', '{negocio}'],
   direccionTomada: ['{nombre}', '{pedido}', '{direccion}', '{negocio}'],
   direccionAnotada: ['{nombre}', '{pedido}', '{direccion}', '{negocio}'],
 };
@@ -827,7 +823,6 @@ export const DESCRIPCION_TEXTOS: Record<keyof AjustesEntregas['textos'], string>
   porQueConfirmar: 'Al cliente de «falta confirmar» que pregunta por qué le escriben o desconfía (se le vuelve a pedir SÍ o NO)',
   pinLejos: 'Al cliente cuyo pin cae lejos del distrito de su pedido: se le pregunta UNA vez si es ahí (responde SÍ o NO, sin lista de opciones). La distancia se cambia en Tiempos',
   pinLejosNo: 'Al cliente que dice que NO es ahí: se le pide la ubicación correcta',
-  ubicacionEnVivo: 'Al cliente que manda su ubicación en tiempo real: no se registra, se le pide la ubicación actual',
   direccionTomada: 'Al cliente que escribió su dirección y se ubicó en el mapa: va debajo de «Ubicación registrada»',
   direccionAnotada: 'Al cliente que escribió su dirección y no se pudo ubicar bien en el mapa: se guarda y se le pide el pin con amabilidad (no cuenta como insistencia)',
 };

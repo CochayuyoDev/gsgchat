@@ -113,6 +113,25 @@ describe('simulaciones de chat: el cliente manda su ubicacion y sale lat/lng exa
     expect(r).toMatchObject({ ok: false, reason: 'no_coordinates_found' });
   });
 
+  // Solo valen el pin de ubicacion actual y los enlaces de Google Maps, Apple Maps y Waze (y el geo: que tambien lee GSG).
+  const NO_RECONOCIDAS: Array<[string, string]> = [
+    ['OpenStreetMap', 'https://www.openstreetmap.org/?mlat=-12.046374&mlon=-77.042793#map=18/-12.046374/-77.042793'],
+    ['coordenadas pegadas en el texto', 'mi ubicacion es -12.046374, -77.042793 por favor'],
+    ['grados, minutos y segundos', `12°02'46.9"S 77°02'34.0"W`],
+    ['Plus Code', '8FVC2222+22 Lima'],
+    ['Plus Code en plus.codes', 'https://plus.codes/8FVC2222+22'],
+  ];
+  for (const [nombre, texto] of NO_RECONOCIDAS) {
+    it(`no se reconoce: ${nombre}`, async () => {
+      expect((await extractLocation(texto, { bbox })).ok).toBe(false);
+    });
+  }
+
+  it('enlace de otra ciudad: no se reconoce por caer fuera de la zona de reparto', async () => {
+    const r = await extractLocation('https://maps.google.com/?q=19.4326,-99.1332', { bbox });
+    expect(r.ok).toBe(false);
+  });
+
   it('mensaje vacio o sin ubicacion: falla sin lanzar', async () => {
     expect((await extractLocation('   ', { bbox })).ok).toBe(false);
     expect((await extractLocation('ok', { bbox })).ok).toBe(false);

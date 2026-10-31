@@ -16,12 +16,8 @@ export type CoordSource =
   | 'query_param' // ?q= ?query= ?destination= ?daddr=
   | 'll_param' // ?ll= ?sll= ?center= ?coordinate=
   | 'geo_uri' // geo:19.4,-99.1
-  | 'osm_hash' // #map=15/19.4/-99.1
-  | 'dms' // 19 grados 25' 57.4" N
-  | 'plus_code' // 76F2XCJ8+9M (Open Location Code completo)
   | 'at_viewport' // @lat,lng,17z : centro del viewport, ultimo recurso
-  | 'address_geocoded' // el enlace solo traia una direccion (?q=Av. ... 865): se encontro en el mapa con su numero de puerta
-  | 'bare_text'; // "19.4326, -99.1332" suelto en el texto
+  | 'address_geocoded'; // el enlace solo traia una direccion (?q=Av. ... 865): se encontro en el mapa con su numero de puerta
 
 export type Confidence = 'exact' | 'high' | 'medium' | 'low';
 

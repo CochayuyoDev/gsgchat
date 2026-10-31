@@ -812,16 +812,6 @@ function rafagaDe(deps: Pick<InboundDeps, 'rafagaMs' | 'config'>): number {
   return deps.rafagaMs ?? deps.config.RAFAGA_MS ?? 0;
 }
 
-/** Ultimo aviso de «esa es tu ubicacion en tiempo real» por telefono: las actualizaciones en vivo no lo repiten. */
-const avisosEnVivo = new Map<string, number>();
-function avisarUbicacionEnVivo(phone: string, ahora: number): boolean {
-  const antes = avisosEnVivo.get(phone);
-  if (antes !== undefined && ahora - antes < 10 * 60_000) return false;
-  avisosEnVivo.set(phone, ahora);
-  if (avisosEnVivo.size > 5_000) avisosEnVivo.clear();
-  return true;
-}
-
 /** Un pin o un boton pulsado se atienden ya: no esperan a la rafaga. */
 function atiendeYa(message: InboundMessage): boolean {
   return message.type === 'location' || message.type === 'livelocation' || message.type === 'interactive' || message.type === 'button';
@@ -833,6 +823,11 @@ async function handleInboundMessageEnFila(
   deps: InboundDeps,
 ): Promise<void> {
   const { repos, wa, config } = deps;
+  // Un enlace de mapa de otra ciudad no se reconoce: ni coordenadas ni respuesta.
+  const leerEnlace = async (t: string) => {
+    const r = await extractLocation(t, { bbox: config.bbox, pais: config.pais, porDireccion: porDireccionDe(deps) });
+    return !r.ok && r.reason === 'outside_bbox' ? ({ ok: false, reason: 'no_coordinates_found', warnings: [] } as const) : r;
+  };
   const phone = message.from;
   const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
 
@@ -1018,7 +1013,7 @@ async function handleInboundMessageEnFila(
   // el pin se perdio). Todo lo demas sigue callado mientras dure la pausa.
   if (contact.botPausadoAt) {
     const texto = message.type === 'text' ? String(message.text?.body ?? '') : '';
-    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || message.type === 'livelocation' || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com)/i.test(texto);
+    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|maps\.apple\.|waze\.com)/i.test(texto);
     // Los botones «Sí, recibo hoy» / «No» que mandó el sistema tambien: son la respuesta a lo que él preguntó.
     const esBotonDeEntrega = message.type === 'interactive' && String(message.interactive?.button_reply?.id ?? '').startsWith('entrega:');
     if (esBotonDeEntrega) request_log(deps, 'bot en pausa, pero el cliente pulsó el botón que mandó el sistema: se atiende', null);
@@ -1265,24 +1260,11 @@ async function handleInboundMessageEnFila(
       interactive: { body, locationRequest: true },
     });
 
-  // --- ubicacion en tiempo real: no se registra -------------------------
-  // Se mueve con el cliente y no dice donde recibe: se le pide la actual.
-  // Vale tanto para las entregas del dia como para cualquier solicitud del
-  // reparto. Las actualizaciones de la misma ubicacion en vivo no repiten el aviso.
-  if (message.type === 'livelocation') {
-    let texto = deps.entregas ? await deps.entregas.alUbicacionEnVivo(phone).catch(() => null) : null;
-    if (!texto) {
-      const abierta = (await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ?? (await repos.rutas.abiertaPorTelefono(phone).catch(() => null));
-      if (abierta && (abierta.estado === 'pendiente' || abierta.estado === 'enviado' || abierta.estado === 'respondio')) {
-        texto = TEXTOS_POR_DEFECTO.ubicacionEnVivo;
-        await repos.rutas.registrarEvento(abierta.id, 'respuesta', 'mandó su ubicación en tiempo real: no se registra, se le pide la ubicación actual').catch(() => undefined);
-      }
-    }
-    if (texto) {
-      if (avisarUbicacionEnVivo(phone, Date.now())) await reply(texto);
-      return;
-    }
-  }
+  // --- ubicacion en tiempo real: no es una ubicacion valida -------------
+  // Solo valen el pin de ubicacion actual y los enlaces de Google Maps, Apple
+  // Maps y Waze. La ubicacion en vivo no se lee, no se contesta y se sigue
+  // esperando una ubicacion valida.
+  if (message.type === 'livelocation') return;
 
   // --- un enlace de mapa sin ubicación segura -----------------------------
   // El cliente con una entrega en curso manda un enlace de mapa en vez del pin.
@@ -1294,7 +1276,7 @@ async function handleInboundMessageEnFila(
   if (message.type === 'text' && deps.entregas && !(await deps.entregas.esMotorizado(phone).catch(() => false))) {
     const enlaces = enlacesDeMapa(message.text?.body ?? '');
     if (enlaces.length && (await deps.entregas.tieneEntregaEnCurso(phone).catch(() => false))) {
-      const leida = enlaces.length === 1 ? await extractLocation(enlaces[0]!, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }).catch(() => null) : null;
+      const leida = enlaces.length === 1 ? await leerEnlace(enlaces[0]!).catch(() => null) : null;
       // Fuera del país (o de la zona) lo atiende el camino de fuera de zona, más abajo.
       const sinUbicacion = enlaces.length > 1 || !leida || (!leida.ok && leida.reason !== 'outside_bbox');
       if (sinUbicacion) {
@@ -1318,8 +1300,8 @@ async function handleInboundMessageEnFila(
     if (esperando) {
       const escrito = message.text?.body ?? message.media?.transcripcion ?? message.button?.text ?? message.interactive?.button_reply?.title ?? '';
       const boton = message.interactive?.button_reply?.id ?? message.button?.payload ?? null;
-      const ubicacion = escrito && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(escrito)
-        ? await extractLocation(escrito, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }).catch(() => null) : null;
+      const ubicacion = escrito && /https?:\/\/|\bgoogle\.|goo\.gl|maps\.apple\.|waze\.com/i.test(escrito)
+        ? await leerEnlace(escrito).catch(() => null) : null;
       const confirmaPin = Boolean(deps.entregas && clasificarPinLejos(escrito, boton) !== 'otra' && await deps.entregas.pinLejosPendiente(phone).catch(() => false));
       if (!ubicacion?.ok && !confirmaPin) {
         // Un número equivocado se reporta por dentro, sin contestarle al cliente.
@@ -1351,7 +1333,7 @@ async function handleInboundMessageEnFila(
     const cuerpo = message.text?.body ?? '';
     const escrito = cuerpo || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.media?.transcripcion || '';
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
-    const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }).catch(() => null) : null;
+    const enlace = !esPin && cuerpo && /https?:\/\/|\bgoogle\.|goo\.gl|maps\.apple\.|waze\.com/i.test(cuerpo) ? await leerEnlace(cuerpo).catch(() => null) : null;
     if (!esPin && !enlace?.ok) {
       await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1, citaId: message.context?.id ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
@@ -1551,7 +1533,7 @@ async function handleInboundMessageEnFila(
   const [rules, prefs, result] = await Promise.all([
     repos.automation.listRules(),
     repos.automation.getPrefs(),
-    extractLocation(text, { pais: deps.config.pais, porDireccion: porDireccionDe(deps) }),
+    leerEnlace(text),
   ]);
 
   // Las entregas del dia: la respuesta a "¿confirmas tu pedido?" y lo que

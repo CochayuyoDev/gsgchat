@@ -14,9 +14,9 @@
  *   5 ?daddr=  (Apple, Maps clasico)     11 /lat,lng en /maps/dir/, /maps/search/ o /maps/place/ (el ultimo)
  *   6 ?ll=     (Apple, Waze)             12 @lat,lng            (centro de la camara: ultimo recurso)
  *
- * Entre medias van los formatos que GSGchat ya leia y GSG no (OpenStreetMap,
- * grados-minutos-segundos, Plus Codes) y, al final de todo, un par suelto en el
- * texto. Dentro de un patron se prueban TODAS sus coincidencias: si la
+ * Solo se leen enlaces de Google Maps, Apple Maps y Waze y el `geo:` de Android que
+ * tambien lee GSG (31/10): ni OpenStreetMap, ni grados-minutos-segundos, ni Plus
+ * Codes, ni un par suelto en el texto. Dentro de un patron se prueban TODAS sus coincidencias: si la
  * preferida cae fuera de la zona, la siguiente del mismo patron va antes que un
  * patron menos preciso (ver runParsers en extract.ts).
  *
@@ -27,8 +27,6 @@
  */
 
 import type { RawCandidate } from '../types.js';
-import { parseDms } from './dms.js';
-import { decodePlusCode, findPlusCode } from './pluscode.js';
 
 export interface ParseTarget {
   /** Texto completo de entrada, ya decodificado. */
@@ -134,37 +132,6 @@ function parsePathCoords(target: ParseTarget): RawCandidate[] {
     .map(([latRaw, lngRaw]) => ({ latRaw, lngRaw, source: 'path_coords', confidence: 'high' }));
 }
 
-/** OpenStreetMap con lat y lng en parametros separados (`?mlat=&mlon=`). */
-function parseOsmMarker({ url }: ParseTarget): RawCandidate[] {
-  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) return [];
-  const mlat = url.searchParams.get('mlat');
-  const mlon = url.searchParams.get('mlon');
-  return mlat && mlon ? [{ latRaw: mlat, lngRaw: mlon, source: 'll_param', confidence: 'high' }] : [];
-}
-
-/** Fragmento de OpenStreetMap: `#map=15/19.4326/-99.1332`. */
-function parseOsmHash({ decoded }: ParseTarget): RawCandidate[] {
-  const m = new RegExp(String.raw`#map=[\d.]+/(${NUM})/(${NUM})`, 'i').exec(decoded);
-  return m ? [{ latRaw: m[1]!, lngRaw: m[2]!, source: 'osm_hash', confidence: 'high' }] : [];
-}
-
-function parseDmsCandidate({ decoded }: ParseTarget): RawCandidate[] {
-  const dms = parseDms(decoded);
-  if (!dms) return [];
-  // Un segundo de arco son ~31 m; con decimas de segundo bajamos a ~3 m.
-  return [{ latRaw: dms.lat.toFixed(7), lngRaw: dms.lng.toFixed(7), source: 'dms', confidence: 'high', precisionMeters: 3 }];
-}
-
-function parsePlusCodeCandidate({ decoded }: ParseTarget): RawCandidate[] {
-  const code = findPlusCode(decoded);
-  if (!code) return [];
-  const point = decodePlusCode(code);
-  if (!point) return [];
-  const significant = code.replace('+', '').replace(/0+$/, '').length;
-  const precisionMeters = significant >= 11 ? 3 : significant >= 10 ? 14 : 275;
-  return [{ latRaw: point.lat.toFixed(7), lngRaw: point.lng.toFixed(7), source: 'plus_code', confidence: significant >= 10 ? 'medium' : 'low', precisionMeters }];
-}
-
 /**
  * 12. `@lat,lng,17z`: el centro de la camara. Ultimo recurso: si el usuario
  * arrastro el mapa antes de compartir, apunta a cuadras del sitio.
@@ -177,13 +144,6 @@ function parseAtViewport(target: ParseTarget): RawCandidate[] {
     confidence: 'low',
     warning: 'coordenada tomada del centro del mapa, no del lugar: confirmar con el usuario',
   }));
-}
-
-/** Par pegado a pelo en el chat: "19.4326, -99.1332". */
-function parseBareText({ decoded }: ParseTarget): RawCandidate[] {
-  const re = /(?:^|[\s(>:=])(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})(?=$|[\s)<.,;]|$)/;
-  const m = re.exec(decoded);
-  return m ? [{ latRaw: m[1]!, lngRaw: m[2]!, source: 'bare_text', confidence: 'medium' }] : [];
 }
 
 export function safeDecode(value: string): string {
@@ -213,12 +173,7 @@ export const PARSERS: Array<(t: ParseTarget) => RawCandidate[]> = [
   deQuery('viewpoint', { source: 'll_param' }),
   parseGeoUri, //                                    10
   parsePathCoords, //                                11
-  parseOsmMarker,
-  parseOsmHash,
-  parseDmsCandidate,
-  parsePlusCodeCandidate,
   // El origen de una ruta solo si no hay nada mejor, y avisando.
   deQuery('saddr', { warning: 'la coordenada es el ORIGEN de la ruta, no el destino' }),
   parseAtViewport, //                                12
-  parseBareText,
 ];
