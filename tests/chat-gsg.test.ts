@@ -1,3 +1,5 @@
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
 import { crearBus } from '../src/eventos/bus.js';
@@ -223,5 +225,59 @@ describe('el flujo del diagrama: /api/v1/messages, webhook con chatId y /api/v1/
     expect(e.textosA('51987654323').filter((t) => t === 'Ya te veo')).toHaveLength(1);
     expect((await e.app.inject({ method: 'POST', url: '/api/v1/send-message', headers: { 'x-api-key': clave, 'content-type': 'application/json' }, payload: JSON.stringify({ chat_id: 'CHAT-3A', texto: 'x', idExterno: 'diag-2', usuario: { id: 1 } }) })).statusCode).toBe(403);
     expect((await e.app.inject({ method: 'POST', url: '/api/v1/send-message', headers: { 'content-type': 'application/json' }, payload: JSON.stringify({ chat_id: 'CHAT-3A', texto: 'x', idExterno: 'diag-3', usuario: { id: 1 } }) })).statusCode).toBe(401);
+  });
+});
+
+describe('POST /api/v1/chat con foto, video o audio (media por URL)', () => {
+  const relleno = Buffer.alloc(64, 1);
+  const ficheros: Record<string, { tipo: string; datos: Buffer }> = {
+    '/foto.jpg': { tipo: 'image/jpeg', datos: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), relleno]) },
+    '/video.mp4': { tipo: 'video/mp4', datos: Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), relleno]) },
+    '/nota.ogg': { tipo: 'audio/ogg', datos: Buffer.concat([Buffer.from('OggS'), relleno]) },
+    '/falso.jpg': { tipo: 'image/jpeg', datos: Buffer.from('esto no es una foto, es texto plano largo') },
+  };
+  let servidor: Server;
+  let base = '';
+  beforeAll(async () => {
+    servidor = createServer((req, res) => {
+      const f = ficheros[req.url ?? ''];
+      if (!f) { res.statusCode = 404; res.end(); return; }
+      res.setHeader('content-type', f.tipo);
+      res.end(f.datos);
+    });
+    await new Promise<void>((ok) => servidor.listen(0, '127.0.0.1', ok));
+    base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => { await new Promise((ok) => servidor.close(ok)); });
+
+  const conMedia = (extra: Record<string, unknown>) => ({ tracking: 'CHAT-2', idExterno: `media-${Math.random()}`, usuario: { id: 77, nombre: 'Juan', rol: 'motorizado' }, ...extra });
+  const ultimoDe = async (tipo: string) => (await consultar({ tracking: 'CHAT-2' }, escritor)).json().mensajes.filter((m: any) => m.tipo === tipo && m.direccion === 'saliente').at(-1);
+
+  it('una foto con su pie de texto sale por WhatsApp, firmada por el usuario de GSG', async () => {
+    const r = await escribir(conMedia({ texto: 'Asi esta la puerta', media: { url: `${base}/foto.jpg` } }));
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ ok: true, estado: 'enviado', duplicado: false });
+    expect(await ultimoDe('image')).toMatchObject({ autor: 'persona', autorNombre: 'Juan', emisor: { tipo: 'gsg', usuarioId: '77' } });
+  });
+
+  it('un video y un audio se mandan solos, sin texto', async () => {
+    expect((await escribir(conMedia({ media: { url: `${base}/video.mp4`, tipo: 'video' } }))).statusCode).toBe(200);
+    expect(await ultimoDe('video')).toBeTruthy();
+    expect((await escribir(conMedia({ media: { url: `${base}/nota.ogg`, tipo: 'audio', voz: true } }))).statusCode).toBe(200);
+    expect(await ultimoDe('audio')).toBeTruthy();
+  });
+
+  it('un reintento con el mismo idExterno no vuelve a mandar el archivo', async () => {
+    const cuerpo = conMedia({ idExterno: 'media-fijo', media: { url: `${base}/foto.jpg` } });
+    expect((await escribir(cuerpo)).json()).toMatchObject({ duplicado: false });
+    expect((await escribir(cuerpo)).json()).toMatchObject({ ok: true, duplicado: true });
+  });
+
+  it('rechaza con 400: un audio con texto, un fichero que no es lo que dice, una URL que no abre, sin texto ni media', async () => {
+    expect((await escribir(conMedia({ texto: 'hola', media: { url: `${base}/nota.ogg`, tipo: 'audio' } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ media: { url: `${base}/falso.jpg`, tipo: 'imagen' } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ media: { url: `${base}/no-existe.jpg` } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ media: { url: `${base}/foto.jpg`, tipo: 'gif' } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({}))).statusCode).toBe(400);
   });
 });

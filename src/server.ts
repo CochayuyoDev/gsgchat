@@ -320,7 +320,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas, mediaDir });
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
   if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, webhooks: repos.webhooks, simulador: deps.simuladorGsg, config });
   if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });

@@ -14,11 +14,17 @@
  * permisos son los de siempre: `conversaciones:leer` para leer y `mensajes:enviar` para escribir.
  */
 
+import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Repos } from '../../db/repos.js';
 import type { Sender } from '../../outbound/sender.js';
-import { respuestaDeEnvio } from './routes.js';
+import { respuestaDeEnvio, mediaSchema, TIPOS_MEDIA } from './routes.js';
+import { bajarMedia } from './media-saliente.js';
+import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
+import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
 import { archivoDeMensaje } from './archivos-gsg.js';
 import { trackingDeEntrega } from '../../entregas/repo.js';
 import { nombreDeEtiqueta } from '../../archive/clasificar.js';
@@ -33,6 +39,10 @@ export interface ApiConversacionesGsgDeps {
    * sin enlaces. Ver src/api/v1/archivos-gsg.ts.
    */
   archivos?: { publicBase: string; secreto: string };
+  /** Donde se guardan los ficheros que GSG manda por URL (`media`), para que el chat los pinte. */
+  mediaDir?: string;
+  /** Con que se bajan los ficheros de `media.url`. Para pruebas. */
+  fetchImpl?: typeof fetch;
 }
 
 /** Un token del chat embebido solo abre la conversacion para la que se emitio. */
@@ -49,9 +59,13 @@ const consultaSchema = z.object({
 /** Un id que GSG puede mandar como texto o como numero. */
 const idDeGsg = z.union([z.string(), z.number()]).transform((v) => String(v).trim()).pipe(z.string().min(1).max(191));
 
-const mensajeSchema = z.object({
+const mensajeSchema = z
+  .object({
   tracking: z.string().trim().min(1).max(191),
-  texto: z.string().trim().min(1).max(4000),
+  /** El mensaje; con `media` es el pie de la foto, el video o el documento. */
+  texto: z.string().trim().min(1).max(4000).optional(),
+  /** Una foto, un video, un audio o un documento, por URL. */
+  media: mediaSchema.optional(),
   /** El id que GSG le puso a este mensaje: con el, un reintento no se manda dos veces. */
   idExterno: idDeGsg,
   /** Quien escribe en GSG. */
@@ -62,7 +76,8 @@ const mensajeSchema = z.object({
     /** Su rol en GSG al momento de escribir (p. ej. motorizado, operador). */
     rol: z.string().trim().max(60).optional(),
   }),
-});
+  })
+  .refine((b) => b.texto || b.media, { message: 'hace falta texto o media' });
 
 /** `chat_id` (el nombre del diagrama de integracion) es el tracking: si no viene `tracking`, vale este. */
 const conChatId = (entrada: unknown): Record<string, unknown> => {
@@ -190,22 +205,42 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
 
     enCurso.add(b.idExterno);
     try {
-      const outcome = await sender.send({
+      // Lo escribio una persona de GSG: sale firmado asi y el bot se calla en este chat.
+      // Y lo tecleo de verdad, en la pantalla de GSG: igual que en el chat de
+      // aqui. Asi el envio no finge el tecleo (hasta 9 s de "escribiendo...")
+      // ni espera turno detras de la cola automatica, y las guardas de
+      // consentimiento y volumen no aplican, que son para las campanas.
+      const comun = {
         phone: entrega.phone,
-        kind: 'freeform',
-        category: 'UTILITY',
-        text: b.texto,
-        // Lo escribio una persona de GSG: sale firmado asi y el bot se calla en este chat.
-        origen: 'persona',
+        category: 'UTILITY' as const,
+        origen: 'persona' as const,
         autorNombre: b.usuario.nombre,
         atiendePersona: true,
-        // Y lo tecleo de verdad, en la pantalla de GSG: igual que en el chat de
-        // aqui. Asi el envio no finge el tecleo (hasta 9 s de "escribiendo...")
-        // ni espera turno detras de la cola automatica, y las guardas de
-        // consentimiento y volumen no aplican, que son para las campanas.
         manual: true,
-        emisor: { tipo: 'gsg', usuarioId: b.usuario.id, rol: b.usuario.rol ?? null, tracking, idExterno: b.idExterno },
-      });
+        emisor: { tipo: 'gsg' as const, usuarioId: b.usuario.id, rol: b.usuario.rol ?? null, tracking, idExterno: b.idExterno },
+      };
+      let outcome;
+      if (b.media) {
+        const kindPedido = b.media.tipo ? TIPOS_MEDIA[b.media.tipo] : undefined;
+        if (b.media.tipo && !kindPedido) return reply.code(400).send({ error: 'media.tipo tiene que ser imagen, video, audio o documento' });
+        const bajado = await bajarMedia(b.media.url, kindPedido, deps.fetchImpl ?? fetch);
+        if (!bajado.ok) return reply.code(400).send({ error: bajado.error });
+        const kind = kindPedido ?? tipoDeAdjuntoSaliente(bajado.mimeType);
+        const pie = (b.texto ?? b.media.caption)?.trim() || undefined;
+        if (kind === 'audio' && b.texto) return reply.code(400).send({ error: 'un audio no lleva texto: manda el audio solo y el texto en otro mensaje' });
+        // Un tipo generico (octet-stream) con nombre: la extension del nombre manda.
+        const porMime = extensionDe(bajado.mimeType, kind);
+        const extension = porMime === '.bin' && b.media.nombre?.includes('.') ? `.${b.media.nombre.split('.').pop()!.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'}` : porMime;
+        const id = idDeMedia(`api:${randomUUID()}`, extension);
+        await writeFile(path.join(deps.mediaDir ?? mediaDirectory(), id), bajado.datos);
+        outcome = await sender.send({
+          ...comun,
+          kind: 'media',
+          media: { id, kind, datos: bajado.datos, mimeType: bajado.mimeType, filename: b.media.nombre || undefined, caption: kind === 'audio' ? undefined : pie, voz: kind === 'audio' && Boolean(b.media.voz) },
+        });
+      } else {
+        outcome = await sender.send({ ...comun, kind: 'freeform', text: b.texto! });
+      }
       if (outcome.ok) {
         await guardados
           .guardar({ idExterno: b.idExterno, tracking, usuarioId: b.usuario.id, usuarioNombre: b.usuario.nombre ?? null, rol: b.usuario.rol ?? null, phone: entrega.phone, wamid: outcome.wamid ?? null })

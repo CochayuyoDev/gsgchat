@@ -12,6 +12,8 @@
  * se recuerda un rato y la repeticion se ignora.
  */
 
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Repos, TemplateQuality, TemplateStatus } from '../db/repos.js';
@@ -23,6 +25,7 @@ import { TtlCache } from '../util/cache.js';
 import { esPausaAutomatica } from '../salud/monitor.js';
 import { perteneceAlChatActual } from './alcance-chat.js';
 import { entradaAdmitida } from './entradas-admitidas.js';
+import { extensionDe, idDeMedia, leerMedia, mediaDirectory, type MediaKind } from './local/media.js';
 
 export interface WebhookDeps extends InboundDeps {
   repos: Repos;
@@ -30,6 +33,8 @@ export interface WebhookDeps extends InboundDeps {
   settings: SettingsService;
   /** Ids de mensajes ya procesados; si falta, no se deduplica. */
   seen?: TtlCache<true>;
+  /** Donde se guardan los ficheros que llegan (por defecto, el de siempre). */
+  mediaDir?: string;
 }
 
 type RawRequest = FastifyRequest & { rawBody?: Buffer };
@@ -167,7 +172,9 @@ export async function processChange(
           if (seen.get(message.id)) continue;
           seen.set(message.id, true);
         }
-        await handleInboundMessage(conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' }), profileName, deps);
+        const entrante = conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' });
+        await guardarMediaDeMeta(entrante, deps);
+        await handleInboundMessage(entrante, profileName, deps);
       }
       return;
     }
@@ -350,13 +357,35 @@ export async function processChange(
 }
 
 /**
+ * Meta solo guarda el fichero un tiempo (unos 30 dias): si nadie lo abre antes,
+ * la foto, el video o el audio desaparecen del chat. Por eso se baja en cuanto
+ * llega y se deja en el disco, con el nombre que ya busca `GET /archivos/:token`
+ * (ver src/api/v1/archivos-gsg.ts). Si falla no se pierde nada: se vuelve a
+ * intentar cuando alguien lo abra.
+ */
+async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, deps: WebhookDeps): Promise<void> {
+  const media = message.media as { id?: unknown; mimeType?: unknown } | undefined;
+  if (!media || typeof media.id !== 'string' || typeof media.mimeType !== 'string' || !deps.wa.downloadMedia) return;
+  try {
+    const dir = deps.mediaDir ?? mediaDirectory();
+    const copia = idDeMedia(`meta:${media.id}`, extensionDe(media.mimeType, message.type as MediaKind));
+    if (await leerMedia(dir, copia)) return;
+    const bajado = await deps.wa.downloadMedia(media.id);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, copia), bajado.datos);
+  } catch (error) {
+    console.warn('[webhook] no se pudo guardar el archivo de Meta al recibirlo', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
  * La API de Meta trae el adjunto como `image: { id, mime_type, caption }` (o
  * `audio`, `video`): solo el id, el fichero se baja aparte cuando alguien lo
  * abre (ver src/api/v1/archivos-gsg.ts). Aqui se pasa a `media`, la forma
  * comun con la que se guarda en el chat.
  */
 export function conMediaDeMeta<T extends { type?: string; media?: unknown }>(message: T): T {
-  if (message.media || !message.type || !['image', 'audio', 'video'].includes(message.type)) return message;
+  if (message.media || !message.type || !['image', 'audio', 'video', 'sticker'].includes(message.type)) return message;
   const crudo = (message as Record<string, unknown>)[message.type] as { id?: unknown; mime_type?: unknown; caption?: unknown; voice?: unknown } | undefined;
   if (!crudo || typeof crudo.id !== 'string') return message;
   return {
