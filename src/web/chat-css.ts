@@ -420,6 +420,7 @@ export const CHAT_CSS = `
   .pin-cliente .pin-titulo { font-weight: 600; font-size: 13px; }
   .adjunto { display: block; margin: 2px 0 6px; max-width: min(320px, 100%); }
   .adjunto-foto img, .adjunto-video video { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 8px; background: var(--borde); }
+  .adjunto-sticker img { display: block; width: 160px; max-width: 100%; height: auto; background: transparent; }
   .adjunto-audio { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
   .adjunto-audio audio { width: min(280px, 100%); }
   .pin-cliente .pin-coords { font-family: ui-monospace, Consolas, monospace; font-size: 13px; user-select: all; }

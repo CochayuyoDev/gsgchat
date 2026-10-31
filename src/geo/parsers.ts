@@ -98,6 +98,11 @@ function parseData3d4d(target: ParseTarget): RawCandidate[] {
   return orden.map(([latRaw, lngRaw]) => ({ latRaw, lngRaw, source: 'data_3d4d', confidence: 'high', ...(warning ? { warning } : {}) }));
 }
 
+/** Mapa incrustado: `/maps/embed?pb=...!2d<lng>!3d<lat>` (aqui el orden es longitud, latitud). */
+function parseEmbed(target: ParseTarget): RawCandidate[] {
+  return pares(target, new RegExp(String.raw`!1d[\d.]+!2d(${NUM})!3d(${NUM})`, 'g')).map(([lngRaw, latRaw]) => ({ latRaw, lngRaw, source: 'data_3d4d', confidence: 'high' }));
+}
+
 /** 8. Waze live-map: `?to=ll.<lat>,<lng>`. */
 function parseWazeTo(target: ParseTarget): RawCandidate[] {
   return pares(target, new RegExp(String.raw`[?&]to=ll\.${PAR}`, 'gi')).map(([latRaw, lngRaw]) => ({ latRaw, lngRaw, source: 'll_param', confidence: 'high' }));
@@ -192,6 +197,7 @@ export function safeDecode(value: string): string {
 /** Orden de prioridad. Cambiarlo cambia la politica del extractor (ver la cabecera). */
 export const PARSERS: Array<(t: ParseTarget) => RawCandidate[]> = [
   parseData3d4d, //                                   1
+  parseEmbed,
   deQuery('query'), //                                2
   deQuery('q', { loc: true }), //                     3
   deQuery('destination'), //                          4

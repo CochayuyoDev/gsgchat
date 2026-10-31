@@ -1224,7 +1224,7 @@ document.getElementById('bajar').onclick = function () {
  * arriba, un refresco no le tira la vista al final.
  */
 function renderMessages(messages, scrollToEnd, mantenerVista) {
-  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive', 'image', 'audio', 'video'].indexOf(m.kind) >= 0; });
+  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive', 'image', 'audio', 'video', 'sticker'].indexOf(m.kind) >= 0; });
   messages = messages.filter(function (m) { return !m.expiresAt || Date.parse(m.expiresAt) > Date.now(); });
   pintados = messages;
   clearTimeout(expiryTimer);
@@ -1374,6 +1374,7 @@ function adjuntoHtml(m) {
   if (m.kind === 'image') return '<a class="adjunto adjunto-foto" href="' + url + '" target="_blank" rel="noopener" title="Abrir la foto"><img src="' + url + '" alt="Foto del cliente" loading="lazy"></a>';
   if (m.kind === 'audio') return '<div class="adjunto adjunto-audio"><span>🎤 Nota de voz</span><audio controls preload="none" src="' + url + '"></audio></div>';
   if (m.kind === 'video') return '<div class="adjunto adjunto-video"><video controls preload="metadata" src="' + url + '"></video></div>';
+  if (m.kind === 'sticker') return '<div class="adjunto adjunto-sticker"><img src="' + url + '" alt="Sticker del cliente" loading="lazy"></div>';
   return '';
 }
 

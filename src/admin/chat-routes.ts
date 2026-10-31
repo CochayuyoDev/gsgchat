@@ -757,7 +757,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const goneIds = body.knownIds.filter(id => !conocidasActualizadas.some(m => String(m.id) === id));
     const nextAfterId = visiblesNuevos.length ? String(visiblesNuevos.at(-1)!.id) : body.afterId;
     return responderLectura(request, reply, {
-      messages: visibles.map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString() })),
+      // Con el mismo `archivo` que el hilo completo: si faltara, la pantalla sustituye el mensaje
+      // que ya pintaba por esta version y la foto, el audio o el video desaparecen hasta recargar.
+      messages: visibles.map(m => ({
+        ...m,
+        expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        archivo: archivoDeMensaje(m, { publicBase: '.', secreto: config.TRACKING_SECRET }),
+      })),
       goneIds,
       hasMoreNew: nuevos.length > limite,
       nextAfterId,

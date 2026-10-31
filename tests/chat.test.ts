@@ -18,6 +18,7 @@ import type { OutboundQueue } from '../src/outbound/queue.js';
 import { processChange } from '../src/whatsapp/webhook.js';
 import { readInbound } from '../src/handlers/inbound.js';
 import { idDeMedia } from '../src/whatsapp/local/media.js';
+import { chatPage } from '../src/web/chat-page.js';
 import {
   approvedTemplate,
   createFakeRepos,
@@ -325,6 +326,32 @@ describe('lista de conversaciones', () => {
     expect(respuesta.json().messages.map((m: { id: number }) => m.id)).toEqual([salida, entrada]);
     expect(respuesta.json().nextAfterId).toBe(String(entrada));
     expect(respuesta.json().messages[0].expiresAt).toBeTruthy();
+  });
+
+  it('al sincronizar, el mensaje con foto, audio, video o sticker conserva su archivo (si no, desaparecia hasta recargar)', async () => {
+    const contact = await repos.contacts.upsertFromInbound('5215500007811', 'Eva');
+    const inicio = await repos.messages.add({ contactId: contact.id, direction: 'out', kind: 'text', wamid: 'wamid.arch.out', body: 'Hola', status: 'sent', payload: { origen: 'sistema' } });
+    const ids: Record<string, number> = {};
+    for (const [kind, mime] of [['image', 'image/jpeg'], ['audio', 'audio/ogg'], ['video', 'video/mp4'], ['sticker', 'image/webp']] as const) {
+      ids[kind] = await repos.messages.add({ contactId: contact.id, direction: 'in', kind, wamid: `wamid.arch.${kind}`, body: `(${kind})`, status: 'delivered', payload: { media: { id: `${kind}`.padEnd(24, '0') + '.bin', mimeType: mime } } });
+    }
+    // El hilo completo y la sincronizacion tienen que traer el mismo `archivo`.
+    const hilo = await app.inject({ url: `/admin/chat/${contact.id}?read=false`, headers: auth });
+    const sync = await app.inject({ method: 'POST', url: `/admin/chat/${contact.id}/sync`, headers: auth, payload: { afterId: String(inicio), knownIds: Object.values(ids).map(String) } });
+    expect(sync.statusCode).toBe(200);
+    for (const [kind, id] of Object.entries(ids)) {
+      const deHilo = hilo.json().messages.find((m: { id: number }) => m.id === id);
+      const deSync = sync.json().messages.find((m: { id: number }) => m.id === id);
+      expect(deHilo.archivo, kind).toMatchObject({ url: expect.stringMatching(/^\.\/archivos\/[\w-]+\.[\w-]+$/) });
+      expect(deSync.archivo, kind).toEqual(deHilo.archivo);
+    }
+    expect(sync.json().messages.find((m: { id: number }) => m.id === ids.sticker).archivo.tipo).toBe('sticker');
+  });
+
+  it('la pantalla del chat pinta stickers, fotos, audios y videos', () => {
+    const html = chatPage({ proveedor: 'local', configured: true, nombreNegocio: 'Prueba' });
+    expect(html).toContain("'image', 'audio', 'video', 'sticker'");
+    expect(html).toContain('adjunto-sticker');
   });
 
   it('busca por nombre y por numero', async () => {

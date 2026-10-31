@@ -18,7 +18,7 @@ import { enlacesDeLaPagina, needsResolution, resolveShortLink } from './resolve.
 import { isAllowedHost } from '../util/net-guard.js';
 import { precisionFromDecimals, validate } from './validate.js';
 
-const URL_RE = /\b(?:https?:\/\/|www\.|(?:maps\.app\.)?goo\.gl\/|maps\.google\.[a-z.]{2,6}\/)[^\s<>"']+/gi;
+const URL_RE = /\b(?:https?:\/\/|www\.|(?:maps\.app\.)?goo\.gl\/|maps\.google\.[a-z.]{2,6}\/|google\.[a-z.]{2,6}\/maps|maps\.apple\.com\/|(?:ul\.)?waze\.com\/)[^\s<>"']+/gi;
 const GEO_URI_RE = /\bgeo:-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?[^\s<>"']*/i;
 
 /** Enlace canonico para reenviar por WhatsApp. */
