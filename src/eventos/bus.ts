@@ -14,6 +14,7 @@
  */
 
 import { EventEmitter } from 'node:events';
+import type { ArchivoDeMensaje } from '../api/v1/archivos-gsg.js';
 
 /** Un contacto tal como viaja hacia fuera: lo justo para reconocerlo. */
 export interface ContactoEvento {
@@ -35,6 +36,8 @@ export interface Eventos {
       /** El anuncio (Facebook/Instagram) desde el que escribio, si vino de uno. */
       anuncio: { id: string | null; titulo: string | null; texto: string | null; url: string | null; imagen: string | null; clid: string | null; origen: string | null } | null;
       datos: Record<string, unknown> | null;
+      /** La foto, el video, el audio o el documento: un enlace firmado que abre el fichero tal cual (el mismo `archivo` del historial). null si no lleva. */
+      archivo: ArchivoDeMensaje | null;
       fecha: string;
     };
     /** Si se puede contestar con texto libre por la API de Meta. */
@@ -47,7 +50,7 @@ export interface Eventos {
   'mensaje.enviado': {
     contacto: ContactoEvento;
     /** `autor`: quien lo mando: 'persona' (a mano), 'ia' (el asistente) o 'sistema' (reglas, reparto, campanas, la API). `voz`: salio como nota de voz. */
-    mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string; datos: Record<string, unknown> | null };
+    mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string; datos: Record<string, unknown> | null; archivo: ArchivoDeMensaje | null };
     /** Igual que en `mensaje.recibido`: el chat de GSG al que pertenece. */
     chatId: string | null;
     trackings: string[];

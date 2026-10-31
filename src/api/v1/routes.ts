@@ -81,7 +81,7 @@ export interface ApiV1Deps {
 }
 
 /** Los tipos de fichero con nombres en espanol (y en ingles, por si acaso). */
-const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
+export const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
   imagen: 'image',
   foto: 'image',
   image: 'image',
@@ -93,7 +93,7 @@ const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
   file: 'document',
 };
 
-const mediaSchema = z.object({
+export const mediaSchema = z.object({
   /** De donde se baja el fichero (http o https). */
   url: z.string().trim().url().max(2000),
   /** imagen | video | audio | documento. Sin el, se deduce del tipo del fichero. */

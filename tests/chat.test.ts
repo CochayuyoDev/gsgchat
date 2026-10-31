@@ -17,6 +17,7 @@ import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { processChange } from '../src/whatsapp/webhook.js';
 import { readInbound } from '../src/handlers/inbound.js';
+import { idDeMedia } from '../src/whatsapp/local/media.js';
 import {
   approvedTemplate,
   createFakeRepos,
@@ -176,6 +177,23 @@ describe('la conversacion se guarda sola', () => {
     expect(nuevos[0]).toMatchObject({ direction: 'in', kind: 'image', payload: { media: { id: 'meta-foto-1', mimeType: 'image/jpeg', caption: 'mi fachada' } } });
   });
 
+  it('la foto de Meta se baja y se guarda en cuanto llega, para que no desaparezca cuando Meta la borre', async () => {
+    const FOTO = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    const bajados: string[] = [];
+    const conDescarga = { ...deps, mediaDir, wa: { ...wa, downloadMedia: async (id: string) => { bajados.push(id); return { datos: FOTO, mimeType: 'image/jpeg' }; } } } as typeof deps;
+    await processChange('messages', inbound({ type: 'image', text: undefined, image: { id: 'meta-foto-guardada', mime_type: 'image/jpeg' } } as Partial<InboundMessage>), conDescarga);
+    expect(bajados).toEqual(['meta-foto-guardada']);
+    const copia = idDeMedia('meta:meta-foto-guardada', '.jpg');
+    expect(readFileSync(join(mediaDir, copia)).equals(FOTO)).toBe(true);
+    // Un mensaje repetido no la baja otra vez; y si la descarga falla, el mensaje se guarda igual.
+    await processChange('messages', inbound({ type: 'image', text: undefined, image: { id: 'meta-foto-guardada', mime_type: 'image/jpeg' } } as Partial<InboundMessage>), conDescarga);
+    expect(bajados).toHaveLength(1);
+    const rota = { ...conDescarga, wa: { ...wa, downloadMedia: async () => { throw new Error('Meta no responde'); } } } as typeof deps;
+    const antes = repos.messages._all.length;
+    await processChange('messages', inbound({ type: 'video', text: undefined, video: { id: 'meta-video-roto', mime_type: 'video/mp4' } } as Partial<InboundMessage>), rota);
+    expect(repos.messages._all.length).toBe(antes + 1);
+  });
+
   it('el estado de entrega llega al mensaje', async () => {
     await repos.contacts.upsertFromInbound('5215500002222');
     await repos.contacts.touchInbound('5215500002222', new Date());
@@ -230,12 +248,19 @@ describe('lista de conversaciones', () => {
     expect(cambiado.body).toContain('segundo');
   });
 
-  it('descarta documentos y stickers antes de crear contactos o registrar mensajes', async () => {
-    for (const type of ['sticker', 'document']) {
-      await processChange('messages', inbound({ type } as Partial<InboundMessage>), deps);
-    }
+  it('descarta documentos antes de crear contactos o registrar mensajes', async () => {
+    await processChange('messages', inbound({ type: 'document' } as Partial<InboundMessage>), deps);
     expect(await repos.contacts.getByPhone('5215500001111')).toBeNull();
     expect(repos.messages._all).toHaveLength(0);
+  });
+
+  it('un sticker del cliente se guarda con su archivo (se baja al llegar) y no se le contesta', async () => {
+    const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBP')]);
+    const conDescarga = { ...deps, mediaDir, wa: { ...wa, downloadMedia: async () => ({ datos: WEBP, mimeType: 'image/webp' }) } } as typeof deps;
+    await processChange('messages', inbound({ type: 'sticker', text: undefined, sticker: { id: 'meta-sticker-1', mime_type: 'image/webp' } } as Partial<InboundMessage>), conDescarga);
+    expect(repos.messages._all).toHaveLength(1);
+    expect(repos.messages._all[0]).toMatchObject({ direction: 'in', kind: 'sticker', payload: { media: { id: 'meta-sticker-1', mimeType: 'image/webp' } } });
+    expect(readFileSync(join(mediaDir, idDeMedia('meta:meta-sticker-1', '.webp'))).equals(WEBP)).toBe(true);
   });
 
   it('fotos, audios y videos se guardan sin respuesta del bot', async () => {
