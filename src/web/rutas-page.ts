@@ -313,7 +313,7 @@ export function rutasPage(opts: RutasOpts): string {
         <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
         <div id="aj-pasos"></div>
-        <div class="aj-editor-inicial" id="aj-editor-inicial"><div class="aj-ei-cab"><h4>Primer mensaje que recibe el cliente</h4><span id="aj-estado-texto-inicial" class="chip" role="status">Cargando…</span></div><p class="muted">Es lo que le llega al cliente cuando GSG manda su pedido. Cámbialo como quieras: a la derecha ves cómo le llega.</p><div class="aj-ei-cols"><div><label for="aj-texto-inicial">Texto</label><textarea id="aj-texto-inicial" rows="13" maxlength="2000" spellcheck="true"></textarea><p class="aj-ei-ayuda">Toca un dato para ponerlo donde está el cursor. Si a un pedido le falta un dato, esa línea no sale.</p><div class="aj-ei-datos" id="aj-datos-inicial"></div></div><div><span class="muted">Así le llega</span><div class="previa aj-ei-previa" id="aj-previa-inicial"></div></div></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar el primer mensaje</button><button type="button" class="btn sm" id="aj-fabrica-texto-inicial">Volver al texto de fábrica</button></div></div>
+        <div class="aj-editor-inicial" id="aj-editor-inicial"><div class="aj-ei-cab"><h4>Primer mensaje que recibe el cliente</h4><span id="aj-estado-texto-inicial" class="chip" role="status">Cargando…</span></div><p class="muted">Es lo que le llega al cliente cuando GSG manda su pedido. Cámbialo como quieras: a la derecha ves cómo le llega.</p><div class="aj-ei-cols"><div><label for="aj-texto-inicial">Texto</label><textarea id="aj-texto-inicial" rows="13" maxlength="2000" spellcheck="true"></textarea><p class="aj-ei-ayuda">Toca un dato para ponerlo donde está el cursor. Si a un pedido le falta un dato, esa línea no sale.</p><div class="aj-ei-datos" id="aj-datos-inicial"></div></div><div><span class="muted">Así le llega</span><div class="previa aj-ei-previa" id="aj-previa-inicial"></div></div></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar el primer mensaje</button><button type="button" class="btn sm" id="aj-fabrica-texto-inicial">Volver al texto de fábrica</button></div></div><div class="aj-editor-inicial" id="aj-editor-otros"><div class="aj-ei-cab"><h4>Los demás mensajes del sistema</h4><span id="aj-estado-otros" class="chip" role="status">Cargando…</span></div><p class="muted">Los otros mensajes fijos del bot: el mensaje final («Ubicación registrada») y los del cambio de ubicación. El mensaje inicial y los recordatorios se editan arriba. No incluye al motorizado, al asistente ni a la IA. Las variables van entre llaves. Un texto igual al de fábrica no se guarda como propio; vaciarlo lo devuelve al de fábrica.</p><div id="aj-otros-lista"></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-otros">Guardar los mensajes</button></div></div>
       </section>
 
       <section class="aj-seccion">
@@ -1657,6 +1657,50 @@ document.getElementById('aj-texto-inicial').addEventListener('input', previaInic
 document.getElementById('aj-guardar-texto-inicial').onclick = function () { guardarTextoInicial(document.getElementById('aj-texto-inicial').value); };
 document.getElementById('aj-fabrica-texto-inicial').onclick = function () { guardarTextoInicial(TEXTO_INICIAL_FABRICA); };
 cargarTextoInicial();
+
+var OTROS_DEL_BOT=['ubicacionRegistrada','ubicacionCambiada','invitarCambioUbicacion','invitarOtroCambioUbicacion','cambioUbicacionAntes','cambioUbicacionTarde'];
+var otrosDef = {};
+async function cargarOtrosTextos() {
+  var estado = document.getElementById('aj-estado-otros');
+  try {
+    var d = await api('/admin/entregas');
+    var t = d.textos || {}, guardados = (d.ajustes && d.ajustes.textos) || {};
+    otrosDef = t.porDefecto || {};
+    var vars = t.variables || {}, desc = t.descripcion || {}, lista = document.getElementById('aj-otros-lista');
+    lista.innerHTML = '';
+    Object.keys(otrosDef).forEach(function (k) {
+      if (OTROS_DEL_BOT.indexOf(k) < 0) return;
+      var l = document.createElement('label');
+      l.style.display = 'block';
+      l.style.marginBottom = '12px';
+      l.innerHTML = '<strong>' + esc(k) + '</strong> <span class="muted">' + esc(desc[k] || '') + '</span>' + (vars[k] && vars[k].length ? '<span class="muted"> Variables: ' + esc(vars[k].join(' ')) + '</span>' : '') + '<textarea data-otro="' + esc(k) + '" rows="4" maxlength="1500" style="width:100%"></textarea>';
+      l.querySelector('textarea').value = (guardados[k] || '').trim() ? guardados[k] : otrosDef[k];
+      lista.appendChild(l);
+    });
+    estado.textContent = 'Listo';
+    estado.className = 'chip tono-gris';
+  } catch (e) { estado.textContent = e.message; }
+}
+async function guardarOtrosTextos() {
+  var boton = document.getElementById('aj-guardar-otros');
+  var estado = document.getElementById('aj-estado-otros');
+  boton.disabled = true;
+  estado.textContent = 'Guardando…';
+  try {
+    var textos = {};
+    Array.prototype.forEach.call(document.querySelectorAll('#aj-otros-lista textarea[data-otro]'), function (ta) {
+      var k = ta.getAttribute('data-otro'), v = ta.value.trim();
+      textos[k] = (!v || v === (otrosDef[k] || '').trim()) ? '' : ta.value;
+    });
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: textos } });
+    estado.textContent = 'Guardado';
+    toast('Mensajes guardados.');
+    await cargarOtrosTextos();
+  } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
+}
+document.getElementById('aj-guardar-otros').onclick = guardarOtrosTextos;
+cargarOtrosTextos();
 
 /* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */
 async function cargarAjustes() {
