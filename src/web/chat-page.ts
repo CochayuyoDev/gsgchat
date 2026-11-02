@@ -1362,6 +1362,112 @@ function cuerpoVisible(m) {
   return m.payload && m.payload.interactive && m.payload.interactive.locationRequest ? cuerpo + '\n\n📍 [Enviar ubicación]' : cuerpo;
 }
 
+/* ---- Nota de voz: el reproductor de WhatsApp (play, onda, tiempo y velocidad) ---- */
+var AU = { el: null, url: null, vel: 1 };
+function audioTiempo(s) {
+  s = Math.max(0, Math.round(Number(s) || 0));
+  return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+}
+/* La onda sale del enlace: la misma nota se ve siempre igual, sin bajar el audio. */
+function audioOnda(url, fraccion) {
+  var h = 7, barras = '', total = 34, activas = Math.round(total * fraccion);
+  for (var i = 0; i < url.length; i++) h = (h * 31 + url.charCodeAt(i)) >>> 0;
+  for (var j = 0; j < total; j++) {
+    h = (h * 1103515245 + 12345) >>> 0;
+    var alto = 22 + Math.round(((h >>> 8) % 100) * 0.7);
+    barras += '<b' + (j < activas ? ' class="on"' : '') + ' style="height:' + alto + '%"></b>';
+  }
+  return barras;
+}
+/* Lo que dura: el audio si ya lo sabe; si no (Chrome da Infinity en algunos ogg), lo que dijo el telefono. */
+var AUDUR = {};
+function audioDur(el, seg, url) {
+  var d = el ? el.duration : NaN;
+  return isFinite(d) && d > 0 ? d : (Number(seg) || (url && AUDUR[url]) || 0);
+}
+/* Los audios que llegan por Meta no traen su duracion: se lee de cada uno (solo la cabecera, gracias a los rangos) para mostrarla antes de dar play. */
+function audioPrecargar(url) {
+  if (AUDUR[url] !== undefined) return;
+  AUDUR[url] = 0;
+  var el = new Audio();
+  el.preload = 'metadata';
+  el.addEventListener('loadedmetadata', function () {
+    if (isFinite(el.duration) && el.duration > 0) { AUDUR[url] = el.duration; audioPintar(url); }
+  });
+  el.src = url;
+}
+function audioHtml(a, url) {
+  var activo = AU.url === a.url && AU.el;
+  var dur = audioDur(activo ? AU.el : null, a.segundos, a.url);
+  if (!dur) setTimeout(function () { audioPrecargar(a.url); }, 0);
+  var frac = activo && dur ? Math.min(1, AU.el.currentTime / dur) : 0;
+  var suena = activo && !AU.el.paused;
+  var tiempo = activo && (suena || AU.el.currentTime > 0) ? AU.el.currentTime : dur;
+  return '<div class="adjunto adjunto-audio wa-audio' + (suena ? ' sonando' : '') + '" data-url="' + url + '" data-seg="' + (a.segundos || '') + '">' +
+    '<button type="button" class="wa-a-play" aria-label="' + (suena ? 'Pausar' : 'Reproducir') + '"></button>' +
+    '<div class="wa-a-barra" role="slider" aria-label="Posicion de la nota de voz">' + audioOnda(a.url, frac) + '</div>' +
+    '<span class="wa-a-t">' + (tiempo ? audioTiempo(tiempo) : '🎤') + '</span>' +
+    '<button type="button" class="wa-a-vel"' + (activo ? '' : ' hidden') + ' aria-label="Velocidad">' + AU.vel + 'x</button>' +
+    '</div>';
+}
+function audioPintar(url) {
+  var nodos = document.querySelectorAll('.wa-audio');
+  for (var i = 0; i < nodos.length; i++) {
+    var w = nodos[i];
+    if (w.dataset.url !== url) continue;
+    var activo = AU.url === url && AU.el;
+    var dur = audioDur(activo ? AU.el : null, w.dataset.seg, url);
+    var frac = activo && dur ? Math.min(1, AU.el.currentTime / dur) : 0;
+    var barras = w.querySelectorAll('.wa-a-barra b'), n = Math.round(barras.length * frac);
+    for (var k = 0; k < barras.length; k++) barras[k].classList.toggle('on', k < n);
+    var suena = activo && !AU.el.paused;
+    w.classList.toggle('sonando', !!suena);
+    w.querySelector('.wa-a-play').setAttribute('aria-label', suena ? 'Pausar' : 'Reproducir');
+    var t = activo && (suena || AU.el.currentTime > 0) ? AU.el.currentTime : dur;
+    w.querySelector('.wa-a-t').textContent = t ? audioTiempo(t) : '🎤';
+    var v = w.querySelector('.wa-a-vel');
+    v.hidden = !activo; v.textContent = AU.vel + 'x';
+  }
+}
+function audioAlternar(url) {
+  if (AU.el && AU.url === url) {
+    if (AU.el.paused) AU.el.play().catch(function () {}); else AU.el.pause();
+    return;
+  }
+  if (AU.el) { var antes = AU.url; AU.el.pause(); AU.el = null; AU.url = null; audioPintar(antes); }
+  var el = new Audio(url);
+  el.preload = 'auto';
+  el.playbackRate = AU.vel;
+  AU.el = el; AU.url = url;
+  ['timeupdate', 'play', 'pause', 'loadedmetadata', 'durationchange'].forEach(function (e) { el.addEventListener(e, function () { audioPintar(url); }); });
+  el.addEventListener('ended', function () { el.currentTime = 0; audioPintar(url); });
+  el.addEventListener('error', function () {
+    AU.el = null; AU.url = null;
+    document.querySelectorAll('.wa-audio').forEach(function (w) { if (w.dataset.url === url) { w.classList.remove('sonando'); w.querySelector('.wa-a-t').textContent = 'No se pudo reproducir'; } });
+  });
+  audioPintar(url);
+  el.play().catch(function () {});
+}
+document.addEventListener('click', function (ev) {
+  var w = ev.target.closest && ev.target.closest('.wa-audio');
+  if (!w) return;
+  var url = w.dataset.url;
+  if (ev.target.closest('.wa-a-play')) { audioAlternar(url); return; }
+  if (ev.target.closest('.wa-a-vel')) {
+    AU.vel = AU.vel === 1 ? 1.5 : AU.vel === 1.5 ? 2 : 1;
+    if (AU.el) AU.el.playbackRate = AU.vel;
+    audioPintar(url);
+    return;
+  }
+  var barra = ev.target.closest('.wa-a-barra');
+  if (barra) {
+    if (AU.url !== url) audioAlternar(url);
+    var el = AU.el, r = barra.getBoundingClientRect();
+    var ir = function () { var d = audioDur(el, w.dataset.seg, url); if (el && d) el.currentTime = d * Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)); };
+    if (el && audioDur(el, w.dataset.seg, url)) ir(); else if (el) el.addEventListener('loadedmetadata', ir, { once: true });
+  }
+});
+
 /**
  * La foto, el audio o el video que mando el cliente, para verlo o escucharlo
  * aqui. El enlace es el mismo que recibe GSG en el historial (firmado). Si el
@@ -1372,7 +1478,7 @@ function adjuntoHtml(m) {
   if (!a || !a.url) return '';
   var url = esc(a.url);
   if (m.kind === 'image') return '<a class="adjunto adjunto-foto" href="' + url + '" target="_blank" rel="noopener" title="Abrir la foto"><img src="' + url + '" alt="Foto del cliente" loading="lazy"></a>';
-  if (m.kind === 'audio') return '<div class="adjunto adjunto-audio"><span>🎤 Nota de voz</span><audio controls preload="none" src="' + url + '"></audio></div>';
+  if (m.kind === 'audio') return audioHtml(a, url);
   if (m.kind === 'video') return '<div class="adjunto adjunto-video"><video controls preload="metadata" src="' + url + '"></video></div>';
   if (m.kind === 'sticker') return '<div class="adjunto adjunto-sticker"><img src="' + url + '" alt="Sticker del cliente" loading="lazy"></div>';
   return '';

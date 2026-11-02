@@ -501,7 +501,7 @@ async function bajarAdjunto(
       dir: opts.mediaDir ?? mediaDirectory(),
       descargar: (m) =>
         conTope(
-          baileys.downloadMediaMessage(m as never, 'buffer', {}, reintento as never) as Promise<Buffer>,
+          baileys.downloadMediaMessage(m as never, 'stream', {}, reintento as never) as Promise<import('node:stream').Readable>,
           TOPE_DESCARGA_MS,
           'la descarga tardo demasiado',
         ),

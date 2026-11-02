@@ -25,7 +25,7 @@ import { TtlCache } from '../util/cache.js';
 import { esPausaAutomatica } from '../salud/monitor.js';
 import { perteneceAlChatActual } from './alcance-chat.js';
 import { entradaAdmitida } from './entradas-admitidas.js';
-import { extensionDe, idDeMedia, leerMedia, mediaDirectory, type MediaKind } from './local/media.js';
+import { abrirMedia, conCupoDeDescarga, extensionDe, idDeMedia, mediaDirectory, type MediaKind } from './local/media.js';
 
 export interface WebhookDeps extends InboundDeps {
   repos: Repos;
@@ -365,14 +365,20 @@ export async function processChange(
  */
 async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, deps: WebhookDeps): Promise<void> {
   const media = message.media as { id?: unknown; mimeType?: unknown } | undefined;
-  if (!media || typeof media.id !== 'string' || typeof media.mimeType !== 'string' || !deps.wa.downloadMedia) return;
+  if (!media || typeof media.id !== 'string' || typeof media.mimeType !== 'string' || (!deps.wa.downloadMedia && !deps.wa.downloadMediaToFile)) return;
   try {
     const dir = deps.mediaDir ?? mediaDirectory();
     const copia = idDeMedia(`meta:${media.id}`, extensionDe(media.mimeType, message.type as MediaKind));
-    if (await leerMedia(dir, copia)) return;
-    const bajado = await deps.wa.downloadMedia(media.id);
+    if (await abrirMedia(dir, copia).then((a) => { a?.flujo.destroy(); return a; })) return;
     await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, copia), bajado.datos);
+    await conCupoDeDescarga(async () => {
+      if (deps.wa.downloadMediaToFile) {
+        await deps.wa.downloadMediaToFile(media.id as string, path.join(dir, copia));
+        return;
+      }
+      const bajado = await deps.wa.downloadMedia!(media.id as string);
+      await writeFile(path.join(dir, copia), bajado.datos);
+    });
   } catch (error) {
     console.warn('[webhook] no se pudo guardar el archivo de Meta al recibirlo', error instanceof Error ? error.message : error);
   }

@@ -22,7 +22,8 @@ import type { FastifyInstance } from 'fastify';
 import type { Repos } from '../../db/repos.js';
 import type { Message } from '../../db/messages.js';
 import type { WhatsAppClient } from '../../whatsapp/client.js';
-import { extensionDe, idDeMedia, leerMedia, mediaDirectory } from '../../whatsapp/local/media.js';
+import { servirMedia } from '../../whatsapp/local/servir.js';
+import { abrirMedia, conCupoDeDescarga, extensionDe, idDeMedia, mediaDirectory, tamanoMedia } from '../../whatsapp/local/media.js';
 
 /** Lo que vale un enlace: GSG recibe uno nuevo cada vez que pide el historial. */
 export const DIAS_ENLACE_ARCHIVO = 7;
@@ -129,7 +130,7 @@ export interface ArchivosGsgDeps {
   secreto: string;
   mediaDir?: string;
   /** Para bajar de Meta lo que llego por la API oficial (solo trae el id). */
-  wa?: Pick<WhatsAppClient, 'downloadMedia'>;
+  wa?: Pick<WhatsAppClient, 'downloadMedia' | 'downloadMediaToFile'>;
 }
 
 /** `GET /archivos/:token`: el fichero de un mensaje, con el enlace firmado del historial. */
@@ -148,30 +149,31 @@ export async function registerArchivosGsg(app: FastifyInstance, deps: ArchivosGs
 
     // Lo guardado al recibirlo (QR o lo que se mando desde aqui) o una copia ya bajada de Meta.
     const copia = idDeMedia(`meta:${String(media.id)}`, extensionDe(mimeType, mensaje.kind as Parameters<typeof extensionDe>[1]));
-    let datos = (await leerMedia(dir, String(media.id))) ?? (await leerMedia(dir, copia));
-    if (!datos && deps.wa?.downloadMedia) {
-      const bajado = await deps.wa.downloadMedia(String(media.id)).catch((error: unknown) => {
-        request.log.warn({ err: error }, 'no se pudo bajar el archivo de Meta');
-        return null;
-      });
-      if (bajado) {
-        datos = bajado.datos;
-        await writeFile(path.join(dir, copia), bajado.datos).catch(() => undefined);
-      }
+    let enDisco = (await tamanoMedia(dir, String(media.id))) !== null ? String(media.id) : copia;
+    if ((await tamanoMedia(dir, enDisco)) === null && (deps.wa?.downloadMediaToFile || deps.wa?.downloadMedia)) {
+      await conCupoDeDescarga(async () => {
+        if (deps.wa?.downloadMediaToFile) {
+          await deps.wa.downloadMediaToFile(String(media.id), path.join(dir, copia));
+        } else {
+          const bajado = await deps.wa!.downloadMedia!(String(media.id));
+          await writeFile(path.join(dir, copia), bajado.datos);
+        }
+      }).catch((error: unknown) => request.log.warn({ err: error }, 'no se pudo bajar el archivo de Meta'));
+      enDisco = copia;
     }
-    if (!datos) return reply.code(404).send({ error: 'el archivo ya no está guardado' });
+    if ((await tamanoMedia(dir, enDisco)) === null) return reply.code(404).send({ error: 'el archivo ya no está guardado' });
 
     const nombre = typeof media.filename === 'string' ? media.filename.replace(/["\r\n]/g, '') : '';
     // Se abre en la pagina solo lo que no puede ejecutar nada (fotos, video, audio, PDF).
     // Un documento cualquiera (un HTML, un SVG) que mando el cliente se descarga.
     const seVe = /^(image\/(jpeg|png|webp|gif)|video\/[\w.+-]+|audio\/[\w.+-]+|application\/pdf)$/i.test(mimeType.split(';')[0]!.trim());
     const disposicion = seVe ? 'inline' : 'attachment';
-    return reply
-      .type(seVe ? mimeType : 'application/octet-stream')
-      .header('content-disposition', nombre ? `${disposicion}; filename="${encodeURIComponent(nombre)}"` : disposicion)
-      .header('content-security-policy', "default-src 'none'; sandbox")
-      .header('cache-control', 'private, max-age=86400')
-      .header('x-content-type-options', 'nosniff')
-      .send(datos);
+    return servirMedia(request, reply, dir, enDisco, {
+      'content-type': seVe ? mimeType : 'application/octet-stream',
+      'content-disposition': nombre ? `${disposicion}; filename="${encodeURIComponent(nombre)}"` : disposicion,
+      'content-security-policy': "default-src 'none'; sandbox",
+      'cache-control': 'private, max-age=86400',
+      'x-content-type-options': 'nosniff',
+    });
   });
 }
