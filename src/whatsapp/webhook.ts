@@ -25,7 +25,7 @@ import { TtlCache } from '../util/cache.js';
 import { esPausaAutomatica } from '../salud/monitor.js';
 import { perteneceAlChatActual } from './alcance-chat.js';
 import { entradaAdmitida } from './entradas-admitidas.js';
-import { abrirMedia, conCupoDeDescarga, extensionDe, idDeMedia, mediaDirectory, type MediaKind } from './local/media.js';
+import { tamanoMedia, conCupoDeDescarga, extensionDe, idDeMedia, mediaDirectory, type MediaKind } from './local/media.js';
 
 export interface WebhookDeps extends InboundDeps {
   repos: Repos;
@@ -369,7 +369,8 @@ async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, d
   try {
     const dir = deps.mediaDir ?? mediaDirectory();
     const copia = idDeMedia(`meta:${media.id}`, extensionDe(media.mimeType, message.type as MediaKind));
-    if (await abrirMedia(dir, copia).then((a) => { a?.flujo.destroy(); return a; })) return;
+    // Ya esta en disco: lo del QR se guarda al recibirlo (su id es el nombre del fichero) y lo de Meta, la vez anterior. No se baja nada.
+    if ((await tamanoMedia(dir, media.id)) !== null || (await tamanoMedia(dir, copia)) !== null) return;
     await mkdir(dir, { recursive: true });
     await conCupoDeDescarga(async () => {
       if (deps.wa.downloadMediaToFile) {
