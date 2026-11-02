@@ -21,8 +21,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Repos } from '../../db/repos.js';
 import type { Sender } from '../../outbound/sender.js';
-import { respuestaDeEnvio, mediaSchema, TIPOS_MEDIA } from './routes.js';
-import { bajarMedia } from './media-saliente.js';
+import { respuestaDeEnvio, mediaSchema, TIPOS_MEDIA, LIMITE_CUERPO_CON_ARCHIVO } from './routes.js';
+import { obtenerMedia } from './media-saliente.js';
 import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
 import { archivoDeMensaje } from './archivos-gsg.js';
@@ -224,7 +224,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
       if (b.media) {
         const kindPedido = b.media.tipo ? TIPOS_MEDIA[b.media.tipo] : undefined;
         if (b.media.tipo && !kindPedido) return reply.code(400).send({ error: 'media.tipo tiene que ser imagen, video, audio o documento' });
-        const bajado = await bajarMedia(b.media.url, kindPedido, deps.fetchImpl ?? fetch);
+        const bajado = await obtenerMedia(b.media, kindPedido, deps.fetchImpl ?? fetch);
         if (!bajado.ok) return reply.code(400).send({ error: bajado.error });
         const kind = kindPedido ?? tipoDeAdjuntoSaliente(bajado.mimeType);
         const pie = (b.texto ?? b.media.caption)?.trim() || undefined;
@@ -253,6 +253,6 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
       enCurso.delete(b.idExterno);
     }
   };
-  app.post('/api/v1/chat', { config: { permiso: 'mensajes:enviar' } }, escribirChat);
-  app.post('/api/v1/send-message', { config: { permiso: 'mensajes:enviar' } }, escribirChat);
+  app.post('/api/v1/chat', { bodyLimit: LIMITE_CUERPO_CON_ARCHIVO, config: { permiso: 'mensajes:enviar' } }, escribirChat);
+  app.post('/api/v1/send-message', { bodyLimit: LIMITE_CUERPO_CON_ARCHIVO, config: { permiso: 'mensajes:enviar' } }, escribirChat);
 }

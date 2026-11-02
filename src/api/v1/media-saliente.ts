@@ -80,6 +80,29 @@ async function leerConTope(r: Response, tope: number): Promise<Buffer | null> {
   return Buffer.concat(trozos);
 }
 
+/**
+ * El fichero de `media`: lo baja de `url` o lo decodifica de `base64`. En los dos
+ * casos pasa por la misma comprobacion de formato real.
+ */
+export async function obtenerMedia(
+  media: { url?: string; base64?: string },
+  pedido: string | undefined,
+  fetchImpl: typeof fetch,
+): Promise<{ ok: true; datos: Buffer; mimeType: string } | { ok: false; error: string }> {
+  if (media.base64 === undefined) return bajarMedia(media.url ?? '', pedido, fetchImpl);
+  // Admite el prefijo de un data URI: "data:image/jpeg;base64,...."
+  const m = /^data:([\w.+-]+\/[\w.+-]+)(?:;[^,]*)?;base64,/i.exec(media.base64);
+  const declarado = (m?.[1] ?? 'application/octet-stream').toLowerCase();
+  const limpio = (m ? media.base64.slice(m[0].length) : media.base64).replace(/\s+/g, '');
+  if (!limpio || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(limpio)) return { ok: false, error: 'media.base64 no es base64 valido' };
+  const datos = Buffer.from(limpio, 'base64');
+  if (!datos.length) return { ok: false, error: 'media.base64 esta vacio' };
+  if (datos.length > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
+  const v = comprobarFormato(datos, pedido, declarado);
+  if (!v.ok) return v;
+  return { ok: true, datos, mimeType: v.mimeType };
+}
+
 /** Baja el fichero de `media.url`: como mucho 16 MB, en 30 s, y solo si es lo que dice ser. */
 export async function bajarMedia(url: string, pedido: string | undefined, fetchImpl: typeof fetch): Promise<{ ok: true; datos: Buffer; mimeType: string } | { ok: false; error: string }> {
   if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'media.url tiene que empezar por http:// o https://' };

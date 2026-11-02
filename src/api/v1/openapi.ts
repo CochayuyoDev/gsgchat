@@ -330,10 +330,10 @@ export function openApi(baseUrl: string): Json {
               texto: { type: 'string', maxLength: 4000, description: 'Lo que se le escribe al cliente. Con `media` es el pie de la foto, el video o el documento (un audio no lleva texto)' },
               media: {
                 type: 'object',
-                required: ['url'],
-                description: 'Una foto, un video, un audio o un documento. GSGchat baja el fichero de la URL (hasta 16 MB), comprueba que es lo que dice ser y lo manda por WhatsApp.',
+                description: 'Una foto, un video, un audio o un documento (hasta 16 MB). Va por `url` (GSGchat lo baja) o por `base64` (el fichero dentro del JSON); una de las dos. GSGchat comprueba que es lo que dice ser y lo manda por WhatsApp.',
                 properties: {
                   url: { type: 'string', description: 'Direccion http(s) de donde se baja el fichero' },
+                  base64: { type: 'string', description: 'El fichero mismo en base64, con o sin el prefijo `data:image/jpeg;base64,`. Para quien no tiene una direccion publica. Ya decodificado, hasta 16 MB' },
                   tipo: { type: 'string', enum: ['imagen', 'video', 'audio', 'documento'], description: 'Sin el, se deduce del fichero. Fotos: jpeg, png, webp. Videos: mp4, 3gp. Audios: ogg, mp3, m4a, aac, amr' },
                   nombre: { type: 'string', maxLength: 200, description: 'El nombre con el que se ensena un documento' },
                   voz: { type: 'boolean', description: 'Un audio como nota de voz' },

@@ -44,7 +44,7 @@ import type { ServicioVoz } from '../../voz/servicio.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
 import { payloadExterno } from '../../util/payload-externo.js';
 import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
-import { bajarMedia } from './media-saliente.js';
+import { obtenerMedia } from './media-saliente.js';
 import { archivoDeMensaje } from './archivos-gsg.js';
 import { crearIdempotencia } from './idempotencia.js';
 
@@ -94,9 +94,18 @@ export const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document
   file: 'document',
 };
 
+/** Un archivo de 16 MB en base64 pesa ~21,4 MB: el limite general de 4 MB no alcanza para las rutas que lo reciben. */
+export const LIMITE_CUERPO_CON_ARCHIVO = 24 * 1024 * 1024;
+
 export const mediaSchema = z.object({
-  /** De donde se baja el fichero (http o https). */
-  url: z.string().trim().url().max(2000),
+  /** De donde se baja el fichero (http o https). Una de dos: `url` o `base64`. */
+  url: z.string().trim().url().max(2000).optional(),
+  /**
+   * El fichero mismo, en base64, dentro del JSON (con o sin el prefijo
+   * `data:image/jpeg;base64,`). Para quien no tiene una direccion publica.
+   * Hasta 16 MB ya decodificado.
+   */
+  base64: z.string().max(23_000_000).optional(),
   /** imagen | video | audio | documento. Sin el, se deduce del tipo del fichero. */
   tipo: z.string().trim().toLowerCase().max(20).optional(),
   caption: z.string().max(1024).optional(),
@@ -104,7 +113,7 @@ export const mediaSchema = z.object({
   nombre: z.string().trim().max(200).optional(),
   /** Un audio como nota de voz (con la onda y el play). */
   voz: z.boolean().optional(),
-});
+}).refine((m) => Boolean(m.url) !== Boolean(m.base64), { message: 'media lleva url o base64 (una de las dos)' });
 
 const telefonoSchema = z.string().min(6).max(30).transform((v) => normalizePhone(v));
 
@@ -268,7 +277,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   // Un reintento del otro sistema con la misma Idempotency-Key no envia dos veces. Ver idempotencia.ts.
   const idempotencia = crearIdempotencia();
 
-  app.post('/api/v1/mensajes', { config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
+  app.post('/api/v1/mensajes', { bodyLimit: LIMITE_CUERPO_CON_ARCHIVO, config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
     const body = mensajeSchema.parse(request.body ?? {});
     const phone = body.telefono;
     if (fueraDeAlcance(request.usuario, phone)) return reply.code(403).send(ERROR_ALCANCE);
@@ -297,7 +306,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     } else if (body.media) {
       const kindPedido = body.media.tipo ? TIPOS_MEDIA[body.media.tipo] : undefined;
       if (body.media.tipo && !kindPedido) return reply.code(400).send({ error: 'media.tipo tiene que ser imagen, video, audio o documento' });
-      const bajado = await bajarMedia(body.media.url, kindPedido, deps.fetchImpl ?? fetch);
+      const bajado = await obtenerMedia(body.media, kindPedido, deps.fetchImpl ?? fetch);
       if (!bajado.ok) return reply.code(400).send({ error: bajado.error });
       const kind = kindPedido ?? tipoDeAdjuntoSaliente(bajado.mimeType);
       // Un tipo generico (octet-stream) con nombre: la extension del nombre manda.
