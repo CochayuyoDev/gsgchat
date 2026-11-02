@@ -281,3 +281,39 @@ describe('POST /api/v1/chat con foto, video o audio (media por URL)', () => {
     expect((await escribir(conMedia({}))).statusCode).toBe(400);
   });
 });
+
+describe('POST /api/v1/chat con el archivo en base64 (sin URL publica)', () => {
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 1)]);
+  const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(64, 2)]);
+  const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(64, 3)]);
+  const conMedia = (media: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ tracking: 'CHAT-2', idExterno: `b64-${Math.random()}`, usuario: { id: 77, nombre: 'Juan', rol: 'motorizado' }, media, ...extra });
+  const ultimoDe = async (tipo: string) => (await consultar({ tracking: 'CHAT-2' }, escritor)).json().mensajes.filter((m: any) => m.tipo === tipo && m.direccion === 'saliente').at(-1);
+
+  it('una foto en base64 sale por WhatsApp, firmada por el usuario de GSG', async () => {
+    const r = await escribir(conMedia({ base64: JPEG.toString('base64'), tipo: 'imagen' }, { texto: 'Asi esta la puerta' }));
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ ok: true, estado: 'enviado', duplicado: false });
+    expect(await ultimoDe('image')).toMatchObject({ autor: 'persona', autorNombre: 'Juan', emisor: { tipo: 'gsg', usuarioId: '77' } });
+  });
+
+  it('acepta el prefijo data: y un audio como nota de voz', async () => {
+    expect((await escribir(conMedia({ base64: `data:video/mp4;base64,${MP4.toString('base64')}` }))).statusCode).toBe(200);
+    expect((await escribir(conMedia({ base64: OGG.toString('base64'), tipo: 'audio', voz: true }))).statusCode).toBe(200);
+    expect(await ultimoDe('video')).toBeTruthy();
+    expect(await ultimoDe('audio')).toBeTruthy();
+  });
+
+  it('un archivo de 6 MB pasa (el limite general de 4 MB no le aplica)', async () => {
+    const grande = Buffer.concat([JPEG, Buffer.alloc(6 * 1024 * 1024, 9)]);
+    expect((await escribir(conMedia({ base64: grande.toString('base64'), tipo: 'imagen' }))).statusCode).toBe(200);
+  });
+
+  it('rechaza con 400: base64 roto, algo que no es lo que dice, vacio, y url con base64 a la vez o ninguno', async () => {
+    expect((await escribir(conMedia({ base64: '@@@ esto no es base64 @@@' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: Buffer.from('esto no es una foto, es texto plano largo').toString('base64'), tipo: 'imagen' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: OGG.toString('base64'), tipo: 'imagen' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: '' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: JPEG.toString('base64'), url: 'http://127.0.0.1:1/x.jpg' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ tipo: 'imagen' }))).statusCode).toBe(400);
+  });
+});

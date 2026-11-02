@@ -103,6 +103,7 @@ export const CAMPOS_MENSAJE: Array<[string, string, string]> = [
   ['tracking', 'Sí', 'El tracking del pedido, el mismo que GSG mandó en la API 1. El mensaje sale al WhatsApp de ese pedido: el teléfono no se manda.'],
   ['texto', 'Sí, si no va «media»', 'Lo que se le escribe al cliente (hasta 4000 caracteres). Con «media» es el pie de la foto, el video o el documento; un audio no lleva texto.'],
   ['media.url', 'Sí, si no va «texto»', 'Dirección http o https de una foto, un video o un audio. GSGchat baja el fichero (hasta 16 MB), comprueba que es lo que dice ser y lo manda por WhatsApp. Fotos: jpeg, png o webp. Videos: mp4 o 3gp. Audios: ogg, mp3, m4a, aac o amr.'],
+  ['media.base64', 'Alternativa a media.url', 'El fichero mismo en base64 dentro del JSON (con o sin el prefijo data:image/jpeg;base64,), para quien no tiene una dirección pública. Hasta 16 MB ya decodificado. Va media.url o media.base64, no los dos.'],
   ['media.tipo', 'No', 'imagen, video, audio o documento. Sin él se deduce del fichero.'],
   ['media.voz', 'No', 'true para que el audio salga como nota de voz.'],
   ['idExterno', 'Sí', 'El id que GSG le puso a este mensaje. Evita duplicados: si GSG reintenta el mismo mensaje, no se manda otra vez al cliente.'],
