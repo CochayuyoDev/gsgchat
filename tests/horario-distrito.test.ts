@@ -96,7 +96,8 @@ describe('los textos al cliente', () => {
     const v = variablesDeVentana(ventanaDeEntrega({ distrito: 'Ancón' }, AJUSTES));
     const t = rellenar(TEXTOS_POR_DEFECTO.ubicacionRegistrada, { negocio: 'GSG', nombre: 'Ana', distrito: 'Ancón', ...v });
     expect(t).toContain('Horario aproximado de llegada de 6 a 8 de la noche.');
-    expect(t).toContain('hasta las 10:00 PM');
+    expect(t).not.toContain('casuísticas');
+    expect(t).not.toContain('10:00 PM');
   });
 
   it('el horario sale sin distrito, también el general', () => {
