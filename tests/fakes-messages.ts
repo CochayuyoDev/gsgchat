@@ -211,6 +211,12 @@ export function createFakeMessages(
       const m = all.find(x => x.wamid === wamid && x.storedAt && x.storedAt > retenidosDesde && visible(x));
       return m ? { contactId: m.contactId, id: String(m.id) } : null;
     },
+    async mediaReferenciada() {
+      return all.flatMap(m => {
+        const media = (m.payload as { media?: { id?: unknown; mimeType?: unknown } } | null)?.media;
+        return media && typeof media.id === 'string' ? [{ id: media.id, kind: m.kind, mimeType: typeof media.mimeType === 'string' ? media.mimeType : null }] : [];
+      });
+    },
     async limpiarAntes(desde) {
       const ids = new Set(all.filter(m => !m.storedAt || m.storedAt <= desde).slice(0,1000).map(m => m.id));
       for (let i = all.length - 1; i >= 0; i--) if (ids.has(all[i]!.id)) all.splice(i,1);

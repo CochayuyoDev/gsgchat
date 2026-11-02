@@ -96,6 +96,11 @@ export function createDynamicWhatsAppClient(
       if (!cliente.downloadMedia) throw new Error('este proveedor guarda los archivos al recibirlos');
       return cliente.downloadMedia(mediaId);
     },
+    downloadMediaToFile: async (mediaId, destino) => {
+      const cliente = inner();
+      if (!cliente.downloadMediaToFile) throw new Error('este proveedor guarda los archivos al recibirlos');
+      return cliente.downloadMediaToFile(mediaId, destino);
+    },
     sendButtons: async (...args) => inner().sendButtons(...args),
     sendTemplate: async (...args) => inner().sendTemplate(...args),
     markAsRead: async (...args) => inner().markAsRead(...args),

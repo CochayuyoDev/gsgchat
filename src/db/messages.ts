@@ -113,6 +113,8 @@ export interface MessagesRepo {
   iniciadaEnAlcance(contactId: string, alcance: { afterId: string; retenidosDesde: Date }): Promise<boolean>;
   referenciaVisiblePorWamid(wamid: string, retenidosDesde: Date): Promise<{ contactId: string; id: string } | null>;
   limpiarAntes(desde: Date): Promise<number>;
+  /** Los adjuntos que todavia nombra algun mensaje: lo que la limpieza no puede borrar. */
+  mediaReferenciada(): Promise<Array<{ id: string; kind: string; mimeType: string | null }>>;
   markRead(contactId: string, at: Date): Promise<void>;
   /** Total de mensajes entrantes sin leer, para el globo del menu. */
   unreadTotal(desde?: Date | null, alcance?: { afterId: string; retenidosDesde: Date }): Promise<number>;
@@ -509,6 +511,13 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         [wamid, retenidosDesde],
       );
       return rows[0] ? { contactId: rows[0].contact_id, id: String(rows[0].id) } : null;
+    },
+    async mediaReferenciada() {
+      const { rows } = await pool.query<{ id: string; kind: string; mime: string | null }>(
+        `select json_unquote(json_extract(payload, '$.media.id')) as id, kind, json_unquote(json_extract(payload, '$.media.mimeType')) as mime
+           from messages where json_extract(payload, '$.media.id') is not null`,
+      );
+      return rows.map((r) => ({ id: r.id, kind: r.kind, mimeType: r.mime }));
     },
     async limpiarAntes(desde) {
       const { rowCount } = await pool.query('delete from messages where stored_at is null or stored_at <= $1 order by stored_at, id limit 1000', [desde]);

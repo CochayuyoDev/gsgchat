@@ -24,7 +24,8 @@ import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { createSeenCache, processChange, type WebhookDeps } from '../whatsapp/webhook.js';
 import type { StokyClient } from '../stoky/client.js';
-import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
+import { mediaDirectory } from '../whatsapp/local/media.js';
+import { servirMedia } from '../whatsapp/local/servir.js';
 import { readInbound } from '../handlers/inbound.js';
 import type { PuertoGsg } from '../rutas/gsg.js';
 import { defaultAuthDir, hayVinculacion, sesionLocalPorDefecto, toJid, type SesionLocal } from '../whatsapp/local/session.js';
@@ -487,15 +488,9 @@ export async function registerLocalRoutes(
    */
   app.get('/admin/local/media/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const datos = await leerMedia(mediaDir, id);
-    if (!datos) return reply.code(404).send({ error: 'ese adjunto no existe' });
-
-    return reply
-      .type(tipoMime(id))
-      // El contenido de un id nunca cambia -sale del wamid-, asi que se puede
-      // cachear para siempre y no volver a pedirlo en cada scroll del chat.
-      .header('cache-control', 'private, max-age=31536000, immutable')
-      .send(datos);
+    // El contenido de un id nunca cambia -sale del wamid-, asi que se puede
+    // cachear para siempre y no volver a pedirlo en cada scroll del chat.
+    return servirMedia(request, reply, mediaDir, id, { 'content-type': tipoMime(id), 'cache-control': 'private, max-age=31536000, immutable' });
   });
 
   /** Desvincula y borra las credenciales: obliga a escanear otra vez. */

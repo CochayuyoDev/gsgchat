@@ -421,8 +421,17 @@ export const CHAT_CSS = `
   .adjunto { display: block; margin: 2px 0 6px; max-width: min(320px, 100%); }
   .adjunto-foto img, .adjunto-video video { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 8px; background: var(--borde); }
   .adjunto-sticker img { display: block; width: 160px; max-width: 100%; height: auto; background: transparent; }
-  .adjunto-audio { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
-  .adjunto-audio audio { width: min(280px, 100%); }
+  /* Nota de voz como en WhatsApp: play, onda, tiempo y velocidad */
+  .msg .adjunto-audio, .adjunto-audio { display: flex; align-items: center; gap: 8px; min-width: 230px; max-width: min(300px, 100%); padding: 4px 2px; font-size: 12.5px; font-weight: 500; }
+  .wa-a-play { flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; background: #00a884; color: #fff; cursor: pointer; position: relative; padding: 0; }
+  .wa-a-play::before { content: ''; position: absolute; left: 14px; top: 10px; border-style: solid; border-width: 8px 0 8px 13px; border-color: transparent transparent transparent #fff; }
+  .wa-audio.sonando .wa-a-play::before { left: 11px; top: 11px; width: 5px; height: 14px; border: 0; background: #fff; box-shadow: 8px 0 0 #fff; }
+  .wa-a-barra { flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; gap: 2px; cursor: pointer; }
+  .wa-a-barra b { flex: 1; min-width: 2px; border-radius: 2px; background: #b5bdc2; }
+  .wa-a-barra b.on { background: #00a884; }
+  .wa-a-t { flex: none; min-width: 34px; color: var(--texto-suave, #667781); font-variant-numeric: tabular-nums; }
+  .wa-a-vel { flex: none; border: 0; border-radius: 12px; background: rgba(0,0,0,.08); color: inherit; font: inherit; font-size: 11.5px; font-weight: 700; padding: 3px 7px; cursor: pointer; }
+  .wa-a-vel[hidden] { display: none; }
   .pin-cliente .pin-coords { font-family: ui-monospace, Consolas, monospace; font-size: 13px; user-select: all; }
   .pin-cliente .pin-acciones { display: flex; gap: 10px; align-items: center; font-size: 13px; }
   .pin-cliente .pin-copiar { border: 1px solid var(--borde); background: var(--superficie); border-radius: var(--radio-sm); padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; min-height: 32px; color: var(--texto); }
