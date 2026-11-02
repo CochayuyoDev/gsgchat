@@ -16,6 +16,7 @@ import type { Repos } from '../db/repos.js';
 import type { Bus, ContactoEvento, Eventos } from './bus.js';
 import { trackingDeEntrega } from '../entregas/repo.js';
 import { archivoDeMensaje, type ArchivoDeMensaje } from '../api/v1/archivos-gsg.js';
+import { payloadExterno } from '../util/payload-externo.js';
 import type { Message } from '../db/messages.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
@@ -92,7 +93,7 @@ export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: s
             texto: message.body ?? null,
             transcripcion: typeof payload.transcripcion === 'string' ? payload.transcripcion : null,
             anuncio: payload.anuncio && typeof payload.anuncio === 'object' ? (payload.anuncio as Eventos['mensaje.recibido']['mensaje']['anuncio']) : null,
-            datos: message.payload ?? null,
+            datos: payloadExterno(message.payload) ?? null,
             archivo: archivoDe(id, message),
             fecha,
           },
@@ -112,7 +113,7 @@ export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: s
             fecha,
             // El adjunto (datos.media: id, kind, mimeType...) tambien en lo que sale,
             // para que el otro sistema baje la foto o el sticker mandado desde el telefono.
-            datos: message.payload ?? null,
+            datos: payloadExterno(message.payload) ?? null,
             archivo: archivoDe(id, message),
           },
           ...chat,

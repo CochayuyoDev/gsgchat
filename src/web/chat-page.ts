@@ -1279,7 +1279,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       borradoHtml(m) +
       '<span class="meta">' +
         (m.payload && m.payload.editadoAt ? '<span class="editado" title="Se editó después de enviarlo">editado</span>' : '') +
-        (m.direction === 'out' && m.payload && m.payload.origen === 'ia' && !m.payload.textoFijo ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') +
+        quienMando(m) +
         esc(hhmm(m.createdAt)) + (m.direction === 'out' ? ' ' + tick(m.status) : '') +
       '</span>' +
       reaccionesHtml(m) +
@@ -1467,6 +1467,30 @@ document.addEventListener('click', function (ev) {
     if (el && audioDur(el, w.dataset.seg, url)) ir(); else if (el) el.addEventListener('loadedmetadata', ir, { once: true });
   }
 });
+
+/**
+ * Quien mando un mensaje saliente, como nota chica junto a la hora: el bot, la
+ * IA, una persona de aqui (con su rol) o una persona de GSG. Los entrantes no
+ * llevan nota: los manda el cliente.
+ */
+function quienMando(m) {
+  if (m.direction !== 'out') return '';
+  var p = m.payload || {};
+  var texto, titulo;
+  if (p.emisor && p.emisor.tipo === 'gsg') {
+    texto = 'GSG · ' + (p.autorNombre || 'usuario');
+    titulo = 'Usuario de GSG' + (p.emisor.rol ? ' (' + p.emisor.rol + ')' : '');
+  } else if (p.origen === 'ia' && !p.textoFijo) {
+    texto = 'IA'; titulo = 'Lo escribió el asistente IA';
+  } else if (p.origen === 'persona') {
+    var rol = p.autorRol === 'admin' ? 'administrador' : p.autorRol === 'operador' ? 'operador' : '';
+    if (p.autorNombre === 'Teléfono') { texto = 'Teléfono'; titulo = 'Se escribió desde el teléfono'; }
+    else { texto = (p.autorNombre || 'Usuario') + (rol ? ' · ' + rol : ''); titulo = 'Usuario de GSGchat' + (rol ? ' (' + rol + ')' : ''); }
+  } else {
+    texto = 'Bot'; titulo = 'Mensaje automático del sistema';
+  }
+  return '<span class="quien" title="' + esc(titulo) + '">' + esc(texto) + '</span>';
+}
 
 /**
  * La foto, el audio o el video que mando el cliente, para verlo o escucharlo

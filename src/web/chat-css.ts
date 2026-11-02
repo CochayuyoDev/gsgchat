@@ -310,6 +310,7 @@ export const CHAT_CSS = `
   .msg.primero.out::before { right: -8px; background: var(--mine); clip-path: polygon(0 0, 100% 0, 0 100%); }
   .msg.primero.in::before { left: -8px; background: var(--theirs); clip-path: polygon(0 0, 100% 0, 100% 100%); }
   .msg a { color: var(--accent); }
+  .msg .quien { margin-right: 6px; font-size: 10px; opacity: .7; letter-spacing: .01em; }
   .msg .meta { float: right; margin: 8px -2px -4px 10px; font-size: 11px; color: var(--muted);
     white-space: nowrap; position: relative; top: 3px; display: inline-flex; align-items: center; gap: 4px; }
   .msg .tick { color: var(--muted); }

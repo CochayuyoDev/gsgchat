@@ -388,7 +388,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
-  await registerApiConversacionesGsg(app, { repos, sender, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
+  await registerApiConversacionesGsg(app, { repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
   // Los archivos de ese historial (`archivo.url`): enlace firmado, sin clave. Ver src/api/v1/archivos-gsg.ts.
   await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa });
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
