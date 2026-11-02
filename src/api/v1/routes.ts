@@ -42,6 +42,7 @@ import { ErrorApi, registrarCatalogoErrores } from '../errores.js';
 import type { ServicioPlan } from '../../plan/servicio.js';
 import type { ServicioVoz } from '../../voz/servicio.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
+import { payloadExterno } from '../../util/payload-externo.js';
 import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
 import { bajarMedia } from './media-saliente.js';
 import { archivoDeMensaje } from './archivos-gsg.js';
@@ -415,7 +416,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,
           voz: p.media?.voz === true,
           archivo: deps.archivos ? archivoDeMensaje(m, deps.archivos) : null,
-          datos: m.payload,
+          datos: payloadExterno(m.payload),
           estado: m.status,
           fecha: m.createdAt,
         };

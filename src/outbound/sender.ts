@@ -55,6 +55,8 @@ export interface SendJob {
   atiendePersona?: boolean;
   /** Si lo escribio un usuario de otro sistema (GSG): quien, con que rol y para que tracking. Se guarda en el hilo (payload.emisor). */
   emisor?: { tipo: string; usuarioId: string; rol: string | null; tracking: string; idExterno: string };
+  /** El rol de quien escribe desde el chat de aqui ('admin' u 'operador'): se guarda para que el hilo diga quien fue. */
+  autorRol?: string;
   /**
    * Limites por contacto propios de quien manda, por encima de la politica.
    *
@@ -161,6 +163,7 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
     // Un texto fijo del negocio que manda el asistente: en el chat y para GSG es del sistema, no de la IA.
     ...(job.textoFijo ? { textoFijo: true } : {}),
     ...(nombre ? { autorNombre: nombre } : {}),
+    ...(job.autorRol ? { autorRol: job.autorRol } : {}),
     ...(job.emisor ? { emisor: job.emisor } : {}),
     // La cita se guarda con lo justo para pintarla: de quien era y que decia.
     // El id tambien, para poder saltar al original si sigue en el hilo.

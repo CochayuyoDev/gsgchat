@@ -981,12 +981,14 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * salvo que el cuerpo diga otra cosa (el chat embebido de otro sistema
    * manda en nombre de su asesor). Va al hilo y al webhook (`autorNombre`).
    */
-  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string; atiendePersona?: boolean }) => ({
+  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string; rol?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string; atiendePersona?: boolean }) => ({
     // Sin decir nada, quien escribe desde el chat es una persona: que el
     // hilo no lo apunte como 'sistema' solo porque la ventana de Meta obligue.
     origen: body.autor ?? 'persona',
     atiendePersona: body.atiendePersona === true && (body.autor ?? 'persona') === 'persona',
     autorNombre: body.autorNombre?.trim() || (request.usuario?.nombre || request.usuario?.usuario || '').split(' ')[0] || undefined,
+    // Su rol, salvo que escriba en nombre de otra persona (el chat embebido de otro sistema).
+    autorRol: body.autorNombre?.trim() ? undefined : request.usuario?.rol,
   });
 
   app.post('/admin/chat/send', async (request, reply) => {

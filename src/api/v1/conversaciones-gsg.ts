@@ -26,6 +26,7 @@ import { bajarMedia } from './media-saliente.js';
 import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
 import { archivoDeMensaje } from './archivos-gsg.js';
+import { payloadExterno } from '../../util/payload-externo.js';
 import { trackingDeEntrega } from '../../entregas/repo.js';
 import { nombreDeEtiqueta } from '../../archive/clasificar.js';
 import { catalogoVigente, numeroNormalizado } from '../../chat/etiquetar.js';
@@ -100,7 +101,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     // audio se escucha con `archivo.url`. Un audio transcrito se guarda con lo que
     // dijo como cuerpo; aquí sale como «(audio)» y sin la transcripción en `datos`.
     const audio = m.kind === 'audio';
-    let datos = m.payload;
+    let datos = payloadExterno(m.payload);
     if (audio && datos) {
       const { transcripcion: _t, ...resto } = datos as Record<string, unknown>;
       const media = resto.media && typeof resto.media === 'object' ? (({ transcripcion: _mt, ...r }) => r)(resto.media as Record<string, unknown>) : resto.media;
