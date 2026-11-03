@@ -139,9 +139,17 @@ export function createFakeMessages(
         deliveryId: message.deliveryId ?? null,
         createdAt: message.createdAt ?? new Date(),
         storedAt: new Date(),
+        lineaId: message.lineaId ?? null,
+        lineaEtiqueta: message.lineaEtiqueta ?? null,
+        lineaNumero: message.lineaNumero ?? null,
       };
       all.push(row);
       return row.id;
+    },
+
+    async lineaDelUltimoEntrante(contactId) {
+      const ultimo = all.filter((m) => m.contactId === contactId && m.direction === 'in' && m.lineaId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0];
+      return ultimo?.lineaId ?? null;
     },
 
     async setStatusByWamid(wamid, status) {
@@ -180,6 +188,9 @@ export function createFakeMessages(
                   body: last.body,
                   status: last.status,
                   createdAt: last.createdAt,
+                  lineaId: last.lineaId ?? null,
+                  lineaEtiqueta: last.lineaEtiqueta ?? null,
+                  lineaNumero: last.lineaNumero ?? null,
                 }
               : null,
             unread: mine.filter(

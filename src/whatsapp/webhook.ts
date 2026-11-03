@@ -19,7 +19,9 @@ import type { Config } from '../config.js';
 import type { Repos, TemplateQuality, TemplateStatus } from '../db/repos.js';
 import { verifyChallenge, verifySignature } from './signature.js';
 import type { ChangeValue, WebhookPayload } from './types.js';
-import { handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
+import { claveEntrada, handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
+import type { ServicioLineas } from './lineas.js';
+import type { LineaDeMensaje } from './types.js';
 import type { SettingsService } from '../settings/service.js';
 import { TtlCache } from '../util/cache.js';
 import { esPausaAutomatica } from '../salud/monitor.js';
@@ -35,6 +37,8 @@ export interface WebhookDeps extends InboundDeps {
   seen?: TtlCache<true>;
   /** Donde se guardan los ficheros que llegan (por defecto, el de siempre). */
   mediaDir?: string;
+  /** Las lineas de la tienda, para saber por cual llego cada mensaje. Sin ellas, no se anota. */
+  lineas?: ServicioLineas;
 }
 
 type RawRequest = FastifyRequest & { rawBody?: Buffer };
@@ -135,6 +139,21 @@ export function qualityFromEvent(event: string | undefined): 'GREEN' | 'YELLOW' 
   return null;
 }
 
+/**
+ * La linea por la que llego un aviso: la que diga el transporte (`lineaId`:
+ * WAHA por sesion, local por socket) o, en Meta, la del `phone_number_id` de
+ * los metadatos. Si no se reconoce, es la principal: asi lo de siempre sigue
+ * funcionando aunque llegue algo que no encaja con ninguna linea.
+ */
+export async function lineaDelAviso(value: ChangeValue, lineas: ServicioLineas | undefined): Promise<LineaDeMensaje | undefined> {
+  if (!lineas) return undefined;
+  const linea =
+    (value.lineaId ? await lineas.obtener(value.lineaId) : null) ??
+    (value.metadata?.phone_number_id ? await lineas.porIdExterno('cloud', value.metadata.phone_number_id) : null) ??
+    (await lineas.principal());
+  return { id: linea.id, etiqueta: linea.etiqueta, numero: linea.telefono };
+}
+
 export async function processChange(
   field: string,
   value: ChangeValue,
@@ -162,15 +181,18 @@ export async function processChange(
       }
 
       const profileName = value.contacts?.[0]?.profile?.name;
-      for (const message of value.messages ?? []) {
+      const linea = (value.messages ?? []).length ? await lineaDelAviso(value, deps.lineas) : undefined;
+      for (const recibido of value.messages ?? []) {
+        const message = linea ? { ...recibido, linea } : recibido;
         if (!entradaAdmitida(message)) continue;
         if (!(await perteneceAlChatActual(repos, deps.settings, message))) continue;
         // La segunda entrega de un mensaje (el telefono reenvio un "ver una
         // vez") lleva el mismo id a proposito: no es un duplicado, es el
         // fichero que faltaba.
         if (seen && message.id && !message.reenvio) {
-          if (seen.get(message.id)) continue;
-          seen.set(message.id, true);
+          const clave = claveEntrada(message);
+          if (seen.get(clave)) continue;
+          seen.set(clave, true);
         }
         const entrante = conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' });
         await guardarMediaDeMeta(entrante, deps);

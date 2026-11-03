@@ -43,6 +43,9 @@ import { providerOf, createSettingsService } from '../settings/service.js';
 import { createDynamicWhatsAppClient } from '../whatsapp/dynamic.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { crearSesionLocal, type SesionLocal } from '../whatsapp/local/session.js';
+import { crearServicioLineas } from '../whatsapp/lineas.js';
+import { crearRegistroClientes } from '../whatsapp/registro.js';
+import { keyFromBase64 } from '../settings/crypto.js';
 
 import { type EstadoInstancia } from '../plan/servicio.js';
 import { versionDelPaquete } from '../util/version.js';
@@ -138,6 +141,9 @@ export interface TiendaViva {
   repos: Repos;
   ajustes: ServicioAjustes;
   sesion: SesionLocal;
+  /** Las lineas de WhatsApp de la tienda y el cliente de cada una (la principal es `sesion`). */
+  lineas: import('../whatsapp/lineas.js').ServicioLineas;
+  registro: import('../whatsapp/registro.js').RegistroClientes;
   /** La base de esta tienda (para mirar dentro en las pruebas y en el Modulo desarrollador). */
   pool: Pool;
   /** El nombre de su base en el servidor. */
@@ -196,6 +202,26 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         sesion,
       });
 
+      // Una linea de WhatsApp por canal: la principal es `wa` y `sesion` de arriba
+      // (lo de siempre); las demas, cada una con su cliente y su sesion.
+      const lineas = crearServicioLineas(pool, keyFromBase64(o.secretos.settingsKey), nombreBase);
+      const registro = crearRegistroClientes({
+        lineas,
+        principal: { cliente: wa, sesion },
+        authDir: o.authDir,
+        opcionesLocal: { nativeButtons: config.WHATSAPP_NATIVE_BUTTONS },
+        resolveTemplateBody: async (name, language) => (await repos.templates.get(name, language))?.body ?? undefined,
+        humanizar: () => politica().humanizar,
+        graphVersion: config.GRAPH_API_VERSION,
+        principalAjustes: () => ({ proveedor: providerOf(settings.current()), configurada: settings.isConfigured() }),
+      });
+      // La pantalla lee el estado y el numero de cada linea de la base: se mantiene al dia.
+      const sincronizarLineas = () => void registro.sincronizar().catch(() => undefined);
+      sincronizarLineas();
+      const relojLineas = setInterval(sincronizarLineas, 10_000);
+      relojLineas.unref?.();
+      limpieza.push(() => clearInterval(relojLineas), () => registro.detener());
+
       /**
        * Quien es «el numero» para la salud. Con Baileys se lee del estado de la
        * sesion; con WAHA, de lo ultimo que conto su pantalla de Conexion. Ver
@@ -211,6 +237,23 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           phoneNumberId: cred.phoneNumberId,
           telefono: proveedor === 'local' ? sesion.getLocalState().phone : numeroVigente.actual(),
         });
+      };
+      /**
+       * Cada linea para el sender: su cliente y la identidad con la que se llevan
+       * su cupo, su calentamiento y su estado (la principal conserva la de siempre).
+       */
+      const resolverLinea = async (id: string | null) => {
+        const t = await registro.transporte(id);
+        if (!t) return null;
+        const { linea } = t;
+        return {
+          id: linea.id,
+          etiqueta: linea.etiqueta,
+          numero: linea.telefono || (linea.principal ? sesion.getLocalState().phone : ''),
+          cliente: t.cliente,
+          identidad: linea.principal ? phoneNumberId() : `linea:${linea.id}`,
+          ventanaAplica: linea.principal ? providerOf(settings.current()) === 'cloud' : linea.proveedor === 'cloud',
+        };
       };
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
@@ -229,6 +272,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         createSender({
           repos,
           wa,
+          resolverLinea,
           phoneNumberId,
           warmup: politica().warmup,
           maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
@@ -446,6 +490,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         mediaDir: o.mediaDir,
         autoConectarLocal: o.autoConectarLocal,
         sesionLocal: sesion,
+        lineas,
+        registroClientes: registro,
         anotarNumeroVigente: numeroVigente.anotar,
         numeroDeSalud: phoneNumberId,
         authDir: o.authDir,
@@ -499,6 +545,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         repos,
         ajustes,
         sesion,
+        lineas,
+        registro,
         pool,
         base: nombreBase,
         contexto,
@@ -514,6 +562,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           await app.close().catch(() => undefined);
           // Sin socket vivo que siga guardando en una carpeta que quiza se borra.
           sesion.detener();
+          registro.detener();
           await cerrar().catch(() => undefined);
         },
       };

@@ -75,9 +75,12 @@ const porDireccionDe = (deps: { entregas?: { ubicarDireccionDeEnlace(direccion: 
   deps.entregas ? (direccion: string) => deps.entregas!.ubicarDireccionDeEnlace(direccion) : undefined;
 import { horaEnPalabras, horarioEnPalabras, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 import type { Solicitud } from '../db/rutas.js';
+import { ID_LINEA_PRINCIPAL } from '../whatsapp/lineas.js';
 import { ventanaDeEntrega } from '../entregas/horario-distrito.js';
 
 export interface InboundDeps {
+  /** Para ubicar un enlace de mapa que solo trae una direccion escrita (ver extractLocation). */
+  geocodificador?: import('../entregas/geocodificar.js').Geocodificador;
   repos: Repos;
   sender: Sender;
   wa: WhatsAppClient;
@@ -699,31 +702,53 @@ export function firmaDeAccion(message: InboundMessage): string | null {
   return null;
 }
 
+/** La clave de deduplicacion de un entrante: el id, con la linea delante si no es la principal. */
+export function claveEntrada(message: InboundMessage): string {
+  const linea = message.linea;
+  return linea && linea.id !== ID_LINEA_PRINCIPAL ? `${linea.id.slice(0, 8)}:${message.id}` : message.id;
+}
+
+/**
+ * Los mismos repos, pero todo mensaje que se guarde lleva la linea por la que
+ * llego. Se hace aqui, y no en cada `messages.add` del manejador, para no
+ * olvidar ninguno de los caminos de entrada.
+ */
+function conLineaDeEntrada(deps: InboundDeps, linea: InboundMessage['linea']): InboundDeps {
+  if (!linea) return deps;
+  const messages = Object.create(deps.repos.messages) as typeof deps.repos.messages;
+  messages.add = (m) => deps.repos.messages.add({ lineaId: linea.id, lineaEtiqueta: linea.etiqueta, lineaNumero: linea.numero, ...m });
+  return { ...deps, repos: { ...deps.repos, messages } };
+}
+
 export async function handleInboundMessage(
   message: InboundMessage,
   profileName: string | undefined,
-  deps: InboundDeps,
+  rawDeps: InboundDeps,
 ): Promise<void> {
   if (!entradaAdmitida(message)) return;
+  const deps = conLineaDeEntrada(rawDeps, message.linea);
   // Reenvíos de un mismo wamid no pueden ejecutar dos veces una regla,
   // aunque la fila del chat haya vencido y se haya borrado físicamente.
   // El recibo conserva solo metadatos durante siete días; nunca el cuerpo.
   // Los reenvíos multimedia son filtrados antes de llegar aquí.
   const provider = message.provider ?? 'whatsapp';
+  // Con varias lineas, el mismo id de mensaje de dos cuentas distintas no es
+  // el mismo mensaje: la clave lleva la linea (la principal conserva la de siempre).
+  const claveId = claveEntrada(message);
   const reservado = await deps.repos.messages.reservarEntrada(
     provider,
-    message.id,
+    claveId,
     new Date(),
     new Date(Date.now() + 7 * 24 * 60 * 60_000),
   );
   if (!reservado) return;
   try {
     await handleInboundMessageReservado(message, profileName, deps);
-    await deps.repos.messages.finalizarEntrada(provider, message.id, 'aceptado');
+    await deps.repos.messages.finalizarEntrada(provider, claveId, 'aceptado');
   } catch (error) {
     // Un fallo durante el turno puede ocurrir después de que un proveedor
     // aceptara un envío. Se marca incierto y no se reproduce a ciegas.
-    await deps.repos.messages.finalizarEntrada(provider, message.id, 'incierto').catch(() => undefined);
+    await deps.repos.messages.finalizarEntrada(provider, claveId, 'incierto').catch(() => undefined);
     throw error;
   }
 }

@@ -33,6 +33,10 @@ export interface Message {
   deliveryId: number | null;
   createdAt: Date;
   storedAt?: Date;
+  /** La linea de WhatsApp del mensaje y su etiqueta y numero de ese momento. */
+  lineaId?: string | null;
+  lineaEtiqueta?: string | null;
+  lineaNumero?: string | null;
 }
 
 export interface ActividadDia {
@@ -52,6 +56,10 @@ export interface NewMessage {
   status?: string | null;
   deliveryId?: number | null;
   createdAt?: Date;
+  /** La linea de WhatsApp del mensaje, con su etiqueta y numero de ese momento. */
+  lineaId?: string | null;
+  lineaEtiqueta?: string | null;
+  lineaNumero?: string | null;
 }
 
 /** Una fila de la lista de chats. */
@@ -70,6 +78,10 @@ export interface Conversation {
     body: string | null;
     status: string | null;
     createdAt: Date;
+    /** La linea de WhatsApp de ese ultimo mensaje (etiqueta y numero de entonces). */
+    lineaId?: string | null;
+    lineaEtiqueta?: string | null;
+    lineaNumero?: string | null;
   } | null;
   unread: number;
   /** true si el cliente escribio en las ultimas 24 h. */
@@ -103,6 +115,8 @@ export interface MessagesRepo {
   finalizarAccionWhatsapp(key: string, estado: 'aceptado' | 'fallido' | 'incierto', wamidSaliente?: string | null): Promise<void>;
   limpiarAccionesWhatsappAntes(ahora: Date): Promise<number>;
   add(message: NewMessage): Promise<number>;
+  /** La linea por la que llego el ultimo mensaje de este cliente; null si no hay o es anterior a las lineas. */
+  lineaDelUltimoEntrante(contactId: string): Promise<string | null>;
   /** Estado de entrega que llega por webhook. */
   setStatusByWamid(wamid: string, status: string): Promise<void>;
   listConversations(query: { q?: string; limit: number; offset: number; incluirApartados?: boolean; desde?: Date | null; alcance?: { afterId: string; retenidosDesde: Date } }): Promise<Conversation[]>;
@@ -235,6 +249,9 @@ interface Row {
   status: string | null;
   delivery_id: number | null;
   created_at: Date;
+  whatsapp_number_id?: string | null;
+  linea_etiqueta?: string | null;
+  linea_numero?: string | null;
 }
 
 const toMessage = (r: Row): Message => ({
@@ -249,6 +266,9 @@ const toMessage = (r: Row): Message => ({
   deliveryId: r.delivery_id,
   createdAt: r.created_at,
   storedAt: (r as Row & { stored_at?: Date }).stored_at ?? r.created_at,
+  lineaId: r.whatsapp_number_id ?? null,
+  lineaEtiqueta: r.linea_etiqueta ?? null,
+  lineaNumero: r.linea_numero ?? null,
 });
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -358,8 +378,8 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       // hace que insertId sea el id de la fila que ya existia.
       const { insertId } = await pool.query(
         `insert into messages
-           (contact_id, direction, wamid, kind, body, payload, status, delivery_id, created_at, stored_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8, coalesce($9, now(3)), now(3))
+           (contact_id, direction, wamid, kind, body, payload, status, delivery_id, created_at, stored_at, whatsapp_number_id, linea_etiqueta, linea_numero)
+         values ($1,$2,$3,$4,$5,$6,$7,$8, coalesce($9, now(3)), now(3), $10,$11,$12)
          on duplicate key update id = last_insert_id(id), status = coalesce(values(status), status)`,
         [
           message.contactId,
@@ -371,9 +391,22 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           message.status ?? null,
           message.deliveryId ?? null,
           message.createdAt ?? null,
+          message.lineaId ?? null,
+          message.lineaEtiqueta ?? null,
+          message.lineaNumero ?? null,
         ],
       );
       return insertId;
+    },
+
+    async lineaDelUltimoEntrante(contactId) {
+      const { rows } = await pool.query<{ whatsapp_number_id: string | null }>(
+        `select whatsapp_number_id from messages
+          where contact_id = $1 and direction = 'in' and whatsapp_number_id is not null
+          order by created_at desc, id desc limit 1`,
+        [contactId],
+      );
+      return rows[0]?.whatsapp_number_id ?? null;
     },
 
     async setStatusByWamid(wamid, status) {
@@ -436,10 +469,14 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         message_at: Date | null;
         message_id: number | null;
         unread: number;
+        whatsapp_number_id: string | null;
+        linea_etiqueta: string | null;
+        linea_numero: string | null;
       }>(
         `select c.id as contact_id, c.phone, c.name, c.tipo, c.opt_in_at, c.opt_out_at, c.last_inbound_at,
                 c.chat_fijado_at, c.chat_silenciado_at, c.chat_apartado_at,
                 m.direction, m.kind, m.body, m.status, m.created_at as message_at, m.id as message_id,
+                m.whatsapp_number_id, m.linea_etiqueta, m.linea_numero,
                 (select count(*)
                    from messages u
                   where u.contact_id = c.id and u.direction = 'in'
@@ -484,6 +521,9 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
               body: r.body,
               status: r.status,
               createdAt: r.message_at,
+              lineaId: r.whatsapp_number_id ?? null,
+              lineaEtiqueta: r.linea_etiqueta ?? null,
+              lineaNumero: r.linea_numero ?? null,
             }
           : null,
         unread: Number(r.unread ?? 0),

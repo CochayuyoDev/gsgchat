@@ -35,6 +35,12 @@ export interface SendJob {
   kind: MessageKind;
   category: TemplateCategory;
   campaignId?: string | null;
+  /**
+   * Por que linea de WhatsApp sale. Sin indicarla: la del ultimo mensaje que
+   * el cliente mando (la conversacion sigue por donde llego) o, si no hay, la
+   * principal. Un reintento sale siempre por la linea del primer intento.
+   */
+  whatsappNumberId?: string | null;
   /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
   manual?: boolean;
   /** Envío con cadencia propia: el transporte no añade escritura artificial. */
@@ -183,6 +189,8 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
  */
 export interface AccionMensaje {
   phone: string;
+  /** La linea por la que se hace; la del mensaje original. Sin ella, la principal. */
+  whatsappNumberId?: string | null;
   mensaje: CitaSaliente;
   tipo: 'reaccion' | 'eliminar' | 'editar';
   /** Para 'reaccion'. Cadena vacia = quitarla. */
@@ -192,7 +200,7 @@ export interface AccionMensaje {
 }
 
 export type SendOutcome =
-  | { ok: true; wamid: string; deliveryId: number }
+  | { ok: true; wamid: string; deliveryId: number; whatsappNumberId?: string | null }
   | {
       ok: false;
       blocked: true;
@@ -200,6 +208,8 @@ export type SendOutcome =
       reason: string;
       retryAfterMs?: number;
       deliveryId: number;
+      /** La linea del intento: la cola la fija en el trabajo para que el reintento no cambie de numero. */
+      whatsappNumberId?: string | null;
     }
   | {
       ok: false;
@@ -207,6 +217,7 @@ export type SendOutcome =
       error: string;
       retryable: boolean;
       deliveryId: number | null;
+      whatsappNumberId?: string | null;
       /** Codigo de Meta (131026...) o del cliente, normalizado; null si no se reconocio. */
       code?: string | null;
       /**
@@ -217,7 +228,24 @@ export type SendOutcome =
       incierto?: boolean;
     };
 
+/** Una linea de WhatsApp lista para enviar: su cliente y lo que la identifica ante los controles. */
+export interface LineaDeEnvio {
+  id: string;
+  etiqueta: string;
+  numero: string;
+  cliente: WhatsAppClient;
+  /** Con que id se llevan su estado, su cupo y su calentamiento (numberState, counters). */
+  identidad: string;
+  /** Si la ventana de 24 h de Meta aplica a esta linea (solo la API oficial). */
+  ventanaAplica: boolean;
+}
+
 export interface SenderDeps {
+  /**
+   * Resuelve una linea (null = la principal). Devuelve null si no existe, esta
+   * deshabilitada o no se puede armar. Sin esto, todo sale por `wa`, como siempre.
+   */
+  resolverLinea?: (id: string | null) => Promise<LineaDeEnvio | null>;
   repos: Repos;
   wa: WhatsAppClient;
   /** Funcion si el numero puede cambiar desde /setup sin reiniciar. */
@@ -258,7 +286,7 @@ export interface Sender {
    * puerta al cliente de WhatsApp que tienen las pantallas: meter una segunda
    * seria abrir dos caminos hacia lo mismo.
    */
-  presencia?(phone: string): Promise<{ estado: string; desde: string } | null>;
+  presencia?(phone: string, whatsappNumberId?: string | null): Promise<{ estado: string; desde: string } | null>;
 }
 
 export function createSender(deps: SenderDeps): Sender {
@@ -275,6 +303,24 @@ export function createSender(deps: SenderDeps): Sender {
       ? deps.serviceWindowApplies()
       : deps.serviceWindowApplies !== false;
 
+  /** El cliente de una linea (null = la principal); undefined si no hay lineas montadas o no existe. */
+  const clienteDeLinea = async (id: string | null | undefined): Promise<WhatsAppClient | undefined> =>
+    deps.resolverLinea ? (await deps.resolverLinea(id ?? null))?.cliente : undefined;
+
+  /**
+   * Por que linea sale un trabajo. Una linea PEDIDA que no esta disponible no
+   * se sustituye por otra (seria salir desde un numero que nadie eligio); una
+   * implicita (la del ultimo entrante) que ya no existe cae en la principal.
+   */
+  async function lineaDelTrabajo(job: SendJob, contactId: string): Promise<{ linea: LineaDeEnvio | null; pedida: boolean }> {
+    const principal: LineaDeEnvio = { id: '', etiqueta: '', numero: '', cliente: wa, identidad: phoneId(), ventanaAplica: ventanaAplica() };
+    if (!deps.resolverLinea) return { linea: principal, pedida: false };
+    if (job.whatsappNumberId) return { linea: await deps.resolverLinea(job.whatsappNumberId), pedida: true };
+    const ultima = await repos.messages.lineaDelUltimoEntrante(contactId);
+    const resuelta = (ultima ? await deps.resolverLinea(ultima) : null) ?? (await deps.resolverLinea(null));
+    return { linea: resuelta, pedida: false };
+  }
+
   const permitidos = () => (typeof deps.soloNumeros === 'function' ? deps.soloNumeros() : deps.soloNumeros) ?? [];
 
   const puerto: Sender = {
@@ -286,6 +332,7 @@ export function createSender(deps: SenderDeps): Sender {
      * al operador creyendo que borro algo que sigue en el telefono del cliente.
      */
     async accion(accion) {
+      const wa = (await clienteDeLinea(accion.whatsappNumberId)) ?? deps.wa;
       if (accion.tipo === 'reaccion') {
         if (!wa.sendReaction) throw new Error('este proveedor no manda reacciones');
         const r = await wa.sendReaction(accion.phone, accion.mensaje, accion.emoji ?? '');
@@ -301,7 +348,8 @@ export function createSender(deps: SenderDeps): Sender {
       return { ok: true, wamid: r.wamid };
     },
 
-    async presencia(phone) {
+    async presencia(phone, lineaId) {
+      const wa = (await clienteDeLinea(lineaId)) ?? deps.wa;
       // Sin soporte del proveedor no se inventa nada: null es "no se sabe".
       return (await wa.presencia?.(phone).catch(() => null)) ?? null;
     },
@@ -388,14 +436,33 @@ export function createSender(deps: SenderDeps): Sender {
       // Sin socket no hay nada que intentar: se devuelve "espera" sin dejar
       // una entrega fallida que el monitor contaria como rechazo de WhatsApp
       // y que el motor de rutas contaria como intento gastado.
+      const { linea } = await lineaDelTrabajo(job, contact.id);
+      if (!linea) {
+        return {
+          ok: false,
+          blocked: true,
+          code: 'sin_conexion',
+          reason: 'La linea de WhatsApp elegida no esta disponible (no existe, esta deshabilitada o le faltan datos)',
+          retryAfterMs: 2 * 60_000,
+          deliveryId: -1,
+          whatsappNumberId: job.whatsappNumberId ?? null,
+        };
+      }
+      // Desde aqui el trabajo queda atado a esta linea: si espera o se reintenta,
+      // sale por el mismo numero y no por otro (la cola copia este id al trabajo).
+      const lineaId = linea.id || null;
+      const wa = linea.cliente;
+      const phoneId = () => linea.identidad;
+      const ventanaAplica = () => linea.ventanaAplica;
       if (wa.conectado?.() === false) {
         return {
           ok: false,
           blocked: true,
           code: 'sin_conexion',
-          reason: 'WhatsApp no esta conectado: se reintenta en cuanto vuelva la sesion',
+          reason: `${linea.etiqueta ? `La linea «${linea.etiqueta}»` : 'WhatsApp'} no esta conectada: se reintenta en cuanto vuelva la sesion`,
           retryAfterMs: 2 * 60_000,
           deliveryId: -1,
+          whatsappNumberId: lineaId,
         };
       }
 
@@ -417,10 +484,11 @@ export function createSender(deps: SenderDeps): Sender {
           category: job.category,
           variables: job.variables,
           businessInitiated: false,
+          whatsappNumberId: lineaId,
         });
         const reason = `modo prueba: a ${contact.phone} no se le escribe porque no esta en la lista de numeros permitidos`;
         await repos.deliveries.markBlocked(deliveryId, `allowlist: ${reason}`);
-        return { ok: false, blocked: true, code: 'allowlist', reason, deliveryId };
+        return { ok: false, blocked: true, code: 'allowlist', reason, deliveryId, whatsappNumberId: lineaId };
       }
 
       const template =
@@ -461,6 +529,7 @@ export function createSender(deps: SenderDeps): Sender {
         category: job.category,
         variables: job.variables,
         businessInitiated,
+        whatsappNumberId: lineaId,
       });
 
       const decision = evaluateGates(
@@ -492,6 +561,7 @@ export function createSender(deps: SenderDeps): Sender {
           reason: decision.reason,
           retryAfterMs: decision.retryAfterMs,
           deliveryId,
+          whatsappNumberId: lineaId,
         };
       }
 
@@ -526,6 +596,9 @@ export function createSender(deps: SenderDeps): Sender {
           status: 'sent',
           deliveryId,
           createdAt: enviadoAt,
+          lineaId,
+          lineaEtiqueta: linea.etiqueta || null,
+          lineaNumero: linea.numero || null,
         });
 
         // Solo lo iniciado por la empresa consume cupo diario: responder
@@ -539,7 +612,7 @@ export function createSender(deps: SenderDeps): Sender {
         // Una persona acaba de escribir en este chat: el bot se calla (lo atiende ella). Se reactiva a mano.
         if (job.atiendePersona) await repos.contacts.pausarBot(contact.id, true, enviadoAt).catch(() => undefined);
 
-        return { ok: true, wamid: result.wamid, deliveryId };
+        return { ok: true, wamid: result.wamid, deliveryId, whatsappNumberId: lineaId };
       } catch (error) {
         const retryable = error instanceof WhatsAppApiError ? error.retryable : false;
         const message = error instanceof Error ? error.message : 'error desconocido';
@@ -567,7 +640,7 @@ export function createSender(deps: SenderDeps): Sender {
         // Sin respuesta del proveedor (no es un WhatsAppApiError: red, tiempo
         // agotado) o un 200 sin wamid: puede que el mensaje si saliera.
         const incierto = !(error instanceof WhatsAppApiError) || error.httpStatus === 200;
-        return { ok: false, blocked: false, error: message, retryable: insistir, deliveryId, code, ...(incierto ? { incierto: true } : {}) };
+        return { ok: false, blocked: false, error: message, retryable: insistir, deliveryId, whatsappNumberId: lineaId, code, ...(incierto ? { incierto: true } : {}) };
       }
     },
   };
