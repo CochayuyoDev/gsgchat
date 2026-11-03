@@ -124,22 +124,28 @@ ${bandaDemo}
     <button class="bajar hidden" id="bajar" title="Bajar al último mensaje" aria-label="Bajar al último mensaje">↓<span class="nuevos hidden" id="bajar-nuevos"></span></button>
 
 
+    <input type="file" id="archivo" class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip">
+
     <div class="cita-previa hidden" id="cita-previa">
       <div class="bloque"><span class="quien"></span><span class="que"></span></div>
       <button type="button" class="icon" id="cita-quitar" title="No responder a ese mensaje" aria-label="Quitar la cita">✕</button>
     </div>
+    <div class="previa hidden" id="adjunto-previa"></div>
     <div class="panel-bajo hidden" id="panel-atajos"></div>
+    <div class="panel-bajo hidden" id="panel-stickers"></div>
     <div class="panel-bajo emojis hidden" id="panel-emojis">
       <input class="buscador" id="emojis-buscar" placeholder="Buscar: caras, gestos, corazones, trabajo, comida" aria-label="Buscar emoji">
       <div id="emojis-rejillas"></div>
     </div>
     <div class="rapidas-barra hidden" id="rapidas-barra"></div>
 
+    <div class="grabando hidden" id="grabando"></div>
     <div class="composer hidden" id="composer">
-      <button class="ghost" id="boton-mas" title="Ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
+      <button class="ghost" id="boton-mas" title="Adjuntar, sticker, ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
       <button class="ghost" id="boton-emoji" title="Emoji" aria-label="Elegir un emoji" aria-expanded="false">😊</button>
       <select id="linea-sel" class="hidden" title="Por qué número de WhatsApp sale tu respuesta" aria-label="Línea de WhatsApp para responder"></select>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje  ·  / para respuestas rápidas" aria-label="Escribe un mensaje"></textarea>
+      <button id="grabar" title="Grabar una nota de voz" aria-label="Grabar una nota de voz">🎤</button>
       <button id="send" class="hidden" title="Enviar" aria-label="Enviar">➤</button>
     </div>
 
@@ -2043,6 +2049,7 @@ async function revisarConexion() {
  */
 function ocupado() {
   return Boolean(menuAbierto) || (seleccion && seleccion.length > 0) ||
+    Boolean(adjuntoPendiente) || Boolean(grabadora) ||
     !document.getElementById('buscar-hilo').classList.contains('hidden') ||
     document.querySelector('.dlg-fondo, .visor, .ayuda-teclas') !== null;
 }

@@ -147,8 +147,8 @@ export function createFakeMessages(
       return row.id;
     },
 
-    async lineaDelUltimoEntrante(contactId) {
-      const ultimo = all.filter((m) => m.contactId === contactId && m.direction === 'in' && m.lineaId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0];
+    async lineaDeLaConversacion(contactId) {
+      const ultimo = all.filter((m) => m.contactId === contactId && m.lineaId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0];
       return ultimo?.lineaId ?? null;
     },
 

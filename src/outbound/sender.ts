@@ -36,8 +36,9 @@ export interface SendJob {
   category: TemplateCategory;
   campaignId?: string | null;
   /**
-   * Por que linea de WhatsApp sale. Sin indicarla: la del ultimo mensaje que
-   * el cliente mando (la conversacion sigue por donde llego) o, si no hay, la
+   * Por que linea de WhatsApp sale. Sin indicarla: la del ultimo mensaje de
+   * la conversacion, entrante o saliente (el flujo empieza y termina por la
+   * misma linea) o, si no hay, la
    * principal. Un reintento sale siempre por la linea del primer intento.
    */
   whatsappNumberId?: string | null;
@@ -316,7 +317,7 @@ export function createSender(deps: SenderDeps): Sender {
     const principal: LineaDeEnvio = { id: '', etiqueta: '', numero: '', cliente: wa, identidad: phoneId(), ventanaAplica: ventanaAplica() };
     if (!deps.resolverLinea) return { linea: principal, pedida: false };
     if (job.whatsappNumberId) return { linea: await deps.resolverLinea(job.whatsappNumberId), pedida: true };
-    const ultima = await repos.messages.lineaDelUltimoEntrante(contactId);
+    const ultima = await repos.messages.lineaDeLaConversacion(contactId);
     const resuelta = (ultima ? await deps.resolverLinea(ultima) : null) ?? (await deps.resolverLinea(null));
     return { linea: resuelta, pedida: false };
   }

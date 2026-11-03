@@ -69,6 +69,26 @@ describe('sender con varias lineas', () => {
     expect(waVentas.sent).toHaveLength(1);
   });
 
+  it('lo que se empezo por una linea sigue por ella aunque el cliente aun no haya contestado', async () => {
+    const { sender, waPrincipal, waVentas } = montar();
+    await sender.send(texto('51900000010', { whatsappNumberId: 'ventas' }));
+    // Los siguientes, sin indicar linea (un recordatorio, un seguimiento...), salen por la misma.
+    await sender.send(texto('51900000010'));
+    await sender.send(texto('51900000010'));
+    expect(waVentas.sent).toHaveLength(3);
+    expect(waPrincipal.sent).toHaveLength(0);
+  });
+
+  it('si el cliente escribe por otra linea, la conversacion pasa a esa', async () => {
+    const { sender, waPrincipal, waVentas, repos } = montar();
+    await sender.send(texto('51900000011', { whatsappNumberId: 'ventas' }));
+    const c = await repos.contacts.upsertFromInbound('51900000011');
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'IN9', kind: 'text', body: 'hola', lineaId: PRINCIPAL, createdAt: new Date(Date.now() + 5000) });
+    await sender.send(texto('51900000011'));
+    expect(waVentas.sent).toHaveLength(1);
+    expect(waPrincipal.sent).toHaveLength(1);
+  });
+
   it('una linea caida espera (no cambia de numero) y el reintento queda fijado a ella', async () => {
     const { sender, waPrincipal, estado } = montar();
     estado.ventasConectada = false;

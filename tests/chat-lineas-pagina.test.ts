@@ -33,3 +33,16 @@ describe('pantalla de conexion con lineas', () => {
     for (const js of scripts) expect(() => new Function(js)).not.toThrow();
   });
 });
+
+describe('adjuntos desde el chat', () => {
+  const html = chatPage({ proveedor: 'local', configured: true, nombreNegocio: 'Prueba' });
+
+  it('la pantalla permite adjuntar, pegar, arrastrar, grabar y mandar stickers por la linea elegida', () => {
+    for (const id of ['id="archivo"', 'id="grabar"', 'id="panel-stickers"', 'id="adjunto-previa"', 'id="grabando"']) expect(html).toContain(id);
+    expect(html).toContain("addEventListener('paste'");
+    expect(html).toContain("addEventListener('drop'");
+    expect(html).toContain('lineaId: lineaSeleccionada()');
+    const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).filter(Boolean);
+    for (const js of scripts) expect(() => new Function(js)).not.toThrow();
+  });
+});

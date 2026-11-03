@@ -115,8 +115,12 @@ export interface MessagesRepo {
   finalizarAccionWhatsapp(key: string, estado: 'aceptado' | 'fallido' | 'incierto', wamidSaliente?: string | null): Promise<void>;
   limpiarAccionesWhatsappAntes(ahora: Date): Promise<number>;
   add(message: NewMessage): Promise<number>;
-  /** La linea por la que llego el ultimo mensaje de este cliente; null si no hay o es anterior a las lineas. */
-  lineaDelUltimoEntrante(contactId: string): Promise<string | null>;
+  /**
+   * La linea con la que se lleva la conversacion de este cliente: la del ultimo
+   * mensaje, entrante o saliente. Se recuerda en el contacto, asi que sigue
+   * valiendo cuando los mensajes ya caducaron. Null = nunca se uso una linea.
+   */
+  lineaDeLaConversacion(contactId: string): Promise<string | null>;
   /** Estado de entrega que llega por webhook. */
   setStatusByWamid(wamid: string, status: string): Promise<void>;
   listConversations(query: { q?: string; limit: number; offset: number; incluirApartados?: boolean; desde?: Date | null; alcance?: { afterId: string; retenidosDesde: Date } }): Promise<Conversation[]>;
@@ -396,17 +400,27 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           message.lineaNumero ?? null,
         ],
       );
+      // La conversacion sigue por la linea del ultimo mensaje, entre o salga.
+      if (message.lineaId) {
+        await pool.query('update contacts set whatsapp_number_id = $2 where id = $1 and (whatsapp_number_id is null or whatsapp_number_id <> $2)', [message.contactId, message.lineaId]);
+      }
       return insertId;
     },
 
-    async lineaDelUltimoEntrante(contactId) {
+    async lineaDeLaConversacion(contactId) {
       const { rows } = await pool.query<{ whatsapp_number_id: string | null }>(
+        'select whatsapp_number_id from contacts where id = $1',
+        [contactId],
+      );
+      if (rows[0]?.whatsapp_number_id) return rows[0].whatsapp_number_id;
+      // Contactos de antes de recordarla en el contacto: la del ultimo mensaje que la tenga.
+      const ultimo = await pool.query<{ whatsapp_number_id: string | null }>(
         `select whatsapp_number_id from messages
-          where contact_id = $1 and direction = 'in' and whatsapp_number_id is not null
+          where contact_id = $1 and whatsapp_number_id is not null
           order by created_at desc, id desc limit 1`,
         [contactId],
       );
-      return rows[0]?.whatsapp_number_id ?? null;
+      return ultimo.rows[0]?.whatsapp_number_id ?? null;
     },
 
     async setStatusByWamid(wamid, status) {
