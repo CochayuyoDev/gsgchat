@@ -495,6 +495,16 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
     <button class="btn peligro hidden" id="desconectar" type="button">Desvincular cuenta</button>
   </div>
 </section>
+<section class="tarjeta con-card" id="card-lineas">
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">📱</span><div class="con-tit"><h2>Líneas de WhatsApp</h2><span id="lineas-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <p class="con-frase">Hasta 8 números por tienda, todos en la misma bandeja y un solo hilo por cliente. La etiqueta (por ejemplo <b>wsp-ali</b>) aparece en cada chat y cada mensaje para saber qué celular revisar. Si una línea se cae, las demás siguen.</p>
+  <div id="lineas-lista" class="lineas-lista"></div>
+  <div class="acciones">
+    <input id="linea-nueva" class="corto" maxlength="80" placeholder="Nombre de la línea (ej. wsp-kevin)" aria-label="Nombre de la nueva línea">
+    <button class="btn primario" id="linea-agregar" type="button">Agregar línea</button>
+  </div>
+  <p class="ayuda" id="lineas-estado" role="status"></p>
+</section>
 ` : ''}${tarjetaGsg ? `<section class="tarjeta con-card" id="gsg">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">${icono('moto')}</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
@@ -1734,6 +1744,109 @@ if ($('perfil')) {
 }
 
 `;
+  const scriptLineas = String.raw`
+/* --- lineas de WhatsApp (hasta 8) ------------------------------------- */
+var lineasMax = 8;
+var lineasVistas = '';
+var TONO_LINEA = { conectado: 'verde', esperando_qr: 'ambar', caido: 'rojo', desconectado: 'gris' };
+var TEXTO_LINEA = { conectado: 'Conectada', esperando_qr: 'Escanea el QR', caido: 'Caída', desconectado: 'Sin conectar' };
+function lineasMsg(t, tono) {
+  var el = $('lineas-estado');
+  if (!el) return;
+  el.textContent = t || '';
+  el.style.color = tono === 'rojo' ? '#b42318' : '';
+}
+function filaLinea(l) {
+  var tono = TONO_LINEA[l.estado] || 'gris';
+  var local = l.proveedor === 'local' && !l.principal;
+  var qr = l.sesion && l.sesion.qr ? '<div class="qr-marco"><img alt="QR de ' + esc(l.etiqueta) + '" src="data:image/png;base64,' + esc(l.sesion.qr) + '"></div><p class="ayuda">En el teléfono de esta línea: WhatsApp &rarr; Dispositivos vinculados &rarr; Vincular un dispositivo.</p>' : '';
+  var codigo = l.sesion && l.sesion.pairingCode ? '<div class="codigo" role="status">' + esc(l.sesion.pairingCode) + '</div>' : '';
+  var botones = '';
+  if (local) {
+    botones += l.estado === 'conectado'
+      ? '<button class="btn" type="button" data-acc="desconectar" data-id="' + esc(l.id) + '">Desvincular</button>'
+      : '<button class="btn primario" type="button" data-acc="conectar" data-id="' + esc(l.id) + '">' + (l.estado === 'esperando_qr' ? 'Mostrar otro QR' : 'Conectar y mostrar el QR') + '</button>';
+  }
+  if (!l.principal) {
+    botones += '<button class="btn" type="button" data-acc="habilitar" data-id="' + esc(l.id) + '" data-valor="' + (l.habilitada ? '0' : '1') + '">' + (l.habilitada ? 'Deshabilitar' : 'Habilitar') + '</button>';
+    botones += '<button class="btn peligro" type="button" data-acc="quitar" data-id="' + esc(l.id) + '">Quitar</button>';
+  }
+  return '<div class="linea-fila" data-linea="' + esc(l.id) + '" style="border:1px solid var(--borde,#d9dde3);border-radius:10px;padding:10px;margin:8px 0">' +
+    '<div class="acciones" style="align-items:center">' +
+      '<input class="corto" data-nombre="' + esc(l.id) + '" maxlength="80" value="' + esc(l.etiqueta) + '" aria-label="Nombre de la línea">' +
+      '<button class="btn" type="button" data-acc="renombrar" data-id="' + esc(l.id) + '">Guardar nombre</button>' +
+      '<span class="chip tono-' + tono + '">' + esc(l.habilitada ? (TEXTO_LINEA[l.estado] || l.estado) : 'Deshabilitada') + '</span>' +
+      (l.principal ? '<span class="chip tono-gris">Principal · activa</span>' : '') +
+    '</div>' +
+    '<p class="ayuda">' + (l.numero ? 'Número: +' + esc(l.numero) : 'Número: se completa al conectar') + ' · ' + (l.proveedor === 'local' ? 'QR / sesión vinculada' : l.proveedor === 'cloud' ? 'API oficial de Meta' : 'WAHA') + (l.principal ? ' · se conecta con la tarjeta de WhatsApp de arriba' : '') + '</p>' +
+    qr + codigo +
+    (botones ? '<div class="acciones">' + botones + '</div>' : '') +
+  '</div>';
+}
+async function cargarLineas() {
+  var lista = $('lineas-lista');
+  if (!lista) return;
+  try {
+    var r = await api('/admin/lineas');
+    lineasMax = r.max || 8;
+    var firma = JSON.stringify(r.lineas);
+    var chip = $('lineas-chip');
+    var conectadas = r.lineas.filter(function (l) { return l.estado === 'conectado'; }).length;
+    if (chip) { chip.textContent = conectadas + ' de ' + r.lineas.length + ' conectadas (máx. ' + lineasMax + ')'; chip.className = 'chip tono-' + (conectadas ? 'verde' : 'ambar'); }
+    ver('linea-agregar', r.lineas.length < lineasMax);
+    ver('linea-nueva', r.lineas.length < lineasMax);
+    /* No se repinta mientras alguien escribe un nombre: el cursor se perderia. */
+    var escribiendo = document.activeElement && lista.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+    if (firma !== lineasVistas && !escribiendo) { lineasVistas = firma; lista.innerHTML = r.lineas.map(filaLinea).join(''); }
+  } catch (error) { lineasMsg(error.message, 'rojo'); }
+}
+async function accionLinea(acc, id, valor) {
+  try {
+    if (acc === 'renombrar') {
+      var campo = document.querySelector('[data-nombre="' + id + '"]');
+      await api('/admin/lineas/' + id, { method: 'PATCH', body: { etiqueta: campo ? campo.value : '' } });
+      lineasMsg('Nombre guardado. Los mensajes viejos conservan el que tenían.');
+    } else if (acc === 'conectar') {
+      await api('/admin/lineas/' + id + '/conectar', { method: 'POST' });
+      lineasMsg('Escanea el QR con el teléfono de esta línea. Si caduca, sale otro solo.');
+    } else if (acc === 'desconectar') {
+      await api('/admin/lineas/' + id + '/desconectar', { method: 'POST' });
+      lineasMsg('Línea desvinculada. Las demás siguen conectadas.');
+    } else if (acc === 'habilitar') {
+      await api('/admin/lineas/' + id, { method: 'PATCH', body: { habilitada: valor === '1' } });
+      lineasMsg(valor === '1' ? 'Línea habilitada.' : 'Línea deshabilitada: no se enviará nada por ella.');
+    } else if (acc === 'quitar') {
+      await api('/admin/lineas/' + id, { method: 'DELETE' });
+      lineasMsg('Línea quitada. Sus mensajes quedan en los chats con su etiqueta.');
+    }
+    lineasVistas = '';
+    await cargarLineas();
+  } catch (error) { lineasMsg(error.message, 'rojo'); }
+}
+(function iniciarLineas() {
+  var lista = $('lineas-lista');
+  if (!lista) return;
+  lista.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-acc]') : null;
+    if (!b) return;
+    if (b.getAttribute('data-acc') === 'quitar' && !window.confirm('¿Quitar esta línea? Sus mensajes viejos se quedan en los chats.')) return;
+    accionLinea(b.getAttribute('data-acc'), b.getAttribute('data-id'), b.getAttribute('data-valor'));
+  });
+  $('linea-agregar').onclick = async function () {
+    var nombre = val('linea-nueva');
+    if (!nombre) { lineasMsg('Ponle un nombre a la línea, por ejemplo wsp-ali.', 'rojo'); return; }
+    try {
+      await api('/admin/lineas', { method: 'POST', body: { etiqueta: nombre, proveedor: 'local' } });
+      setVal('linea-nueva', '');
+      lineasMsg('Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.');
+      lineasVistas = '';
+      await cargarLineas();
+    } catch (error) { lineasMsg(error.message, 'rojo'); }
+  };
+  cargarLineas();
+  setInterval(cargarLineas, 4000);
+})();
+`;
   const scriptGsg = String.raw`
 /* En la pantalla de GSG no hay tarjeta de WhatsApp: el armazon se enseña aqui. */
 if (!document.getElementById('card-wa') && $('app')) $('app').classList.remove('hidden');
@@ -2033,7 +2146,7 @@ if ($('gsg')) {
   if ($('gsg-envios-caja') && $('gsg-envios-caja').open) cargarEnvios();
 }
 `;
-  const script = scriptComun + (vistaWa ? scriptWa : '') + (tarjetaGsg ? scriptGsg : '');
+  const script = scriptComun + (vistaWa ? scriptWa + scriptLineas : '') + (tarjetaGsg ? scriptGsg : '');
 
   return appShell({
     titulo: vistaWa ? 'Conexión WhatsApp' : 'Conexión con GSG',

@@ -70,6 +70,7 @@ export interface AdminDeps {
   entrenamiento?: import('../entrenamiento/servicio.js').ServicioEntrenamiento;
   /** La voz del asistente: desde el chat, un texto puede salir como nota de voz. */
   voz?: import('../voz/servicio.js').ServicioVoz;
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
   /** La puerta a GSG (la configurable desde la pantalla). Sin ella, la del .env. */
   gsg?: import('../rutas/gsg.js').PuertoGsg;
   /** Las entregas del dia: ligan cada conversacion guardada a su pedido. Ver src/entregas. */
@@ -176,7 +177,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   await registerAutomationRoutes(app, { repos, sender });
   const gsg = deps.gsg ?? crearPuertoGsg(config);
-  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes, ia: deps.ia });
+  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes, ia: deps.ia, lineas: deps.lineas });
   await registerLeadsRoutes(app, {
     repos,
     // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.

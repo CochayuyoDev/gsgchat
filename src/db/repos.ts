@@ -425,6 +425,8 @@ export interface DeliveriesRepo {
     variables?: unknown;
     /** Fuera de ventana o con plantilla: lo que cuenta para el limite de Meta. */
     businessInitiated?: boolean;
+    /** La linea de WhatsApp por la que sale. Null = la principal (envios anteriores a las lineas). */
+    whatsappNumberId?: string | null;
   }): Promise<number>;
   markSent(id: number, wamid: string): Promise<void>;
   markBlocked(id: number, reason: string): Promise<void>;
@@ -1241,8 +1243,8 @@ export function createRepos(pool: Pool): Repos {
     async create(input) {
       const { insertId } = await pool.query(
         `insert into deliveries
-           (contact_id, campaign_id, kind, template_name, category, variables, business_initiated)
-         values ($1,$2,$3,$4,$5,$6,$7)`,
+           (contact_id, campaign_id, kind, template_name, category, variables, business_initiated, whatsapp_number_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
           input.contactId,
           input.campaignId ?? null,
@@ -1251,6 +1253,7 @@ export function createRepos(pool: Pool): Repos {
           input.category,
           input.variables ? JSON.stringify(input.variables) : null,
           input.businessInitiated ?? false,
+          input.whatsappNumberId ?? null,
         ],
       );
       return insertId;

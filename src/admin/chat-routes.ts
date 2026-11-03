@@ -41,6 +41,8 @@ export interface ChatDeps {
   mediaDir?: string;
   /** Envío opcional de voz solicitado por la IA; los medios entrantes se ignoran. */
   voz?: import('../voz/servicio.js').ServicioVoz;
+  /** Las lineas de WhatsApp de la tienda: el chat elige por cual responder y rotula cada mensaje. */
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
   /** El puerto hacia GSG: por aqui sale la incidencia manual. Sin el, queda en la cola. */
   gsg?: import('../rutas/gsg.js').PuertoGsg;
   /** La IA del asistente: la usa el boton «Etiquetar los chats de hoy». */
@@ -123,6 +125,8 @@ const sendSchema = z.object({
   templateName: z.string().optional(),
   templateLanguage: z.string().default('es'),
   variables: z.array(z.string()).default([]),
+  /** Por que linea de WhatsApp responder. Sin ella: por donde llego el ultimo mensaje del cliente. */
+  lineaId: z.string().max(64).optional(),
 });
 
 /**
@@ -486,6 +490,44 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    */
   const ventanaObliga = () => providerOf(settings.current()) === 'cloud';
 
+  // ------------------------------------------------------------ lineas
+
+  /** Lo que la pantalla sabe de una linea: rotulo, estado y lo que su proveedor permite. */
+  const vistaDeLinea = (l: import('../whatsapp/lineas.js').Linea) => ({
+    id: l.id,
+    etiqueta: l.etiqueta,
+    numero: l.telefono,
+    estado: l.estado,
+    principal: l.principal,
+    proveedor: l.proveedor,
+    puede: capacidadesDelChat(l.proveedor),
+  });
+
+  /** Las lineas con las que se puede responder (habilitadas), la principal primero. */
+  const lineasActivas = async () => (deps.lineas ? (await deps.lineas.listar()).filter((l) => l.habilitada || l.principal) : []);
+
+  /**
+   * La linea por la que se contesta un chat si nadie elige otra: la del ultimo
+   * mensaje que llego y, si el chat no tiene o esa ya no esta, la principal.
+   */
+  const lineaPorDefecto = async (contactId: string, activas: import('../whatsapp/lineas.js').Linea[]): Promise<string | null> => {
+    if (!activas.length) return null;
+    const ultima = await repos.messages.lineaDelUltimoEntrante(contactId);
+    return activas.find((l) => l.id === ultima)?.id ?? activas.find((l) => l.principal)?.id ?? activas[0]!.id;
+  };
+
+  /** El proveedor de una linea; sin lineas montadas, el de los ajustes como siempre. */
+  const proveedorDeLinea = async (lineaId: string | null | undefined): Promise<string> => {
+    const linea = lineaId && deps.lineas ? await deps.lineas.obtener(lineaId) : null;
+    return linea ? linea.proveedor : providerOf(settings.current());
+  };
+
+  /** La linea de un mensaje del hilo (por donde llego o salio); la del chat si es anterior a las lineas. */
+  const lineaDelMensaje = async (contactId: string, mensajeId: number): Promise<string | null> => {
+    const m = await repos.messages.porId(contactId, mensajeId);
+    return m?.lineaId ?? (await lineaPorDefecto(contactId, await lineasActivas()));
+  };
+
   /**
    * Si un envio escrito a mano puede saltarse las guardas de consentimiento y
    * volumen.
@@ -595,8 +637,19 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const items = await repos.messages.listConversations({ ...query, limit: query.limit + 1, alcance });
     const pagina = items.slice(0, query.limit);
     const etiqueta = await etiquetasDe(pagina.filter((c) => c.tipo !== 'grupo').map((c) => c.phone));
+    // La linea de WhatsApp de cada chat (wsp-ali, wsp-kevin...): la del ultimo mensaje,
+    // con el nombre que tiene ahora; si ya no existe, el que tenia entonces.
+    const porId = new Map((await lineasActivas()).map((l) => [l.id, l]));
+    const conLinea = pagina.map((c) => {
+      const m = c.lastMessage;
+      const base = { ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) };
+      if (!m?.lineaId) return { ...base, linea: null };
+      const viva = porId.get(m.lineaId);
+      return { ...base, linea: { id: m.lineaId, etiqueta: viva?.etiqueta ?? m.lineaEtiqueta ?? '', numero: viva?.telefono || m.lineaNumero || '' } };
+    });
     return responderLectura(request, reply, {
-      items: pagina.map((c) => ({ ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) })),
+      items: conLinea,
+      lineas: (await lineasActivas()).map(vistaDeLinea),
       hasMore: items.length > query.limit,
       siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
       ...comun,
@@ -633,6 +686,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * puede escribir, su pedido de hoy (si lo hay), su ultima ubicacion y
    * cuantas conversaciones guardadas tiene. Solo lectura.
    */
+  /** Las lineas con las que se puede responder, para el selector del chat y los rotulos. */
+  app.get('/admin/chat/lineas', async () => ({ lineas: (await lineasActivas()).map(vistaDeLinea) }));
+
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/ficha', async (request, reply) => {
     const alcance = alcanceChat(request.usuario);
     if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'contacto no encontrado' });
@@ -700,7 +756,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     // Lo que este proveedor sabe hacer, para que la pantalla no pinte botones
     // que no funcionan. Se manda con el hilo porque cambia al cambiar de
     // proveedor, y la pantalla no tiene por que saber cual hay puesto.
-    const puede = capacidadesDelChat(providerOf(settings.current()));
+    const activas = await lineasActivas();
+    const lineaId = await lineaPorDefecto(contact.id, activas);
+    const puede = capacidadesDelChat(await proveedorDeLinea(lineaId));
+    const lineasVista = activas.map(vistaDeLinea);
 
     if (contact.tipo === 'grupo') {
       return responderLectura(request, reply, {
@@ -715,6 +774,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         hasMore,
         beforeCursor: pagina[0]?.id ?? null,
         puede,
+        lineas: lineasVista,
+        lineaPorDefecto: lineaId,
       });
     }
 
@@ -737,6 +798,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       hasMore,
       beforeCursor: pagina[0]?.id ?? null,
       puede,
+      lineas: lineasVista,
+      lineaPorDefecto: lineaId,
     });
   });
 
@@ -981,7 +1044,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * salvo que el cuerpo diga otra cosa (el chat embebido de otro sistema
    * manda en nombre de su asesor). Va al hilo y al webhook (`autorNombre`).
    */
-  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string; rol?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string; atiendePersona?: boolean }) => ({
+  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string; rol?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string; atiendePersona?: boolean; lineaId?: string }) => ({
+    ...(body.lineaId ? { whatsappNumberId: body.lineaId } : {}),
     // Sin decir nada, quien escribe desde el chat es una persona: que el
     // hilo no lo apunte como 'sistema' solo porque la ventana de Meta obligue.
     origen: body.autor ?? 'persona',
@@ -994,6 +1058,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   app.post('/admin/chat/send', async (request, reply) => {
     const body = sendSchema.parse(request.body);
     const firma = quien(request, body);
+    if (body.lineaId) {
+      const elegida = (await lineasActivas()).find((l) => l.id === body.lineaId);
+      if (!elegida) return reply.code(400).send({ error: 'esa linea de WhatsApp no existe o esta deshabilitada' });
+    }
 
     let phone = body.phone ? normalizePhone(body.phone) : undefined;
     let esGrupo = false;
@@ -1127,7 +1195,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const body = z.object({ mensajeId: z.coerce.number().int().positive(), emoji: z.string().max(16) }).parse(request.body ?? {});
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    if (!capacidadesDelChat(providerOf(settings.current())).reaccionar || !sender.accion) {
+    const lineaId = await lineaDelMensaje(contact.id, body.mensajeId);
+    if (!capacidadesDelChat(await proveedorDeLinea(lineaId)).reaccionar || !sender.accion) {
       return reply.code(400).send({ error: 'este WhatsApp no puede mandar reacciones' });
     }
 
@@ -1135,7 +1204,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if ('error' in mensaje) return reply.code(400).send({ error: mensaje.error });
 
     const emoji = body.emoji.trim();
-    await sender.accion({ phone: contact.phone, mensaje, tipo: 'reaccion', emoji });
+    await sender.accion({ phone: contact.phone, whatsappNumberId: lineaId, mensaje, tipo: 'reaccion', emoji });
     await repos.messages.reaccionar(mensaje.id, 'yo', emoji, new Date());
     return { ok: true, emoji };
   });
@@ -1157,14 +1226,22 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     const fallos: string[] = [];
     if (body.paraTodos) {
-      if (!capacidadesDelChat(providerOf(settings.current())).eliminarParaTodos || !sender.accion) {
+      // Si ninguna de las lineas por las que salieron puede, se dice de entrada; si solo
+      // algunas, las demas se quitan igual y el fallo de cada una se informa.
+      const puedenAlguno = await Promise.all(body.ids.map(async (id) => capacidadesDelChat(await proveedorDeLinea(await lineaDelMensaje(contact.id, id))).eliminarParaTodos));
+      if (!puedenAlguno.some(Boolean) || !sender.accion) {
         return reply.code(400).send({ error: 'este WhatsApp no puede eliminar un mensaje para todos: solo se puede quitar de aquí' });
       }
       for (const id of body.ids) {
         const mensaje = await citaDelHilo(contact.id, id);
         if ('error' in mensaje) { fallos.push(mensaje.error); continue; }
+        const lineaId = await lineaDelMensaje(contact.id, id);
+        if (!capacidadesDelChat(await proveedorDeLinea(lineaId)).eliminarParaTodos || !sender.accion) {
+          fallos.push('la linea por la que salio ese mensaje no puede eliminarlo para todos: solo se puede quitar de aquí');
+          continue;
+        }
         try {
-          await sender.accion({ phone: contact.phone, mensaje, tipo: 'eliminar' });
+          await sender.accion({ phone: contact.phone, whatsappNumberId: lineaId, mensaje, tipo: 'eliminar' });
           await repos.messages.marcarBorradoPorRemitente(mensaje.id, new Date());
         } catch (error) {
           fallos.push(error instanceof Error ? error.message : 'no se pudo eliminar');
@@ -1181,7 +1258,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const body = z.object({ mensajeId: z.coerce.number().int().positive(), texto: z.string().trim().min(1).max(4000) }).parse(request.body ?? {});
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    if (!capacidadesDelChat(providerOf(settings.current())).editar || !sender.accion) {
+    const lineaId = await lineaDelMensaje(contact.id, body.mensajeId);
+    if (!capacidadesDelChat(await proveedorDeLinea(lineaId)).editar || !sender.accion) {
       return reply.code(400).send({ error: 'este WhatsApp no puede editar un mensaje ya enviado' });
     }
 
@@ -1189,7 +1267,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if ('error' in mensaje) return reply.code(400).send({ error: mensaje.error });
     if (!mensaje.fromMe) return reply.code(400).send({ error: 'solo se pueden editar los mensajes que mandaste tú' });
 
-    await sender.accion({ phone: contact.phone, mensaje, tipo: 'editar', texto: body.texto });
+    await sender.accion({ phone: contact.phone, whatsappNumberId: lineaId, mensaje, tipo: 'editar', texto: body.texto });
     await repos.messages.editarCuerpo(contact.id, body.mensajeId, body.texto, new Date());
     return { ok: true };
   });
@@ -1322,8 +1400,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/presencia', async (request, reply) => {
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    if (!capacidadesDelChat(providerOf(settings.current())).presencia || !sender.presencia) return { presencia: null };
-    return { presencia: await sender.presencia(contact.phone) };
+    const linea = request.query && typeof (request.query as { lineaId?: unknown }).lineaId === 'string' ? (request.query as { lineaId: string }).lineaId : await lineaPorDefecto(contact.id, await lineasActivas());
+    if (!capacidadesDelChat(await proveedorDeLinea(linea)).presencia || !sender.presencia) return { presencia: null };
+    return { presencia: await sender.presencia(contact.phone, linea) };
   });
 
   /**

@@ -138,6 +138,7 @@ ${bandaDemo}
     <div class="composer hidden" id="composer">
       <button class="ghost" id="boton-mas" title="Ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
       <button class="ghost" id="boton-emoji" title="Emoji" aria-label="Elegir un emoji" aria-expanded="false">😊</button>
+      <select id="linea-sel" class="hidden" title="Por qué número de WhatsApp sale tu respuesta" aria-label="Línea de WhatsApp para responder"></select>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje  ·  / para respuestas rápidas" aria-label="Escribe un mensaje"></textarea>
       <button id="send" class="hidden" title="Enviar" aria-label="Enviar">➤</button>
     </div>
@@ -274,6 +275,26 @@ var pintados = [];       /* lo que hay pintado en el hilo ahora mismo */
 var puedeEscribir = false;
 /* Lo que este proveedor sabe hacer. Lo dice el servidor al abrir el hilo; hasta
    entonces, lo minimo que todos pueden. Nada se pinta "por si acaso". */
+/* Las lineas de WhatsApp de la tienda. Con una sola no se rotula nada: la etiqueta solo aporta con varias. */
+var LINEAS = [];
+var lineaElegida = {};
+function variasLineas() { return LINEAS.length > 1; }
+function colorDeLinea(etiqueta) {
+  var h = 0, s = String(etiqueta || '');
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return 'hsl(' + h + ', 52%, 38%)';
+}
+function lineaTagHtml(etiqueta, titulo) {
+  if (!etiqueta) return '';
+  return '<span class="linea-tag" style="background:' + colorDeLinea(etiqueta) + '" title="' + esc(titulo || etiqueta) + '">' + esc(etiqueta) + '</span>';
+}
+function lineaPorId(id) { return LINEAS.filter(function (l) { return l.id === id; })[0] || null; }
+/* La linea por la que saldra lo que se escriba ahora: la que se eligio en este chat o la de por defecto. */
+function lineaSeleccionada() {
+  if (!current || !variasLineas()) return null;
+  var id = lineaElegida[current.id] || current.lineaPorDefecto;
+  return lineaPorId(id) ? id : null;
+}
 var PUEDE = { citar: false, reaccionar: false, eliminarParaTodos: false, editar: false, presencia: false };
 var filtroLista = 'todos';
 var enviando = 0;
@@ -345,6 +366,7 @@ async function loadChats(keepScroll, anexar) {
       conversations = Array.from(porId.values());
       offsetChats = offset + data.items.length;
     } else { conversations = data.items; offsetChats = data.items.length; }
+    if (data.lineas) LINEAS = data.lineas;
     hasMoreChats = Boolean(data.hasMore);
     if (window.actualizarNoLeidos) window.actualizarNoLeidos(data.unread || 0);
     var badge = document.getElementById('unread');
@@ -386,6 +408,7 @@ function filaDeChat(c) {
            : '<div class="avatar ' + colorDe(c.phone) + '" aria-hidden="true">' + esc(inicial(c.name, c.phone)) + '</div>') +
     '<div class="body"><div class="top">' +
       '<span class="name">' + esc(nombreDe(c)) + '</span>' +
+      (variasLineas() && c.linea ? lineaTagHtml(((lineaPorId(c.linea.id) || {}).etiqueta) || c.linea.etiqueta, 'Último mensaje por ' + (c.linea.etiqueta || '') + (c.linea.numero ? ' · +' + c.linea.numero : '')) : '') +
       (marcas ? '<span class="marcas">' + marcas + '</span>' : '') +
       '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
     '</div><div class="last"><span class="texto">' + prefijo + esc(texto.slice(0, 70)) + '</span>' + chipEtiqueta(c.etiqueta) +
@@ -1118,6 +1141,10 @@ async function openChat(contactId, silent) {
     current.pedido = data.reparto ? data.reparto.referencia : null;
     current.reparto = data.reparto || null;
     PUEDE = data.puede || PUEDE;
+    if (data.lineas) LINEAS = data.lineas;
+    current.lineaPorDefecto = data.lineaPorDefecto || null;
+    var lineaSel = lineaSeleccionada();
+    if (lineaSel && lineaPorId(lineaSel)) PUEDE = lineaPorId(lineaSel).puede || PUEDE;
     puedeEscribir = Boolean(data.canWrite);
     if (nuevo) { ver('ficha', false); salirDeSeleccion(); quitarCita(); cerrarBusqueda(); cerrarPaneles(); nuevosSinVer = 0; ultimoPintadoId = 0; lastCount = 0; }
     ver('confirmar-cierre', false);
@@ -1155,7 +1182,9 @@ function pintarSubtitulo(data) {
   /* Arriba solo lo que importa: en que paso va su pedido y si lo tiene que atender una persona.
      Lo demas (ventana de 24 h, bot callado, baja, conversaciones anteriores) va en la ficha (ⓘ). */
   current.windowOpen = Boolean(data.windowOpen);
+  var lineaCab = variasLineas() ? lineaPorId(lineaSeleccionada() || current.lineaPorDefecto) : null;
   sub.innerHTML = '<span id="t-presencia"></span><span class="t-tel">' + esc(telefonoBonito(current.phone)) + '</span>' +
+    (lineaCab ? lineaTagHtml(lineaCab.etiqueta, 'Se le contesta por ' + lineaCab.etiqueta + (lineaCab.numero ? ' · +' + lineaCab.numero : '')) : '') +
     (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada') ? '<span class="pill warn t-marca" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
     (data.reparto ? '<a class="t-pedido" href="/hoy' + (data.reparto.referencia ? '?buscar=' + encodeURIComponent(data.reparto.referencia) : '') + '" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'Pedido ' + data.reparto.referencia : 'Reparto') + ': ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
     (data.reparto && data.reparto.esperaEnvio ? '<span class="t-tel">' + esc(data.reparto.esperaEnvio.motivo) + (data.reparto.esperaEnvio.hasta ? ' · ' + esc(new Date(data.reparto.esperaEnvio.hasta).toLocaleTimeString()) : '') + '</span>' : '');
@@ -1278,6 +1307,7 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       resaltar(withLinks(cuerpoVisible(m))) +
       borradoHtml(m) +
       '<span class="meta">' +
+        (variasLineas() && m.lineaEtiqueta ? lineaTagHtml(m.lineaEtiqueta, (m.direction === 'out' ? 'Salió por ' : 'Llegó por ') + m.lineaEtiqueta + (m.lineaNumero ? ' · +' + m.lineaNumero : '')) : '') +
         (m.payload && m.payload.editadoAt ? '<span class="editado" title="Se editó después de enviarlo">editado</span>' : '') +
         quienMando(m) +
         esc(hhmm(m.createdAt)) + (m.direction === 'out' ? ' ' + tick(m.status) : '') +
@@ -1797,6 +1827,8 @@ async function enviar(payload) {
     payload.contactId = current.id;
     payload.atiendePersona = true;
     if (cita) payload.citaId = cita;
+    var lineaDeEnvio = lineaSeleccionada();
+    if (lineaDeEnvio) payload.lineaId = lineaDeEnvio;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
     if (r.ok === false) {
       if (pendiente) pendiente.remove();
@@ -1838,12 +1870,36 @@ input.addEventListener('keydown', function (e) {
 
 /* --------------------------------------------------- compositor bloqueado */
 
+/* El selector de linea: solo con varias. Elegir una cambia tambien lo que el chat permite (editar, reaccionar...). */
+function pintarSelectorDeLinea(data) {
+  var sel = document.getElementById('linea-sel');
+  if (!sel) return;
+  if (!variasLineas()) { sel.classList.add('hidden'); return; }
+  var elegida = lineaSeleccionada();
+  sel.innerHTML = LINEAS.map(function (l) {
+    var caida = l.estado !== 'conectado';
+    return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
+  }).join('');
+  sel.style.background = colorDeLinea((lineaPorId(elegida) || {}).etiqueta);
+  sel.classList.remove('hidden');
+  sel.onchange = function () {
+    if (!current) return;
+    lineaElegida[current.id] = sel.value;
+    var l = lineaPorId(sel.value);
+    if (l && l.puede) PUEDE = l.puede;
+    sel.style.background = colorDeLinea(l ? l.etiqueta : '');
+    pintarSubtitulo({ canWrite: true, reparto: current.reparto, windowOpen: current.windowOpen });
+    renderMessages(hilo.mensajes, false, true);
+  };
+}
+
 function renderComposer(data) {
   var composer = document.getElementById('composer');
   var locked = document.getElementById('locked');
   var barra = document.getElementById('rapidas-barra');
   if (!composer || !locked) return;
 
+  pintarSelectorDeLinea(data);
   if (data.canWrite) {
     ver('composer', true);
     locked.classList.add('hidden');

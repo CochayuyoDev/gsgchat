@@ -575,6 +575,12 @@ export const CHAT_CSS = `
   }
   .locked button.primary { background: var(--accent); color: var(--primario-texto); border-color: var(--accent); }
   .empty { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 40px; font-size: 15px; line-height: 1.6; }
+  /* La etiqueta de la linea (wsp-ali, wsp-kevin...): dice por que WhatsApp va o vino cada chat y cada mensaje. */
+  .linea-tag { display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; padding: 0 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; line-height: 17px; color: #fff; }
+  .meta .linea-tag { max-width: 90px; margin-right: 5px; opacity: .92; }
+  #linea-sel { flex: 0 0 auto; max-width: 150px; border-radius: 999px; padding: 4px 8px; font-size: 12px; font-weight: 700; color: #fff; border: 0; cursor: pointer; }
+  #linea-sel option { color: #111; background: #fff; }
+  .linea-nota { font-size: 11px; color: var(--ambar); padding: 2px 12px; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
   .pill.ok { background: var(--verde-suave); color: var(--verde); }
   .pill.bad { background: var(--rojo-suave); color: var(--rojo); }
