@@ -1882,18 +1882,18 @@ function pintarSelectorDeLinea(data) {
   if (!sel) return;
   if (!variasLineas()) { sel.classList.add('hidden'); return; }
   var elegida = lineaSeleccionada();
-  sel.innerHTML = LINEAS.map(function (l) {
+  sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (al azar)</option>') + LINEAS.map(function (l) {
     var caida = l.estado !== 'conectado';
     return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
   }).join('');
-  sel.style.background = colorDeLinea((lineaPorId(elegida) || {}).etiqueta);
+  sel.style.background = elegida ? colorDeLinea((lineaPorId(elegida) || {}).etiqueta) : '#667781';
   sel.classList.remove('hidden');
   sel.onchange = function () {
     if (!current) return;
-    lineaElegida[current.id] = sel.value;
+    if (sel.value) lineaElegida[current.id] = sel.value; else delete lineaElegida[current.id];
     var l = lineaPorId(sel.value);
     if (l && l.puede) PUEDE = l.puede;
-    sel.style.background = colorDeLinea(l ? l.etiqueta : '');
+    sel.style.background = l ? colorDeLinea(l.etiqueta) : '#667781';
     pintarSubtitulo({ canWrite: true, reparto: current.reparto, windowOpen: current.windowOpen });
     renderMessages(hilo.mensajes, false, true);
   };

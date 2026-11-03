@@ -247,6 +247,13 @@ export interface SenderDeps {
    * deshabilitada o no se puede armar. Sin esto, todo sale por `wa`, como siempre.
    */
   resolverLinea?: (id: string | null) => Promise<LineaDeEnvio | null>;
+  /**
+   * Elige AL AZAR una linea de las disponibles (habilitadas y conectadas) para
+   * abrir una conversacion nueva. Solo se usa la primera vez con un cliente:
+   * desde ahi el proceso sigue y termina por esa misma linea. Null = ninguna
+   * disponible (se intenta la principal, que dira que espera la conexion).
+   */
+  sortearLinea?: () => Promise<LineaDeEnvio | null>;
   repos: Repos;
   wa: WhatsAppClient;
   /** Funcion si el numero puede cambiar desde /setup sin reiniciar. */
@@ -310,16 +317,21 @@ export function createSender(deps: SenderDeps): Sender {
 
   /**
    * Por que linea sale un trabajo. Una linea PEDIDA que no esta disponible no
-   * se sustituye por otra (seria salir desde un numero que nadie eligio); una
-   * implicita (la del ultimo entrante) que ya no existe cae en la principal.
+   * se sustituye por otra (seria salir desde un numero que nadie eligio). Sin
+   * pedirla: la de la conversacion en curso; y si no hay, una al azar.
    */
   async function lineaDelTrabajo(job: SendJob, contactId: string): Promise<{ linea: LineaDeEnvio | null; pedida: boolean }> {
     const principal: LineaDeEnvio = { id: '', etiqueta: '', numero: '', cliente: wa, identidad: phoneId(), ventanaAplica: ventanaAplica() };
     if (!deps.resolverLinea) return { linea: principal, pedida: false };
     if (job.whatsappNumberId) return { linea: await deps.resolverLinea(job.whatsappNumberId), pedida: true };
     const ultima = await repos.messages.lineaDeLaConversacion(contactId);
-    const resuelta = (ultima ? await deps.resolverLinea(ultima) : null) ?? (await deps.resolverLinea(null));
-    return { linea: resuelta, pedida: false };
+    // Con una conversacion en curso se sigue por su linea (aunque este caida: espera, no cambia).
+    const enCurso = ultima ? await deps.resolverLinea(ultima) : null;
+    if (enCurso) return { linea: enCurso, pedida: false };
+    // Un cliente nuevo (o cuya linea ya no existe) abre por una linea al azar; ese resultado
+    // vuelve en el envio y la cola lo fija, asi que el proceso entero sale por ella.
+    const sorteada = deps.sortearLinea ? await deps.sortearLinea() : null;
+    return { linea: sorteada ?? (await deps.resolverLinea(null)), pedida: false };
   }
 
   const permitidos = () => (typeof deps.soloNumeros === 'function' ? deps.soloNumeros() : deps.soloNumeros) ?? [];

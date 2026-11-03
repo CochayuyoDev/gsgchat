@@ -255,6 +255,12 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           ventanaAplica: linea.principal ? providerOf(settings.current()) === 'cloud' : linea.proveedor === 'cloud',
         };
       };
+      /** Para abrir una conversacion nueva: una linea al azar entre las habilitadas y conectadas. */
+      const sortearLinea = async () => {
+        const vivas = (await registro.estados()).filter((e) => e.conectada);
+        if (!vivas.length) return null;
+        return resolverLinea(vivas[Math.floor(Math.random() * vivas.length)]!.linea.id);
+      };
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
       let queue: OutboundQueue;
@@ -273,6 +279,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           repos,
           wa,
           resolverLinea,
+          sortearLinea,
           phoneNumberId,
           warmup: politica().warmup,
           maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,

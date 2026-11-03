@@ -9,10 +9,12 @@ import { createSender, type LineaDeEnvio } from '../src/outbound/sender.js';
 import { createMemoryOutboundQueue } from '../src/outbound/memory-queue.js';
 import { createFakeRepos, createFakeWhatsApp } from './fakes.js';
 
+const sorteo: { cual: string | null } = { cual: null };
 const WARMUP = { startPerDay: 50, growth: 1.5, hardCap: 1000 };
 const PRINCIPAL = '00000000-0000-0000-0000-000000000001';
 
 function montar() {
+  sorteo.cual = null;
   const repos = createFakeRepos();
   const waPrincipal = createFakeWhatsApp();
   const waVentas = createFakeWhatsApp();
@@ -27,6 +29,7 @@ function montar() {
   const sender = createSender({
     repos,
     wa: waPrincipal,
+    sortearLinea: async () => (sorteo.cual ? lineas[sorteo.cual]! : null),
     resolverLinea: async (id) => {
       const l = lineas[id ?? PRINCIPAL];
       return l && (l.id !== 'ventas' || estado.ventasHabilitada) ? l : null;
@@ -41,7 +44,24 @@ function montar() {
 const texto = (phone: string, extra: Record<string, unknown> = {}) => ({ phone, kind: 'freeform' as const, category: 'UTILITY' as const, text: 'hola', manual: true, ...extra });
 
 describe('sender con varias lineas', () => {
-  it('un chat nuevo sale por la principal', async () => {
+  it('un cliente nuevo abre por la linea que toque en el sorteo, y desde ahi el proceso sigue por ella', async () => {
+    const { sender, waPrincipal, waVentas, repos } = montar();
+    sorteo.cual = 'ventas';
+    const r = await sender.send(texto('51900000020'));
+    expect(r).toMatchObject({ ok: true, whatsappNumberId: 'ventas' });
+    // El sorteo ahora diria otra, pero el cliente ya tiene su linea.
+    sorteo.cual = PRINCIPAL;
+    await sender.send(texto('51900000020'));
+    await sender.send(texto('51900000020'));
+    expect(waVentas.sent).toHaveLength(3);
+    expect(waPrincipal.sent).toHaveLength(0);
+    // Otro cliente nuevo si puede caer en otra.
+    await sender.send(texto('51900000021'));
+    expect(waPrincipal.sent).toHaveLength(1);
+    expect(repos._deliveries.at(-1)).toMatchObject({ whatsappNumberId: PRINCIPAL });
+  });
+
+  it('un chat nuevo sin sorteo posible sale por la principal', async () => {
     const { sender, waPrincipal, waVentas, repos } = montar();
     const r = await sender.send(texto('51900000001'));
     expect(r).toMatchObject({ ok: true, whatsappNumberId: PRINCIPAL });
