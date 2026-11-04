@@ -12,13 +12,27 @@ import type { Config } from '../config.js';
 import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
-import { extractLocation } from '../geo/extract.js';
+import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { alcanceChat } from '../web/alcance-chat.js';
 import { esperaDeEnvio } from '../rutas/espera-envio.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { extensionDe, idDeMedia, mediaDirectory } from '../whatsapp/local/media.js';
 import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
+import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
+import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
+import { archivoDeMensaje } from '../api/v1/archivos-gsg.js';
+import type { ServicioIA } from '../ia/servicio.js';
+import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, TOPE_CATALOGO, clasificarConIA, nombreDeEtiqueta, validarCatalogo, type Catalogo } from '../archive/clasificar.js';
+import { casosParaCatalogo, evaluarClasificador, leerConversacionEscrita, type InformeEvaluacion } from '../archive/evaluacion.js';
+import { agregarEjemplo, correccionesRecientes, ejemplosParaIA, quitarEjemplo, TOPE_TEXTO_EJEMPLO } from '../chat/ejemplos-etiquetado.js';
+import { TOPE_EJEMPLOS_NEGOCIO } from '../archive/clasificar.js';
+import { catalogoVigente, crearEtiquetador, numeroNormalizado, type Etiquetador } from '../chat/etiquetar.js';
+import { fechaDelNegocio } from '../ajustes/generales.js';
+import type { EtiquetaChat } from '../db/chat-etiquetas.js';
 
 export interface ChatDeps {
   repos: Repos;
@@ -30,8 +44,19 @@ export interface ChatDeps {
   mediaDir?: string;
   /** Envío opcional de voz solicitado por la IA; los medios entrantes se ignoran. */
   voz?: import('../voz/servicio.js').ServicioVoz;
+  /** Las lineas de WhatsApp de la tienda: el chat elige por cual responder y rotula cada mensaje. */
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
   /** El puerto hacia GSG: por aqui sale la incidencia manual. Sin el, queda en la cola. */
   gsg?: import('../rutas/gsg.js').PuertoGsg;
+  /** La IA del asistente: la usa el boton «Etiquetar los chats de hoy». */
+  ia?: ServicioIA;
+}
+
+/** La etiqueta como la pinta la pantalla, junto al nombre del cliente. */
+export function etiquetaParaPantalla(e: EtiquetaChat | undefined, hoy: string, catalogo?: Catalogo) {
+  if (!e) return null;
+  if (!e.etiqueta) return { id: null, nombre: 'Sin clasificar', dia: e.dia, hoy: e.dia === hoy, motivo: e.motivo, origen: e.origen };
+  return { id: e.etiqueta, nombre: nombreDeEtiqueta(e.etiqueta, catalogo), dia: e.dia, hoy: e.dia === hoy, motivo: null, origen: e.origen };
 }
 
 /** Lo maximo que se acepta desde el chat: el limite de video/documento de WhatsApp. */
@@ -82,6 +107,22 @@ export function tipoDeAdjuntoSaliente(mimeType: string): 'image' | 'video' | 'au
   return 'document';
 }
 
+const adjuntoSchema = z.object({
+  contactId: z.string().min(1),
+  /** El fichero en base64 (con o sin el prefijo data:...;base64,). */
+  datos: z.string().min(1),
+  mimeType: z.string().trim().min(3).max(120),
+  filename: z.string().trim().max(200).optional(),
+  caption: z.string().trim().max(1024).optional(),
+  /** Un audio grabado aqui mismo: sale como nota de voz, con su onda y su play. */
+  voz: z.boolean().optional(),
+  citaId: z.coerce.number().int().positive().optional(),
+  autor: z.enum(['persona', 'ia', 'sistema']).optional(),
+  autorNombre: z.string().trim().max(80).optional(),
+  /** Por que linea de WhatsApp sale. Sin ella: la de la conversacion. */
+  lineaId: z.string().max(64).optional(),
+});
+
 const sendSchema = z.object({
   phone: z.string().min(6).optional(),
   contactId: z.string().optional(),
@@ -103,6 +144,8 @@ const sendSchema = z.object({
   templateName: z.string().optional(),
   templateLanguage: z.string().default('es'),
   variables: z.array(z.string()).default([]),
+  /** Por que linea de WhatsApp responder. Sin ella: por donde llego el ultimo mensaje del cliente. */
+  lineaId: z.string().max(64).optional(),
 });
 
 /**
@@ -125,6 +168,337 @@ export function decodificarEntidades(texto: string): string {
 
 export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): Promise<void> {
   const { repos, sender, config, settings } = deps;
+  const zonaHoraria = () => deps.ajustes?.zonaHoraria() ?? config.timezone;
+  // Se crea al primer uso: hay arranques (y pruebas) que registran el chat sin base.
+  let etiquetadorCreado: Etiquetador | null | undefined;
+  const etiquetadorDe = (): Etiquetador | null => {
+    if (etiquetadorCreado !== undefined) return etiquetadorCreado;
+    const repo = repos?.chatEtiquetas;
+    etiquetadorCreado = repo
+      ? crearEtiquetador({
+          repo,
+          ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
+          zonaHoraria,
+          nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
+          log: (mensaje, detalle) => app.log.warn({ ...detalle }, mensaje),
+        })
+      : null;
+    return etiquetadorCreado;
+  };
+  /** Las etiquetas de esos chats (por su numero normalizado), listas para la pantalla. */
+  const etiquetasDe = async (phones: string[]) => {
+    const hoy = fechaDelNegocio(new Date(), zonaHoraria());
+    const ultimas = repos.chatEtiquetas ? await repos.chatEtiquetas.ultimas([...new Set(phones.map(numeroNormalizado))]).catch(() => new Map<string, EtiquetaChat>()) : new Map<string, EtiquetaChat>();
+    const catalogo = repos.chatEtiquetas && ultimas.size ? await catalogoVigente(repos.chatEtiquetas).catch(() => CATALOGO_POR_DEFECTO) : CATALOGO_POR_DEFECTO;
+    return (phone: string) => etiquetaParaPantalla(ultimas.get(numeroNormalizado(phone)), hoy, catalogo);
+  };
+
+  const SIN_ETIQUETAS = 'Esta instalación no guarda etiquetas de chats.';
+  const quienEs = (u: { nombre?: string; usuario?: string } | null | undefined): string | null => u?.nombre || u?.usuario || null;
+
+  /**
+   * «Etiquetar los chats de hoy»: arranca el lote en segundo plano, o devuelve
+   * el que ya corre. La pantalla pregunta por el avance. GSG ve cada etiqueta
+   * como la nota del chat en GET /api/v1/historial.
+   */
+  app.post('/admin/chat/etiquetar', async (request, reply) => {
+    const etiquetador = etiquetadorDe();
+    if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    // releer: tambien los ya etiquetados (por ejemplo tras cambiar el catalogo). Por defecto, solo lo que falta.
+    const { releer } = z.object({ releer: z.boolean().optional() }).parse(request.body ?? {});
+    try {
+      return reply.code(202).send(etiquetador.iniciar(alcance, { iniciadoPor: quienEs(request.usuario), releer }));
+    } catch (error) {
+      return reply.code(409).send({ error: error instanceof Error ? error.message : String(error), ir: '/panel#ia' });
+    }
+  });
+
+  /** El lote en marcha, o el ultimo (aunque el servidor se haya reiniciado). */
+  app.get('/admin/chat/etiquetar', async (_request, reply) => {
+    const etiquetador = etiquetadorDe();
+    if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    return { ...(await etiquetador.estado()), hayIA: etiquetador.hayIA() };
+  });
+
+  /**
+   * Poner o quitar a mano la etiqueta de hoy de un chat (`etiqueta: null` la
+   * quita). Queda como manual: la IA no la pisa. GSG la ve al momento en el
+   * historial del chat. No se le escribe nada al cliente.
+   */
+  app.post<{ Params: { contactId: string } }>('/admin/chat/:contactId/etiqueta', async (request, reply) => {
+    const etiquetador = etiquetadorDe();
+    if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    alcanceChat(request.usuario);
+    const body = z.object({ etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').nullable() }).parse(request.body ?? {});
+    const contacto = await repos.contacts.getById(request.params.contactId);
+    if (!contacto) return reply.code(404).send({ error: 'Ese chat no existe.' });
+    if (contacto.tipo === 'grupo') return reply.code(400).send({ error: 'Los grupos no se etiquetan.' });
+    try {
+      await etiquetador.etiquetarAMano({ phone: contacto.phone, etiqueta: body.etiqueta, quien: quienEs(request.usuario) });
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
+    }
+    return { ok: true, etiqueta: (await etiquetasDe([contacto.phone]))(contacto.phone) };
+  });
+
+  /**
+   * El embudo de chats de un dia (hoy por defecto): cuantos hay de cada
+   * etiqueta, cuantos los puso la IA y cuantos una persona y los que faltan;
+   * y la lista de chats con su etiqueta.
+   */
+  app.get('/admin/chat/etiquetas/embudo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    const q = z.object({ dia: z.string().regex(/^(hoy|ayer|\d{4}-\d{2}-\d{2})$/, 'El día va como hoy, ayer o AAAA-MM-DD.').default('hoy') }).parse(request.query ?? {});
+    const zona = zonaHoraria();
+    const hoy = fechaDelNegocio(new Date(), zona);
+    const dia = q.dia === 'hoy' ? hoy : q.dia === 'ayer' ? fechaDelNegocio(new Date(Date.now() - 86_400_000), zona) : q.dia;
+    const [filas, catalogo, bandeja] = await Promise.all([
+      repos.chatEtiquetas.delDia(dia),
+      catalogoVigente(repos.chatEtiquetas),
+      conversacionesConEtiqueta({ incluirApartados: true }, alcance),
+    ]);
+    const deBandeja = new Map(bandeja.map((c) => [numeroNormalizado(c.phone), c]));
+    const conEtiqueta = new Set(filas.map((f) => f.phone));
+    const chats = filas.map((f) => {
+      const c = deBandeja.get(f.phone);
+      return {
+        phone: f.phone,
+        contactId: c?.contactId ?? null,
+        nombre: c?.name ?? null,
+        ultimoMensaje: c?.lastMessage ? { body: c.lastMessage.body, direction: c.lastMessage.direction, at: c.lastMessage.createdAt } : null,
+        etiqueta: f.etiqueta,
+        nombreEtiqueta: f.etiqueta ? nombreDeEtiqueta(f.etiqueta, catalogo) : 'Sin clasificar',
+        origen: f.origen,
+        motivo: f.motivo,
+        en: f.updatedAt,
+      };
+    });
+    // Los chats de ese dia que aun no tienen etiqueta (los de la bandeja cuyo ultimo mensaje es de ese dia).
+    const sinEtiquetar = bandeja
+      .filter((c) => c.lastMessage && fechaDelNegocio(new Date(c.lastMessage.createdAt), zona) === dia && !conEtiqueta.has(numeroNormalizado(c.phone)))
+      .map((c) => ({ phone: numeroNormalizado(c.phone), contactId: c.contactId, nombre: c.name, ultimoMensaje: c.lastMessage ? { body: c.lastMessage.body, direction: c.lastMessage.direction, at: c.lastMessage.createdAt } : null }));
+    const etapas = new Map(catalogo.map((e) => [e.codigo, { codigo: e.codigo, nombre: e.nombre, ia: 0, manual: 0 }]));
+    for (const f of filas) {
+      if (!f.etiqueta) continue;
+      const e = etapas.get(f.etiqueta) ?? { codigo: f.etiqueta, nombre: nombreDeEtiqueta(f.etiqueta, catalogo), ia: 0, manual: 0 };
+      if (f.origen === 'manual') e.manual++;
+      else e.ia++;
+      etapas.set(f.etiqueta, e);
+    }
+    const etiquetadas = filas.filter((f) => f.etiqueta);
+    return {
+      dia,
+      hoy: dia === hoy,
+      resumen: {
+        chats: filas.length + sinEtiquetar.length,
+        etiquetados: etiquetadas.length,
+        porIA: etiquetadas.filter((f) => f.origen !== 'manual').length,
+        manual: etiquetadas.filter((f) => f.origen === 'manual').length,
+        sinClasificar: filas.length - etiquetadas.length,
+        sinEtiquetar: sinEtiquetar.length,
+      },
+      etapas: [...etapas.values()].map((e) => ({ ...e, total: e.ia + e.manual })).sort((a, b) => b.total - a.total),
+      chats,
+      sinEtiquetar,
+    };
+  });
+
+  /** Los ultimos lotes, el mas reciente primero. */
+  app.get('/admin/chat/etiquetar/lotes', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const q = z.object({ limit: z.coerce.number().int().positive().max(100).default(20) }).parse(request.query ?? {});
+    return { items: await repos.chatEtiquetas.lotes(q.limit) };
+  });
+
+  /** Un lote con su registro de eventos, sus chats y las conversaciones de ese dia. */
+  app.get<{ Params: { id: string } }>('/admin/chat/etiquetar/lotes/:id', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const lote = await repos.chatEtiquetas.lote(request.params.id);
+    if (!lote) return reply.code(404).send({ error: 'Ese lote no existe.' });
+    const [eventos, filas, chats, catalogo] = await Promise.all([
+      repos.chatEtiquetas.eventos({ loteId: lote.id, limite: 500 }),
+      repos.chatEtiquetas.delDia(lote.dia),
+      repos.chatEtiquetas.chatsDelLote(lote.id),
+      catalogoVigente(repos.chatEtiquetas),
+    ]);
+    return {
+      lote,
+      eventos,
+      // Los chats de ESTE lote: como le fue a cada uno.
+      chats: chats.map((c) => ({
+        phone: c.phone,
+        nombre: c.nombre,
+        mensajes: c.totalMensajes,
+        estado: c.estado,
+        etiqueta: c.etiqueta,
+        nombreEtiqueta: c.etiqueta ? nombreDeEtiqueta(c.etiqueta, catalogo) : null,
+        error: c.error,
+        procesadoAt: c.procesadoAt,
+      })),
+      // Todas las conversaciones de ese dia, con su etiqueta vigente.
+      conversaciones: filas.map((f) => ({
+        phone: f.phone,
+        etiqueta: f.etiqueta,
+        nombre: f.etiqueta ? nombreDeEtiqueta(f.etiqueta, catalogo) : 'Sin clasificar',
+        origen: f.origen,
+        motivo: f.motivo,
+        loteId: f.loteId,
+      })),
+    };
+  });
+
+  /** La copia de los mensajes que el lote le mando a la IA de un chat (mientras no pase la retencion). */
+  app.get<{ Params: { id: string; telefono: string } }>('/admin/chat/etiquetar/lotes/:id/chats/:telefono', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const chat = await repos.chatEtiquetas.chatDelLote(request.params.id, numeroNormalizado(request.params.telefono));
+    if (!chat) return reply.code(404).send({ error: 'Ese chat no está en ese lote.' });
+    return {
+      chat: { ...chat, nombreEtiqueta: chat.etiqueta ? nombreDeEtiqueta(chat.etiqueta, await catalogoVigente(repos.chatEtiquetas)) : null },
+      ...(chat.mensajes === null && chat.estado !== 'solo_envio' ? { aviso: 'La copia de los mensajes ya no se guarda: pasaron las 72 horas de retención del chat.' } : {}),
+    };
+  });
+
+  /** El catalogo de etiquetas del negocio: codigos, nombres y lo que lee la IA de cada una. */
+  app.get('/admin/chat/etiquetas/catalogo', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const propio = await repos.chatEtiquetas.catalogo();
+    return { items: propio ?? CATALOGO_POR_DEFECTO, propio: Boolean(propio), codigoOtro: CODIGO_OTRO, tope: TOPE_CATALOGO };
+  });
+
+  /** Guarda el catalogo entero. Solo un administrador. Lo ya etiquetado con otro catalogo se vuelve a mirar en el siguiente lote. */
+  app.put('/admin/chat/etiquetas/catalogo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'Solo un administrador cambia el catálogo de etiquetas.' });
+    const body = z.object({ items: z.array(z.object({ codigo: z.string().max(80), nombre: z.string().max(200), descripcion: z.string().max(400) })).max(100) }).parse(request.body ?? {});
+    const r = validarCatalogo(body.items);
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    await repos.chatEtiquetas.guardarCatalogo(r.catalogo);
+    return { ok: true, items: r.catalogo, propio: true };
+  });
+
+  /** Vuelve al catalogo de fabrica. Solo un administrador. */
+  app.delete('/admin/chat/etiquetas/catalogo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (request.usuario?.rol !== 'admin' || request.usuario.porToken) return reply.code(403).send({ error: 'Solo un administrador cambia el catálogo de etiquetas.' });
+    await repos.chatEtiquetas.borrarCatalogo();
+    return { ok: true, items: CATALOGO_POR_DEFECTO, propio: false };
+  });
+
+  // ------------------------------------------------------- «Probar la IA»
+  // El banco de conversaciones de src/archive/evaluacion.ts, por la IA del
+  // negocio y con su catalogo: el mismo clasificador del boton. Una prueba a la
+  // vez; lo ultimo queda en memoria del proceso (no toca ningun chat ni GSG).
+  const iaQueCompleta = () => (deps.ia?.estado().tieneToken ? { completar: deps.ia.completar.bind(deps.ia) } : null);
+  const modeloDeIA = () => {
+    const e = deps.ia?.estado();
+    return e ? `${e.modeloEfectivo || e.modelo}` : null;
+  };
+  const NO_HAY_IA_PRUEBA = 'Para probar la IA hace falta su clave: guárdala en Avanzado → Asistente IA. No hace falta activar el asistente.';
+  let evaluacion: {
+    enCurso: boolean;
+    hechos: number;
+    total: number;
+    modelo: string | null;
+    empezo: string;
+    termino: string | null;
+    error: string | null;
+    informe: InformeEvaluacion | null;
+  } | null = null;
+
+  /** Empieza a pasar el banco por la IA (o devuelve la prueba que ya corre). */
+  app.post('/admin/chat/etiquetas/evaluar', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const ia = iaQueCompleta();
+    if (!ia) return reply.code(409).send({ error: NO_HAY_IA_PRUEBA, ir: '/panel#ia' });
+    if (evaluacion?.enCurso) return reply.code(202).send(evaluacion);
+    const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const ejemplos = await ejemplosParaIA(repos.chatEtiquetas, catalogo);
+    const actual = (evaluacion = { enCurso: true, hechos: 0, total: casosParaCatalogo(catalogo).usar.length, modelo: modeloDeIA(), empezo: new Date().toISOString(), termino: null, error: null, informe: null });
+    void evaluarClasificador(ia, catalogo, deps.ajustes?.nombreNegocio() ?? config.businessName, {
+      alAvanzar: (hechos, total) => Object.assign(actual, { hechos, total }),
+      ejemplos,
+    })
+      .then((informe) => Object.assign(actual, { informe }))
+      .catch((error) => Object.assign(actual, { error: error instanceof Error ? error.message : String(error) }))
+      .finally(() => Object.assign(actual, { enCurso: false, termino: new Date().toISOString() }));
+    return reply.code(202).send(actual);
+  });
+
+  /** La prueba en marcha o la ultima de este proceso (null si no hubo). */
+  app.get('/admin/chat/etiquetas/evaluar', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    return { evaluacion, hayIA: Boolean(iaQueCompleta()), modelo: modeloDeIA() };
+  });
+
+  /**
+   * Una conversacion escrita a mano («cliente: ...» / «negocio: ...» por
+   * linea): que etiqueta le pone la IA. No se guarda nada ni sale nada a GSG.
+   */
+  app.post('/admin/chat/etiquetas/probar', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const ia = iaQueCompleta();
+    if (!ia) return reply.code(409).send({ error: NO_HAY_IA_PRUEBA, ir: '/panel#ia' });
+    const { texto } = z.object({ texto: z.string().max(8000) }).parse(request.body ?? {});
+    const mensajes = leerConversacionEscrita(texto);
+    if (!mensajes.some((m) => m.direction === 'in')) return reply.code(400).send({ error: 'Escribe al menos un mensaje del cliente (una línea que empiece por «cliente:»).' });
+    const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const ejemplos = await ejemplosParaIA(repos.chatEtiquetas, catalogo);
+    const r = await clasificarConIA(ia, mensajes, null, deps.ajustes?.nombreNegocio() ?? config.businessName, { catalogo, conReglas: false, ejemplos, uso: 'pruebas' });
+    if (r.estado !== 'clasificada') return { etiqueta: null, nombre: null, motivo: r.motivo, mensajes: mensajes.length, modelo: modeloDeIA() };
+    const e = catalogo.find((x) => x.codigo === r.etiqueta);
+    return { etiqueta: r.etiqueta, nombre: nombreDeEtiqueta(r.etiqueta, catalogo), descripcion: e?.descripcion ?? null, motivo: null, mensajes: mensajes.length, modelo: modeloDeIA() };
+  });
+
+  // ------------------------------------------ «Enséñale a etiquetar» (Entrenamiento IA)
+
+  /** Los ejemplos de etiquetado del negocio (van en cada llamada del clasificador). */
+  app.get('/admin/chat/etiquetas/ejemplos', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const catalogo = await catalogoVigente(repos.chatEtiquetas);
+    const items = (await repos.chatEtiquetas.ejemplos()).map((e) => ({ ...e, nombreEtiqueta: nombreDeEtiqueta(e.etiqueta, catalogo), enCatalogo: catalogo.some((c) => c.codigo === e.etiqueta) }));
+    return { items, tope: TOPE_EJEMPLOS_NEGOCIO, topeTexto: TOPE_TEXTO_EJEMPLO };
+  });
+
+  /** Enseña un ejemplo: `{ texto, etiqueta, fuente? }` (fuente = la corrección de la que sale). Lo personal se tapa. */
+  app.post('/admin/chat/etiquetas/ejemplos', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const body = z.object({ texto: z.string().max(4000), etiqueta: z.string().trim().max(60), fuente: z.string().trim().max(200).nullable().optional() }).parse(request.body ?? {});
+    const r = await agregarEjemplo(repos.chatEtiquetas, await catalogoVigente(repos.chatEtiquetas), { ...body, quien: quienEs(request.usuario) });
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    return { ok: true, ejemplo: r.ejemplo };
+  });
+
+  /** Quita un ejemplo. */
+  app.delete<{ Params: { id: string } }>('/admin/chat/etiquetas/ejemplos/:id', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    if (!(await quitarEjemplo(repos.chatEtiquetas, request.params.id))) return reply.code(404).send({ error: 'Ese ejemplo ya no existe.' });
+    return { ok: true };
+  });
+
+  /** Las correcciones de la etiqueta de la IA que hizo el equipo y aún no son ejemplo, con la conversación que leyó la IA. */
+  app.get('/admin/chat/etiquetas/correcciones', async (_request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    return { items: await correccionesRecientes(repos.chatEtiquetas, await catalogoVigente(repos.chatEtiquetas)) };
+  });
+
+  /** El registro de lo que paso al etiquetar y al mandar a GSG, filtrable. */
+  app.get('/admin/chat/etiquetar/eventos', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const q = z
+      .object({
+        loteId: z.string().uuid().optional(),
+        nivel: z.enum(['info', 'aviso', 'error']).optional(),
+        fase: z.enum(['lote', 'analisis', 'sincronizacion']).optional(),
+        telefono: z.string().trim().max(40).optional(),
+        limit: z.coerce.number().int().positive().max(500).default(100),
+      })
+      .parse(request.query ?? {});
+    return {
+      items: await repos.chatEtiquetas.eventos({ loteId: q.loteId, nivel: q.nivel, fase: q.fase, phone: q.telefono ? numeroNormalizado(q.telefono) : undefined, limite: q.limit }),
+    };
+  });
 
   /**
    * Si la ventana de 24 h impide escribir texto libre.
@@ -134,6 +508,47 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * una limitacion que el propio WhatsApp Web no tiene.
    */
   const ventanaObliga = () => providerOf(settings.current()) === 'cloud';
+
+  // ------------------------------------------------------------ lineas
+
+  /** Lo que la pantalla sabe de una linea: rotulo, estado y lo que su proveedor permite. */
+  const vistaDeLinea = (l: import('../whatsapp/lineas.js').Linea) => ({
+    id: l.id,
+    etiqueta: l.etiqueta,
+    numero: l.telefono,
+    estado: l.estado,
+    principal: l.principal,
+    proveedor: l.proveedor,
+    puede: capacidadesDelChat(l.proveedor),
+  });
+
+  /** Las lineas con las que se puede responder (habilitadas), la principal primero. */
+  const lineasActivas = async () => (deps.lineas ? (await deps.lineas.listar()).filter((l) => l.habilitada || l.principal) : []);
+
+  /**
+   * La linea por la que se contesta un chat si nadie elige otra: la que el
+   * cliente tiene asignada. Null si el chat es nuevo: ahi el sistema le da la
+   * mas desahogada.
+   */
+  const lineaPorDefecto = async (contactId: string, activas: import('../whatsapp/lineas.js').Linea[]): Promise<string | null> => {
+    if (!activas.length) return null;
+    // Sin linea asignada no hay linea por defecto: el primer mensaje la decide
+    // (ver src/whatsapp/reparto-lineas.ts) y desde ahi el proceso sigue por esa.
+    const ultima = await repos.messages.lineaDeLaConversacion(contactId);
+    return activas.find((l) => l.id === ultima)?.id ?? null;
+  };
+
+  /** El proveedor de una linea; sin lineas montadas, el de los ajustes como siempre. */
+  const proveedorDeLinea = async (lineaId: string | null | undefined): Promise<string> => {
+    const linea = lineaId && deps.lineas ? await deps.lineas.obtener(lineaId) : null;
+    return linea ? linea.proveedor : providerOf(settings.current());
+  };
+
+  /** La linea de un mensaje del hilo (por donde llego o salio); la del chat si es anterior a las lineas. */
+  const lineaDelMensaje = async (contactId: string, mensajeId: number): Promise<string | null> => {
+    const m = await repos.messages.porId(contactId, mensajeId);
+    return m?.lineaId ?? (await lineaPorDefecto(contactId, await lineasActivas()));
+  };
 
   /**
    * Si un envio escrito a mano puede saltarse las guardas de consentimiento y
@@ -189,6 +604,33 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     };
   };
 
+  /**
+   * Todas las conversaciones de la bandeja (sin grupos) con su etiqueta, para
+   * filtrar y contar por etiqueta. La bandeja es la de las ultimas 72 horas:
+   * se leen de a 100 hasta un tope, que de sobra cubre un dia de reparto.
+   */
+  const TOPE_FILTRO_ETIQUETA = 3000;
+  const conversacionesConEtiqueta = async (filtro: { q?: string; incluirApartados?: boolean }, alcance: ReturnType<typeof alcanceChat>) => {
+    const todas: Awaited<ReturnType<typeof repos.messages.listConversations>> = [];
+    for (let offset = 0; offset < TOPE_FILTRO_ETIQUETA; offset += 100) {
+      const tanda = await repos.messages.listConversations({ ...filtro, limit: 100, offset, alcance });
+      todas.push(...tanda);
+      if (tanda.length < 100) break;
+    }
+    const personas = todas.filter((c) => c.tipo !== 'grupo');
+    const etiqueta = await etiquetasDe(personas.map((c) => c.phone));
+    return personas.map((c) => ({ ...c, etiqueta: etiqueta(c.phone) }));
+  };
+  /**
+   * Si una conversacion pasa el filtro de etiqueta: un codigo del catalogo,
+   * `sin_clasificar` (la IA no pudo) o `sin_etiquetar` (aun no se etiqueto).
+   */
+  const pasaEtiqueta = (e: ReturnType<typeof etiquetaParaPantalla>, filtro: string): boolean => {
+    if (filtro === 'sin_etiquetar') return !e;
+    if (filtro === 'sin_clasificar') return Boolean(e && !e.id);
+    return Boolean(e && e.id === filtro);
+  };
+
   app.get('/admin/chat/conversations', async (request, reply) => {
     const query = z
       .object({
@@ -197,18 +639,68 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         offset: z.coerce.number().int().nonnegative().default(0),
         /** Los chats apartados solo salen cuando se piden. */
         incluirApartados: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
+        /** Solo los de esa etiqueta (codigo del catalogo, sin_clasificar o sin_etiquetar). */
+        etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').optional(),
       })
       .parse(request.query ?? {});
     const alcance = alcanceChat(request.usuario);
-    const items = await repos.messages.listConversations({ ...query, limit: query.limit + 1, alcance });
-    return responderLectura(request, reply, {
-      items: items.slice(0, query.limit),
-      hasMore: items.length > query.limit,
-      siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
+    const comun = {
       unread: await repos.messages.unreadTotal(undefined, alcance),
       scopeId: request.usuario?.chatSesion?.sid ?? 'api',
       vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+    };
+    if (query.etiqueta) {
+      // Se filtra en el servidor sobre TODA la bandeja, no sobre la pagina cargada.
+      const filtradas = (await conversacionesConEtiqueta(query, alcance)).filter((c) => pasaEtiqueta(c.etiqueta, query.etiqueta!));
+      const pagina = filtradas.slice(query.offset, query.offset + query.limit);
+      const hay = filtradas.length > query.offset + query.limit;
+      return responderLectura(request, reply, { items: pagina, hasMore: hay, siguienteOffset: hay ? query.offset + query.limit : null, total: filtradas.length, ...comun });
+    }
+    const items = await repos.messages.listConversations({ ...query, limit: query.limit + 1, alcance });
+    const pagina = items.slice(0, query.limit);
+    const etiqueta = await etiquetasDe(pagina.filter((c) => c.tipo !== 'grupo').map((c) => c.phone));
+    // La linea de WhatsApp de cada chat (wsp-ali, wsp-kevin...): la del ultimo mensaje,
+    // con el nombre que tiene ahora; si ya no existe, el que tenia entonces.
+    const porId = new Map((await lineasActivas()).map((l) => [l.id, l]));
+    const conLinea = pagina.map((c) => {
+      const m = c.lastMessage;
+      const base = { ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) };
+      if (!m?.lineaId) return { ...base, linea: null };
+      const viva = porId.get(m.lineaId);
+      return { ...base, linea: { id: m.lineaId, etiqueta: viva?.etiqueta ?? m.lineaEtiqueta ?? '', numero: viva?.telefono || m.lineaNumero || '' } };
     });
+    return responderLectura(request, reply, {
+      items: conLinea,
+      lineas: (await lineasActivas()).map(vistaDeLinea),
+      hasMore: items.length > query.limit,
+      siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
+      ...comun,
+    });
+  });
+
+  /**
+   * Cuantas conversaciones de la bandeja hay con cada etiqueta, para el
+   * filtro: las del catalogo vigente (aunque tengan 0) y las de antes que aun
+   * se vean, mas sin clasificar y sin etiquetar.
+   */
+  app.get('/admin/chat/etiquetas/conteo', async (request, reply) => {
+    if (!repos?.chatEtiquetas) return reply.code(409).send({ error: SIN_ETIQUETAS });
+    const alcance = alcanceChat(request.usuario);
+    const [todas, catalogo] = await Promise.all([conversacionesConEtiqueta({ incluirApartados: true }, alcance), catalogoVigente(repos.chatEtiquetas)]);
+    const porCodigo = new Map<string, { codigo: string; nombre: string; n: number }>(catalogo.map((e) => [e.codigo, { codigo: e.codigo, nombre: e.nombre, n: 0 }]));
+    let sinClasificar = 0;
+    let sinEtiquetar = 0;
+    for (const c of todas) {
+      const e = c.etiqueta;
+      if (!e) sinEtiquetar++;
+      else if (!e.id) sinClasificar++;
+      else {
+        const fila = porCodigo.get(e.id) ?? { codigo: e.id, nombre: e.nombre, n: 0 };
+        fila.n++;
+        porCodigo.set(e.id, fila);
+      }
+    }
+    return { total: todas.length, etiquetas: [...porCodigo.values()], sinClasificar, sinEtiquetar };
   });
 
   /**
@@ -216,6 +708,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * puede escribir, su pedido de hoy (si lo hay), su ultima ubicacion y
    * cuantas conversaciones guardadas tiene. Solo lectura.
    */
+  /** Las lineas con las que se puede responder, para el selector del chat y los rotulos. */
+  app.get('/admin/chat/lineas', async () => ({ lineas: (await lineasActivas()).map(vistaDeLinea) }));
+
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/ficha', async (request, reply) => {
     const alcance = alcanceChat(request.usuario);
     if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'contacto no encontrado' });
@@ -253,13 +748,20 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       .parse(request.query ?? {});
 
     const alcance = alcanceChat(request.usuario);
-    if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'contacto no encontrado' });
+    // El chat existe cuando el sistema le escribio (ver iniciadaEnAlcance): antes no hay nada que abrir.
+    if (!(await repos.messages.iniciadaEnAlcance(request.params.contactId, alcance))) return reply.code(404).send({ error: 'Todavía no hay chat con este cliente: el sistema aún no le ha escrito. El chat aparece cuando sale el primer mensaje.' });
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
 
     const messages = await repos.messages.listMessages(contact.id, query.limit + 1, query.before, undefined, alcance);
     const hasMore = messages.length > query.limit;
-    const pagina = messages.slice(-query.limit).map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString() }));
+    // Foto, audio o video del cliente: el mismo enlace firmado que recibe GSG en el historial
+    // (relativo, para que valga con el prefijo de la tienda), para verlo o escucharlo aquí.
+    const pagina = messages.slice(-query.limit).map(m => ({
+      ...m,
+      expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + RETENCION_CHAT_MS).toISOString(),
+      archivo: archivoDeMensaje(m, { publicBase: '.', secreto: config.TRACKING_SECRET }),
+    }));
     if (query.read) await repos.messages.markRead(contact.id, new Date());
     // La solicitud de reparto abierta, si la hay: el pedido y en que punto va,
     // para que quien atiende lo vea sin cambiar de pantalla (y para {pedido}).
@@ -276,7 +778,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     // Lo que este proveedor sabe hacer, para que la pantalla no pinte botones
     // que no funcionan. Se manda con el hilo porque cambia al cambiar de
     // proveedor, y la pantalla no tiene por que saber cual hay puesto.
-    const puede = capacidadesDelChat(providerOf(settings.current()));
+    const activas = await lineasActivas();
+    const lineaId = await lineaPorDefecto(contact.id, activas);
+    const puede = capacidadesDelChat(await proveedorDeLinea(lineaId));
+    const lineasVista = activas.map(vistaDeLinea);
 
     if (contact.tipo === 'grupo') {
       return responderLectura(request, reply, {
@@ -291,11 +796,15 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         hasMore,
         beforeCursor: pagina[0]?.id ?? null,
         puede,
+        lineas: lineasVista,
+        lineaPorDefecto: lineaId,
       });
     }
 
+    const etiqueta = (await etiquetasDe([contact.phone]))(contact.phone);
     return responderLectura(request, reply, {
       contact,
+      etiqueta,
       reparto,
       windowOpen,
       // Lo que el operador puede escribir ahora mismo, y por que.
@@ -311,6 +820,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       hasMore,
       beforeCursor: pagina[0]?.id ?? null,
       puede,
+      lineas: lineasVista,
+      lineaPorDefecto: lineaId,
     });
   });
 
@@ -331,7 +842,13 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const goneIds = body.knownIds.filter(id => !conocidasActualizadas.some(m => String(m.id) === id));
     const nextAfterId = visiblesNuevos.length ? String(visiblesNuevos.at(-1)!.id) : body.afterId;
     return responderLectura(request, reply, {
-      messages: visibles.map(m => ({ ...m, expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString() })),
+      // Con el mismo `archivo` que el hilo completo: si faltara, la pantalla sustituye el mensaje
+      // que ya pintaba por esta version y la foto, el audio o el video desaparecen hasta recargar.
+      messages: visibles.map(m => ({
+        ...m,
+        expiresAt: new Date((m.storedAt ?? m.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        archivo: archivoDeMensaje(m, { publicBase: '.', secreto: config.TRACKING_SECRET }),
+      })),
       goneIds,
       hasMoreNew: nuevos.length > limite,
       nextAfterId,
@@ -375,8 +892,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * como `codigo` y el resumen como `comentario`.
    */
   const TIPO_MANUAL = 'incidencia-manual';
-  const tiposManuales = () => (deps.ajustes?.actual().erroresManuales ?? [])
-    .filter(e => e.activo).map(e => ({ codigo: e.id, titulo: e.nombre }));
+  const tiposManuales = () => ERRORES_MANUALES_GSG.map(e => ({ codigo: e.codigo, titulo: e.titulo }));
   const trackingDe = (e: { referencia: string; datosEnvio?: { tracking?: string | null } | null }) => e.datosEnvio?.tracking || e.referencia;
 
   /** Los trackings que el cliente tiene GUARDADOS (pedidos vivos y solicitud abierta): la unica fuente de lo que se manda a GSG. */
@@ -550,17 +1066,24 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * salvo que el cuerpo diga otra cosa (el chat embebido de otro sistema
    * manda en nombre de su asesor). Va al hilo y al webhook (`autorNombre`).
    */
-  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string; atiendePersona?: boolean }) => ({
+  const quien = (request: { usuario?: { nombre?: string | null; usuario?: string; rol?: string } | null }, body: { autor?: 'persona' | 'ia' | 'sistema'; autorNombre?: string; atiendePersona?: boolean; lineaId?: string }) => ({
+    ...(body.lineaId ? { whatsappNumberId: body.lineaId } : {}),
     // Sin decir nada, quien escribe desde el chat es una persona: que el
     // hilo no lo apunte como 'sistema' solo porque la ventana de Meta obligue.
     origen: body.autor ?? 'persona',
     atiendePersona: body.atiendePersona === true && (body.autor ?? 'persona') === 'persona',
     autorNombre: body.autorNombre?.trim() || (request.usuario?.nombre || request.usuario?.usuario || '').split(' ')[0] || undefined,
+    // Su rol, salvo que escriba en nombre de otra persona (el chat embebido de otro sistema).
+    autorRol: body.autorNombre?.trim() ? undefined : request.usuario?.rol,
   });
 
   app.post('/admin/chat/send', async (request, reply) => {
     const body = sendSchema.parse(request.body);
     const firma = quien(request, body);
+    if (body.lineaId) {
+      const elegida = (await lineasActivas()).find((l) => l.id === body.lineaId);
+      if (!elegida) return reply.code(400).send({ error: 'esa linea de WhatsApp no existe o esta deshabilitada' });
+    }
 
     let phone = body.phone ? normalizePhone(body.phone) : undefined;
     let esGrupo = false;
@@ -605,7 +1128,12 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     }
 
     if (body.location) {
-      const result = await extractLocation(body.location, { bbox: config.bbox });
+      // Quien atiende (o el asistente) puede mandar unas coordenadas escritas «lat,lng»; el cliente, no:
+      // lo que entra del cliente solo vale como pin o enlace de mapa (ver src/geo/extract.ts).
+      const escritas = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(body.location);
+      const result = escritas
+        ? fromWhatsAppLocation({ latitude: Number(escritas[1]), longitude: Number(escritas[2]) }, { bbox: config.bbox })
+        : await extractLocation(body.location, { bbox: config.bbox });
       if (!result.ok) {
         return reply.code(400).send({ error: `no se encontraron coordenadas: ${result.reason}` });
       }
@@ -661,11 +1189,57 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), ...firma, ...(cita && !('error' in cita) ? { cita } : {}) });
   });
 
-  app.post('/admin/chat/adjunto', async (_request, reply) => reply.code(410).send({
-    ok: false,
-    codigo: 'MODULO_RETIRADO',
-    error: 'El envío de adjuntos desde el chat está retirado; el chat solo permite texto y ubicación.',
-  }));
+  /**
+   * Una foto, un video, un audio, un sticker o un documento escrito a mano desde el chat.
+   *
+   * Llega en base64 (pegado, arrastrado o elegido con el clip), se guarda en
+   * la misma carpeta que los adjuntos que entran -con el mismo tipo de id,
+   * para que el hilo lo pinte igual- y sale por el sender, con sus guardas y
+   * por la linea elegida. El fichero caduca con el chat: la limpieza diaria
+   * borra los de mas de 24 h. El limite del cuerpo va aparte del general:
+   * 4 MB no dan para un video.
+   */
+  app.post('/admin/chat/adjunto', { bodyLimit: Math.ceil(MAX_BYTES_ADJUNTO * 1.4) + 64 * 1024 }, async (request, reply) => {
+    const body = adjuntoSchema.parse(request.body ?? {});
+    const contact = await repos.contacts.getById(body.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    if (contact.tipo === 'grupo' && !gruposDisponibles()) return reply.code(400).send({ error: SIN_GRUPOS });
+    if (body.lineaId && !(await lineasActivas()).some((l) => l.id === body.lineaId)) {
+      return reply.code(400).send({ error: 'esa linea de WhatsApp no existe o esta deshabilitada' });
+    }
+
+    const datos = Buffer.from(body.datos.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!datos.length) return reply.code(400).send({ error: 'El fichero llegó vacío.' });
+    if (datos.length > MAX_BYTES_ADJUNTO) return reply.code(400).send({ error: 'WhatsApp no acepta ficheros de más de 16 MB. Usa uno más ligero.' });
+
+    const kind = tipoDeAdjuntoSaliente(body.mimeType);
+    const mimeType = body.mimeType.split(';')[0]!.trim().toLowerCase();
+    const base = extensionDe(mimeType, kind === 'document' ? 'document' : kind);
+    const extension = base === '.bin' && body.filename?.includes('.')
+      ? `.${body.filename.split('.').pop()!.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'}`
+      : base;
+    const id = idDeMedia(`chat:${randomUUID()}`, extension);
+    await writeFile(path.join(deps.mediaDir ?? mediaDirectory(), id), datos);
+
+    let cita;
+    if (body.citaId) {
+      cita = await citaDelHilo(contact.id, body.citaId);
+      if ('error' in cita) return reply.code(400).send({ error: cita.error });
+    }
+
+    return sender.send({
+      phone: contact.phone,
+      kind: 'media',
+      category: 'UTILITY',
+      manual: aMano(),
+      ...quien(request, body),
+      ...(cita && !('error' in cita) ? { cita } : {}),
+      // Una nota de voz grabada aqui va como nota de voz de verdad (ptt), no
+      // como fichero de audio: es la diferencia entre la onda con el play y
+      // un adjunto que hay que descargar.
+      media: { id, kind, datos, mimeType, filename: body.filename || undefined, caption: body.caption || undefined, voz: body.voz === true && kind === 'audio' },
+    });
+  });
 
   /** Abrir un chat con alguien que todavia no existe en la libreta. */
   app.post('/admin/chat/start', async (request) => {
@@ -689,7 +1263,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const body = z.object({ mensajeId: z.coerce.number().int().positive(), emoji: z.string().max(16) }).parse(request.body ?? {});
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    if (!capacidadesDelChat(providerOf(settings.current())).reaccionar || !sender.accion) {
+    const lineaId = await lineaDelMensaje(contact.id, body.mensajeId);
+    if (!capacidadesDelChat(await proveedorDeLinea(lineaId)).reaccionar || !sender.accion) {
       return reply.code(400).send({ error: 'este WhatsApp no puede mandar reacciones' });
     }
 
@@ -697,7 +1272,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if ('error' in mensaje) return reply.code(400).send({ error: mensaje.error });
 
     const emoji = body.emoji.trim();
-    await sender.accion({ phone: contact.phone, mensaje, tipo: 'reaccion', emoji });
+    await sender.accion({ phone: contact.phone, whatsappNumberId: lineaId, mensaje, tipo: 'reaccion', emoji });
     await repos.messages.reaccionar(mensaje.id, 'yo', emoji, new Date());
     return { ok: true, emoji };
   });
@@ -719,14 +1294,22 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
     const fallos: string[] = [];
     if (body.paraTodos) {
-      if (!capacidadesDelChat(providerOf(settings.current())).eliminarParaTodos || !sender.accion) {
+      // Si ninguna de las lineas por las que salieron puede, se dice de entrada; si solo
+      // algunas, las demas se quitan igual y el fallo de cada una se informa.
+      const puedenAlguno = await Promise.all(body.ids.map(async (id) => capacidadesDelChat(await proveedorDeLinea(await lineaDelMensaje(contact.id, id))).eliminarParaTodos));
+      if (!puedenAlguno.some(Boolean) || !sender.accion) {
         return reply.code(400).send({ error: 'este WhatsApp no puede eliminar un mensaje para todos: solo se puede quitar de aquí' });
       }
       for (const id of body.ids) {
         const mensaje = await citaDelHilo(contact.id, id);
         if ('error' in mensaje) { fallos.push(mensaje.error); continue; }
+        const lineaId = await lineaDelMensaje(contact.id, id);
+        if (!capacidadesDelChat(await proveedorDeLinea(lineaId)).eliminarParaTodos || !sender.accion) {
+          fallos.push('la linea por la que salio ese mensaje no puede eliminarlo para todos: solo se puede quitar de aquí');
+          continue;
+        }
         try {
-          await sender.accion({ phone: contact.phone, mensaje, tipo: 'eliminar' });
+          await sender.accion({ phone: contact.phone, whatsappNumberId: lineaId, mensaje, tipo: 'eliminar' });
           await repos.messages.marcarBorradoPorRemitente(mensaje.id, new Date());
         } catch (error) {
           fallos.push(error instanceof Error ? error.message : 'no se pudo eliminar');
@@ -743,7 +1326,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const body = z.object({ mensajeId: z.coerce.number().int().positive(), texto: z.string().trim().min(1).max(4000) }).parse(request.body ?? {});
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    if (!capacidadesDelChat(providerOf(settings.current())).editar || !sender.accion) {
+    const lineaId = await lineaDelMensaje(contact.id, body.mensajeId);
+    if (!capacidadesDelChat(await proveedorDeLinea(lineaId)).editar || !sender.accion) {
       return reply.code(400).send({ error: 'este WhatsApp no puede editar un mensaje ya enviado' });
     }
 
@@ -751,7 +1335,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     if ('error' in mensaje) return reply.code(400).send({ error: mensaje.error });
     if (!mensaje.fromMe) return reply.code(400).send({ error: 'solo se pueden editar los mensajes que mandaste tú' });
 
-    await sender.accion({ phone: contact.phone, mensaje, tipo: 'editar', texto: body.texto });
+    await sender.accion({ phone: contact.phone, whatsappNumberId: lineaId, mensaje, tipo: 'editar', texto: body.texto });
     await repos.messages.editarCuerpo(contact.id, body.mensajeId, body.texto, new Date());
     return { ok: true };
   });
@@ -884,8 +1468,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/presencia', async (request, reply) => {
     const contact = await repos.contacts.getById(request.params.contactId);
     if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
-    if (!capacidadesDelChat(providerOf(settings.current())).presencia || !sender.presencia) return { presencia: null };
-    return { presencia: await sender.presencia(contact.phone) };
+    const linea = request.query && typeof (request.query as { lineaId?: unknown }).lineaId === 'string' ? (request.query as { lineaId: string }).lineaId : await lineaPorDefecto(contact.id, await lineasActivas());
+    if (!capacidadesDelChat(await proveedorDeLinea(linea)).presencia || !sender.presencia) return { presencia: null };
+    return { presencia: await sender.presencia(contact.phone, linea) };
   });
 
   /**

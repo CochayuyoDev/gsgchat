@@ -303,7 +303,14 @@ function resaltar(texto, busca) {
 }
 
 /* Cada etiqueta con el tono del armazon: nunca un color a pelo. */
-var TONO_ETIQUETA = { reclamo: 'rojo', cancelacion: 'rojo', entrega: 'verde', venta: 'verde', cambio: 'ambar', sin_respuesta: 'ambar', motorizado: 'azul', pago: 'azul', consulta: 'gris', otro: 'gris' };
+var TONO_ETIQUETA = {
+  reclamo: 'rojo', cancelar_entrega: 'rojo', pedido_no_reconocido: 'rojo',
+  reagendar_entrega: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
+  horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
+  confirmar_recepcion: 'verde', otro: 'gris',
+  /* Las del catalogo de antes, para las conversaciones que ya las tienen. */
+  cancelacion: 'rojo', entrega: 'verde', venta: 'verde', cambio: 'ambar', sin_respuesta: 'ambar', motorizado: 'azul', pago: 'azul', consulta: 'gris'
+};
 var TIPO = { image: '🖼 foto', audio: '🎤 audio', video: '🎬 video', document: '📄 documento', sticker: 'sticker', location: '📍 ubicación' };
 /* Cuerpos que WhatsApp pone como relleno de un adjunto: no aportan nada junto al propio adjunto. */
 var CUERPOS_GENERICOS = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)', '(ubicación)'];
@@ -312,6 +319,7 @@ var SIN_FICHERO = ['text', 'location', 'interactive', 'template', 'unknown'];
 
 /* ------------------------------------------------------------------- estado */
 var ETIQUETAS = [];
+var ETIQUETAS_ANTERIORES = [];
 var NOMBRE_ETIQUETA = {};
 var datos = null;
 var abierta = null;
@@ -350,8 +358,11 @@ function filtrosActuales() {
 }
 
 function pintarEtiquetasEnSelectores() {
-  var opciones = ETIQUETAS.map(function (e) { return '<option value="' + esc(e.id) + '">' + esc(e.nombre) + '</option>'; }).join('');
-  $('f-etiqueta').innerHTML = '<option value="">Cualquier etiqueta</option>' + opciones;
+  var aOpciones = function (lista) { return lista.map(function (e) { return '<option value="' + esc(e.id) + '">' + esc(e.nombre) + '</option>'; }).join(''); };
+  var opciones = aOpciones(ETIQUETAS);
+  /* Por las de antes se puede buscar, pero ya no se ponen. */
+  $('f-etiqueta').innerHTML = '<option value="">Cualquier etiqueta</option>' + opciones +
+    (ETIQUETAS_ANTERIORES.length ? '<optgroup label="Etiquetas anteriores">' + aOpciones(ETIQUETAS_ANTERIORES) + '</optgroup>' : '');
   $('l-etiqueta-add').innerHTML = '<option value="">Añadir etiqueta…</option>' + opciones;
 }
 
@@ -373,7 +384,8 @@ async function cargar() {
   lista.setAttribute('aria-busy', 'false');
   if (!ETIQUETAS.length && (datos.etiquetas || []).length) {
     ETIQUETAS = datos.etiquetas;
-    ETIQUETAS.forEach(function (e) { NOMBRE_ETIQUETA[e.id] = e.nombre; });
+    ETIQUETAS_ANTERIORES = datos.etiquetasAnteriores || [];
+    ETIQUETAS.concat(ETIQUETAS_ANTERIORES).forEach(function (e) { NOMBRE_ETIQUETA[e.id] = e.nombre; });
     pintarEtiquetasEnSelectores();
   }
   /* Si al borrar o al filtrar la última página se queda vacía, se retrocede en vez de enseñar un vacío falso. */
@@ -468,7 +480,9 @@ function filaHtml(a) {
   var detalle = a.messageCount + ' ' + plural(a.messageCount, 'mensaje', 'mensajes') +
     (adj ? ' · 📎 ' + adj : '') +
     ' · ' + (a.origen === 'importado_txt' ? 'importada del teléfono' : motivoTexto(a.reason) + (a.cerradoPor ? ' por ' + a.cerradoPor : ''));
-  var chips = (a.pedido ? '<span class="chip tono-azul">' + esc(a.pedido) + '</span>' : '') + (a.etiquetas || []).map(function (e) { return chipEtiqueta(e); }).join('');
+  var chips = (a.pedido ? '<span class="chip tono-azul">' + esc(a.pedido) + '</span>' : '') + (a.etiquetas || []).map(function (e) { return chipEtiqueta(e); }).join('') +
+    /* Con resumen y sin etiqueta: la IA falló al clasificarla (no es lo mismo que «Otro»). */
+    (a.resumen && !(a.etiquetas || []).length ? '<span class="chip tono-gris" title="No se pudo clasificar al guardarla. «Volver a resumir» lo intenta de nuevo.">Sin clasificar</span>' : '');
   return '<button class="fila" type="button" data-id="' + a.id + '"' + (abierta && abierta.id === a.id ? ' aria-current="true"' : '') + '>' +
     '<span class="top"><b>' + esc(quien) + '</b><span class="cuando">' + esc(fechaHora(a.createdAt)) + '</span></span>' +
     '<span class="det">' + esc(detalle) + '</span>' +
@@ -590,6 +604,7 @@ function pintarChips() {
     (a.deletedAt ? '<span class="chip tono-ambar">En la papelera</span>' : '') +
     (a.pedido ? '<span class="chip tono-azul">' + esc(a.pedido) + '</span>' : '') +
     (a.origen === 'importado_txt' ? '<span class="chip tono-gris">Importada</span>' : '') +
+    (a.resumen && !etiquetasEdit.length ? '<span class="chip tono-gris" title="No se pudo clasificar al guardarla. «Volver a resumir» lo intenta de nuevo.">Sin clasificar</span>' : '') +
     etiquetasEdit.map(function (e) { return chipEtiqueta(e, ' <button class="quitar" type="button" data-quitar-etiqueta="' + esc(e) + '" aria-label="Quitar la etiqueta ' + esc(NOMBRE_ETIQUETA[e] || e) + '">✕</button>'); }).join('');
 }
 

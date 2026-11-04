@@ -117,8 +117,8 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'gsg-courier', seccion: 'Configuración', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Conexión y reportes de pedidos a GSG.', soloAdmin: true },
   { id: 'api-gsgchat', seccion: 'Configuración', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Claves y estado de la conexión que recibe pedidos.', soloAdmin: true },
   { id: 'configuracion', seccion: 'Configuración', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio y supervisor de avisos.', soloAdmin: true },
-  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
-  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
+  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'La IA que le pone su nota a cada chat: servicio, modelo y clave.' },
+  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Enséñale a etiquetar los chats con tus propios casos.' },
   { id: 'fiabilidad', seccion: 'Avanzado', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'Estado y diagnóstico de conexiones.', soloAdmin: true },
   { id: 'usuarios', seccion: 'Avanzado', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
   { id: 'manual', seccion: 'Ayuda', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Instrucciones para usar GSGchat.' },
@@ -262,7 +262,8 @@ const CSS = `
   .s-modo:hover { color: var(--s-text); border-style: solid; }
   .s-app.sencillo .s-item[data-avanzado], .s-app.sencillo .s-grupo-avanzado { display: none; }
   .s-app.plegado .s-modo { display: none; }
-  .s-app.modo-gsg .s-menu-completo, .s-app.modo-gsg .s-modo, .s-app.modo-completo .s-menu-gsg { display: none; }
+  /* El menú es siempre el de GSG, sea cual sea el modo del sistema: así se ve igual en todas partes. */
+  .s-menu-completo, .s-modo { display: none; }
   .s-user { border-top: 1px solid var(--s-line); padding: 12px 12px; display: flex; align-items: center; gap: 10px; }
   .s-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--s-accent-soft); color: var(--s-accent); display: grid; place-items: center; font-weight: 800; font-size: 13px; flex: none; }
   .s-user-txt { flex: 1; min-width: 0; line-height: 1.25; }
@@ -485,7 +486,7 @@ const CSS = `
     .s-nav-movil .s-ico { width: 22px; height: 22px; }
     .s-nav-movil a.activo { color: var(--s-accent); font-weight: 700; }
     .s-nav-movil a.activo::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--s-accent); }
-    .s-app.modo-gsg .s-nav-completo, .s-app.modo-completo .s-nav-gsg { display: none; }
+    .s-nav-completo { display: none; }
     .s-app.sin-nav-movil .s-nav-movil { display: none; }
     .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none;  }
     .s-app.abierto .s-backdrop { opacity: 1; pointer-events: auto; }
@@ -507,10 +508,8 @@ const JS = String.raw`
   var leer = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
 
   /* plegar / desplegar */
-  if (leer('s-plegado') === '1') app.classList.add('plegado');
   document.getElementById('s-plegar').onclick = function () {
     app.classList.toggle('plegado');
-    guardar('s-plegado', app.classList.contains('plegado') ? '1' : '0');
   };
   document.getElementById('s-menu').onclick = function () { app.classList.toggle('abierto'); };
   /* Chips de variables: chipsDeVariables(textarea, ['{nombre}', '{pedido}'], { etiqueta: 'Tocar para insertar:' })
@@ -546,7 +545,7 @@ const JS = String.raw`
     var ruta = location.pathname;
     document.querySelectorAll('#s-nav-movil a[data-ir]').forEach(function (a) {
       var p = a.getAttribute('data-ir').split('#')[0];
-      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
+      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg' || ruta === '/embudo-chats')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
       a.classList.toggle('activo', activo);
     });
   }
@@ -568,22 +567,19 @@ const JS = String.raw`
   };
   document.getElementById('s-backdrop').onclick = function () { app.classList.remove('abierto'); };
 
-  /* grupos: todos abiertos; el que se cierre a mano queda cerrado hasta que se vuelva a abrir */
+  /* grupos: todos abiertos al cargar la pantalla */
   document.querySelectorAll('.s-grupo').forEach(function (g) {
     var id = g.getAttribute('data-grupo');
     /* Inicio (Dashboard, Pedidos GSG, Chats) siempre a la vista: no se pliega. */
     if (id === 'gsg-inicio') { g.classList.add('fijo'); return; }
-    var guardado = leer('s-grupo-' + id);
-    if (guardado === 'cerrado' || (!guardado && g.hasAttribute('data-cerrado'))) g.classList.add('cerrado');
-    g.querySelector('.s-grupo-cab').onclick = function () {
-      g.classList.toggle('cerrado');
-      guardar('s-grupo-' + id, g.classList.contains('cerrado') ? 'cerrado' : 'abierto');
-    };
+    /* Siempre arrancan igual (abiertos; Superadministración, cerrado): lo que se pliegue a mano no se recuerda. */
+    if (g.hasAttribute('data-cerrado')) g.classList.add('cerrado');
+    g.querySelector('.s-grupo-cab').onclick = function () { g.classList.toggle('cerrado'); };
   });
 
   /* el activo: por ruta y ancla; si no hay ancla que coincida, por ruta */
   function menuVisible() {
-    return app.classList.contains('modo-completo') ? '.s-menu-completo' : '.s-menu-gsg';
+    return '.s-menu-gsg';
   }
   function marcarActivo() {
     var ruta = location.pathname;
@@ -602,7 +598,7 @@ const JS = String.raw`
     if (!activo && ruta.indexOf('/procesos/') === 0) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/procesos"]');
     /* /entregas y /hoy son la misma pantalla */
     /* la solicitud de ubicación y sus ajustes son pestañas de Pedidos GSG */
-    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
+    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg' || ruta === '/embudo-chats')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
     items.forEach(function (a) { a.classList.toggle('activo', a === activo); });
     var miga = document.getElementById('s-miga');
     if (activo) {
@@ -679,7 +675,7 @@ const JS = String.raw`
     }
   });
   document.querySelector('.s-buscar').addEventListener('click', function () {
-    if (app.classList.contains('plegado')) { app.classList.remove('plegado'); guardar('s-plegado', '0'); q.focus(); }
+    if (app.classList.contains('plegado')) { app.classList.remove('plegado'); q.focus(); }
   });
 
   /* --- el buscador global (Ctrl K): pedidos de hoy, clientes, conversaciones guardadas y modulos --- */
@@ -823,7 +819,7 @@ const JS = String.raw`
   window.pintarSenalIA = function (c) {
     if (!c || !SENAL_IA[c.estado]) return;
     var texto = SENAL_IA[c.estado];
-    var detalle = c.estado === 'sin_conexion' ? (c.motivo || 'La IA no respondió.') : c.estado === 'apagada' ? 'La IA no está activa o le falta la clave.' : c.estado === 'sin_comprobar' ? 'Aún no se le ha preguntado nada desde que arrancó el sistema.' : 'La última llamada al modelo respondió bien.';
+    var detalle = c.estado === 'sin_conexion' ? (c.motivo || 'La IA no respondió.') : c.estado === 'apagada' ? 'A la IA le falta la clave: guárdala en Asistente IA para etiquetar los chats.' : c.estado === 'sin_comprobar' ? 'Aún no se le ha preguntado nada desde que arrancó el sistema.' : 'La última llamada al modelo respondió bien.';
     var cuando = c.comprobada ? ' (comprobado: ' + horaCorta(c.comprobada) + ')' : '';
     var a = document.getElementById('s-ia-senal');
     if (a) {
@@ -1229,9 +1225,8 @@ export function appShell(opts: ShellOpts): string {
     ...visiblesGsg.filter((i) => !i.seccion).map((i) => itemHtml(i, false)),
     ...secciones.map((sec) => {
       const items = visiblesGsg.filter((i) => i.seccion === sec);
-      // La operación diaria queda visible; configuración, avanzado y ayuda empiezan plegados.
-      const cerrada = sec !== 'Operación';
-      return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}"${cerrada ? ' data-cerrado="1"' : ''}>
+      // Todas las secciones se ven abiertas siempre; solo Superadministración empieza plegada.
+      return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(sec)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
           ${items.map((i) => itemHtml(i, true)).join('\n          ')}

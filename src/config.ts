@@ -6,7 +6,7 @@
 
 import 'dotenv/config';
 import { z } from 'zod';
-import { LIMA_BBOX, LIMA_BBOX_AMPLIADA, MEXICO_BBOX } from './geo/validate.js';
+import { LIMA_BBOX, LIMA_BBOX_AMPLIADA, MEXICO_BBOX, PERU_BBOX } from './geo/validate.js';
 import { DISTRITOS_LIMA_CALLAO } from './preventa/distritos.js';
 import type { BoundingBox } from './types.js';
 
@@ -385,6 +385,12 @@ export interface Config extends RawConfig {
   bbox?: BoundingBox;
   /** Lima y Callao: dentro de `bbox` pero fuera de aqui, el pin se registra y lleva un costo extra. */
   zonaSinExtra?: BoundingBox;
+  /**
+   * El pais en el que tiene sentido la coordenada de un enlace de mapa (Peru).
+   * Un par que cae fuera (Nueva York, Madrid) no es la casa del cliente: se
+   * descarta y se prueba el siguiente de la URL.
+   */
+  pais?: BoundingBox;
   /** Nombre de la zona atendida, para los mensajes al cliente. */
   coverageName: string;
   /** Zona horaria del negocio: decide el saludo y las fechas. */
@@ -453,6 +459,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // (`zonaSinExtra`), que cobra el motorizado.
     bbox: raw.GEO_BBOX === 'lima' ? LIMA_BBOX_AMPLIADA : raw.GEO_BBOX === 'mexico' ? MEXICO_BBOX : undefined,
     zonaSinExtra: raw.GEO_BBOX === 'lima' ? LIMA_BBOX : undefined,
+    // Con la zona de Mexico manda esa; sin zona, el pais de las rutas.
+    pais: raw.GEO_BBOX === 'lima' || (raw.GEO_BBOX === 'none' && raw.RUTAS_PAIS === 'peru') ? PERU_BBOX : undefined,
     timezone: raw.TIMEZONE,
     // Con cobertura de Lima, los distritos se validan contra los que existen.
     // Fuera de ahi no hay lista que valga y el campo acepta texto libre.

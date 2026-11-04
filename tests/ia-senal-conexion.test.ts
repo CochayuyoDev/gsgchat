@@ -132,10 +132,13 @@ describe('la señal de conexión de la IA', () => {
     expect((await app.inject({ method: 'GET', url: '/admin/ia/conexion' })).statusCode).toBe(401);
   });
 
-  it('otra clave o apagarla borra lo que se sabía', async () => {
+  it('otra clave borra lo que se sabía; sin que conteste sigue trabajando (etiqueta), y sin clave está apagada', async () => {
     await ia.guardar({ token: 'sk-otra-clave-0000000000' });
     expect(ia.conexion().estado).toBe('sin_comprobar');
+    // Con la clave, la IA etiqueta los chats aunque no conteste a nadie (28/10): no está apagada.
     await ia.guardar({ activa: false });
+    expect(ia.conexion().estado).toBe('sin_comprobar');
+    await ia.guardar({ borrarClave: true });
     expect(ia.conexion().estado).toBe('apagada');
     const r = await app.inject({ method: 'GET', url: '/admin/ia/conexion', headers: auth });
     expect(r.json().estado).toBe('apagada');

@@ -122,10 +122,10 @@ export async function crearServidorPlataforma(o: OpcionesServidor): Promise<Serv
     // Lo que usa GSG con su clave va a la tienda de esa clave (sin prefijo ni
     // cookie): la recepcion (API 1), cancelar o reintentar (API 2), el
     // seguimiento, la bandeja de reportados y el historial de chat (API 3).
-    const deGsg = rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/') || (rutaApi === '/api/v1/flujo' && req.method === 'POST') || (rutaApi === '/api/v1/seguimiento' && req.method === 'POST') || rutaApi === '/api/v1/reportados' || rutaApi.startsWith('/api/v1/reportados/') || rutaApi === '/api/v1/trackings' || (rutaApi === '/api/v1/chat' && (req.method === 'GET' || req.method === 'POST')) || (rutaApi === '/api/v1/messages' && req.method === 'GET') || (rutaApi === '/api/v1/send-message' && req.method === 'POST');
+    const deGsg = rutaApi === '/api/v1/entregas' || rutaApi.startsWith('/api/v1/entregas/') || (rutaApi === '/api/v1/flujo' && req.method === 'POST') || (rutaApi === '/api/v1/seguimiento' && req.method === 'POST') || rutaApi === '/api/v1/reportados' || rutaApi.startsWith('/api/v1/reportados/') || rutaApi === '/api/v1/trackings' || (rutaApi === '/api/v1/historial' && req.method === 'GET') || (rutaApi === '/api/v1/chat' && req.method === 'POST') || (rutaApi === '/api/v1/messages' && req.method === 'GET') || (rutaApi === '/api/v1/send-message' && req.method === 'POST');
     if (esRecepcionGsg(req.method, url) || ((claveDeCabeceras(req.headers) || claveEnBearer(req.headers)) && deGsg)) {
       // El chat (API 3 y 4): leer el historial pide conversaciones:leer y escribir, mensajes:enviar; lo demas, entregas.
-      const permiso = rutaApi === '/api/v1/chat' || rutaApi === '/api/v1/messages' || rutaApi === '/api/v1/send-message' ? (req.method === 'POST' ? 'mensajes:enviar' : 'conversaciones:leer') : req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
+      const permiso = rutaApi === '/api/v1/historial' || rutaApi === '/api/v1/chat' || rutaApi === '/api/v1/messages' || rutaApi === '/api/v1/send-message' ? (req.method === 'POST' ? 'mensajes:enviar' : 'conversaciones:leer') : req.method === 'GET' || req.method === 'HEAD' ? 'entregas:leer' : 'entregas:gestionar';
       const r = await tiendaDeClaveGsg(plataforma, req.headers, permiso);
       return 'tienda' in r ? { tipo: 'tienda', tienda: r.tienda, url } : { tipo: 'rechazo', rechazo: r.rechazo };
     }

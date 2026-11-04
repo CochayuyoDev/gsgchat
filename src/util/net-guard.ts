@@ -18,12 +18,11 @@ const ALLOWED_HOST_PATTERNS: RegExp[] = [
   /^g\.co$/i,
   /^(?:www\.)?google\.[a-z.]{2,6}$/i,
   /^maps\.google\.[a-z.]{2,6}$/i,
+  // La pagina de consentimiento a la que a veces lleva un enlace corto: dentro trae el enlace de Maps.
+  /^consent\.google\.[a-z.]{2,6}$/i,
   /^(?:www\.)?waze\.com$/i,
   /^ul\.waze\.com$/i,
   /^maps\.apple\.com$/i,
-  /^(?:www\.)?openstreetmap\.org$/i,
-  /^osm\.org$/i,
-  /^plus\.codes$/i,
 ];
 
 export function isAllowedHost(hostname: string): boolean {

@@ -30,7 +30,8 @@ function hoyALas9(): Date {
   return d;
 }
 
-const pideLaNueva = (nombre: string): string => `Claro, ${nombre}, por favor mándeme su nueva ubicación por WhatsApp (el botón de ubicación) para registrarla.`;
+// Desde el 28/10 el texto es fijo, sin nombre: «Por favor, comparta su nueva ubicación 📍».
+const pideLaNueva = (_nombre: string): string => 'Por favor, comparta su nueva ubicación 📍';
 const MOTO_GSG = '999888777';
 
 // ------------------------------------------------------------------ reglas
@@ -86,8 +87,8 @@ describe('las reglas: «un mensaje igual» a «quiero cambiar mi ubicación»', 
     });
   }
 
-  it('la plantilla sin nombre queda «Claro, por favor…» (sin la coma suelta)', () => {
-    expect(rellenar(TEXTOS_POR_DEFECTO.cambioUbicacionAntes, { nombre: null, negocio: 'Demo' })).toBe('Claro, por favor mándeme su nueva ubicación por WhatsApp (el botón de ubicación) para registrarla.');
+  it('la plantilla es la del dueño (28/10), con o sin nombre', () => {
+    expect(rellenar(TEXTOS_POR_DEFECTO.cambioUbicacionAntes, { nombre: null, negocio: 'Demo' })).toBe('Por favor, comparta su nueva ubicación 📍');
     expect(rellenar(TEXTOS_POR_DEFECTO.cambioUbicacionAntes, { nombre: 'Rosa María Quispe', negocio: 'Demo' })).toBe(pideLaNueva('Rosa'));
   });
 });
@@ -127,7 +128,7 @@ describe('«quiero cambiar mi ubicación»: plantilla con el nombre, pin nuevo y
   });
   afterAll(() => e?.cerrar());
 
-  it('antes de la 1:00 PM: «Claro, Rosa, por favor mándeme su nueva ubicación…» con el botón de ubicación', async () => {
+  it('antes de la 1:00 PM: «Por favor, comparta su nueva ubicación» con el botón de ubicación', async () => {
     const salio = await nuevos(() => e.contesta(TEL, { texto: 'quiero cambiar mi ubicación' }));
     expect(salio.map((m) => m.body)).toEqual([pideLaNueva('Rosa')]);
     expect(salio[0]!.kind).toBe('location_request');

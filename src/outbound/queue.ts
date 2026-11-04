@@ -91,6 +91,11 @@ export function createOutboundWorker(opts: OutboundWorkerOptions): Worker<SendJo
 
       if (outcome.ok) return outcome;
 
+      // El reintento sale por la linea del primer intento, no por la que toque despues.
+      if (outcome.whatsappNumberId && (!job.data.whatsappNumberId || job.data.lineaDelSistema)) {
+        await job.updateData({ ...job.data, whatsappNumberId: outcome.whatsappNumberId, lineaDelSistema: true });
+      }
+
       // Un bloqueo con espera (cupo diario, calidad en amarillo) se reprograma;
       // uno definitivo (baja, sin opt-in) se descarta sin reintentos.
       if (outcome.blocked) {

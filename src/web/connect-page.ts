@@ -495,6 +495,28 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
     <button class="btn peligro hidden" id="desconectar" type="button">Desvincular cuenta</button>
   </div>
 </section>
+<section class="tarjeta con-card" id="card-lineas">
+  <div class="con-cab"><span class="con-ico" aria-hidden="true">📱</span><div class="con-tit"><h2>Líneas de WhatsApp</h2><span id="lineas-chip" class="chip tono-gris">Revisando…</span></div></div>
+  <p class="con-frase">Hasta 8 números por tienda, todos en la misma bandeja y un solo hilo por cliente. La etiqueta (por ejemplo <b>wsp-ali</b>) aparece en cada chat y cada mensaje para saber qué celular revisar. Si una línea se cae, las demás siguen.</p>
+  <p class="con-frase">Cada cliente nuevo entra por la línea más desahogada y se queda con ella: siempre se le escribe desde el mismo número. Solo cambia si su línea se quita o se deshabilita, si sigue sin conexión pasado el tiempo que elijas abajo, si él escribe a otro de tus números o si tú eliges otra en el chat.</p>
+  <div id="lineas-lista" class="lineas-lista"></div>
+  <div class="acciones">
+    <input id="linea-nueva" class="corto" maxlength="80" placeholder="Nombre de la línea (ej. wsp-kevin)" aria-label="Nombre de la nueva línea">
+    <button class="btn primario" id="linea-agregar" type="button">Agregar línea</button>
+  </div>
+  <p class="ayuda" id="lineas-estado" role="status"></p>
+  <div id="lineas-reparto" hidden>
+    <h3>Cómo van repartidos los clientes</h3>
+    <div class="tablewrap"><table><thead><tr><th>Línea</th><th>Clientes</th><th>Nuevos hoy</th><th>Mensajes hoy</th></tr></thead><tbody id="lineas-reparto-filas"></tbody></table></div>
+    <div class="acciones" style="align-items:center">
+      <label for="linea-espera">Si una línea se cae, esperar</label>
+      <input id="linea-espera" class="corto" type="number" min="1" max="1440" style="width:90px">
+      <span>minutos antes de pasar sus clientes a otra</span>
+      <button class="btn" id="linea-espera-guardar" type="button">Guardar</button>
+    </div>
+    <details><summary>Últimos cambios de línea</summary><div id="lineas-cambios" class="ayuda"></div></details>
+  </div>
+</section>
 ` : ''}${tarjetaGsg ? `<section class="tarjeta con-card" id="gsg">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">${icono('moto')}</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase" id="gsg-frase">GSG nos manda los pedidos del día en cuanto los tiene, y a GSG le mandamos cada ubicación que registra el cliente. Aquí nunca se le pide nada a GSG.</p>
@@ -539,6 +561,10 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <span class="hint">A donde va cada problema: número sin WhatsApp o inválido, no reconoce el pedido, rechaza… Vacía = incidencias. Por ejemplo v1/gsgchat/reported. El formato de cada aviso está en el Manual.</span></label>
     <input id="gsg-ruta-incidencias" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/reported" aria-describedby="gsg-url-incidencias">
     <p class="ayuda" id="gsg-url-incidencias" role="status" aria-live="polite"></p>
+    <label class="campo" for="gsg-ruta-webhook">Ruta del webhook de GSG (opcional)
+      <span class="hint">Lo que va después de la URL base, sin http:// ni «..». Vacía = sin webhook. Por ejemplo v1/gsgchat/webhook</span></label>
+    <input id="gsg-ruta-webhook" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/webhook" aria-describedby="gsg-url-webhook">
+    <p class="ayuda" id="gsg-url-webhook" role="status" aria-live="polite"></p>
     <label class="campo" for="gsg-ruta-estado">Ruta para consultar el estado de un envío (opcional)
       <span class="hint">El GET de GSG que dice si un tracking está cancelado, con el número o el tracking mal, o sin poder contactar. Vacía = no se le pregunta. Por ejemplo v1/gsgchat/estado</span></label>
     <input id="gsg-ruta-estado" type="text" autocomplete="off" spellcheck="false" placeholder="v1/gsgchat/estado" aria-describedby="gsg-url-estado">
@@ -559,6 +585,17 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
   </form>
   </details>
   <div id="gsg-resultado" class="hidden" role="status" aria-live="polite"></div>
+  <div id="gsg-webhook-caja" class="bloque punteado hidden">
+    <h3>Webhook de GSG</h3>
+    <p class="ayuda" id="gsg-webhook-destino"></p>
+    <div id="gsg-webhook-secreto-caja" class="nota hidden" role="status" aria-live="polite">
+      <b>Secreto del webhook: cópialo ahora, no se vuelve a mostrar.</b>
+      <p><code id="gsg-webhook-secreto" style="word-break:break-all;user-select:all"></code></p>
+      <div class="acciones"><button class="btn sm" id="gsg-webhook-copiar" type="button">Copiar</button><button class="btn sm" id="gsg-webhook-ocultar" type="button">Ya lo copié</button></div>
+      <p class="ayuda">Se le da a GSG: cada aviso sale firmado en la cabecera X-Firma (t=…,v1=hmac sha256 de «t.cuerpo» con este secreto).</p>
+    </div>
+    <div class="acciones"><button class="btn sm" id="gsg-webhook-rotar" type="button">Generar un secreto nuevo</button></div>
+  </div>
   <div class="acciones con-pie">
     <button class="btn" id="gsg-probar" type="button">Probar otra vez</button>
     <span id="gsg-state" class="chip hidden" role="status"></span>
@@ -1719,6 +1756,135 @@ if ($('perfil')) {
 }
 
 `;
+  const scriptLineas = String.raw`
+/* --- lineas de WhatsApp (hasta 8) ------------------------------------- */
+var lineasMax = 8;
+var lineasVistas = '';
+var TONO_LINEA = { conectado: 'verde', esperando_qr: 'ambar', caido: 'rojo', desconectado: 'gris' };
+var TEXTO_LINEA = { conectado: 'Conectada', esperando_qr: 'Escanea el QR', caido: 'Caída', desconectado: 'Sin conectar' };
+function lineasMsg(t, tono) {
+  var el = $('lineas-estado');
+  if (!el) return;
+  el.textContent = t || '';
+  el.style.color = tono === 'rojo' ? '#b42318' : '';
+}
+function filaLinea(l) {
+  var tono = TONO_LINEA[l.estado] || 'gris';
+  var local = l.proveedor === 'local' && !l.principal;
+  var qr = l.sesion && l.sesion.qr ? '<div class="qr-marco"><img alt="QR de ' + esc(l.etiqueta) + '" src="data:image/png;base64,' + esc(l.sesion.qr) + '"></div><p class="ayuda">En el teléfono de esta línea: WhatsApp &rarr; Dispositivos vinculados &rarr; Vincular un dispositivo.</p>' : '';
+  var codigo = l.sesion && l.sesion.pairingCode ? '<div class="codigo" role="status">' + esc(l.sesion.pairingCode) + '</div>' : '';
+  var botones = '';
+  if (local) {
+    botones += l.estado === 'conectado'
+      ? '<button class="btn" type="button" data-acc="desconectar" data-id="' + esc(l.id) + '">Desvincular</button>'
+      : '<button class="btn primario" type="button" data-acc="conectar" data-id="' + esc(l.id) + '">' + (l.estado === 'esperando_qr' ? 'Mostrar otro QR' : 'Conectar y mostrar el QR') + '</button>';
+  }
+  if (!l.principal) {
+    botones += '<button class="btn" type="button" data-acc="habilitar" data-id="' + esc(l.id) + '" data-valor="' + (l.habilitada ? '0' : '1') + '">' + (l.habilitada ? 'Deshabilitar' : 'Habilitar') + '</button>';
+    botones += '<button class="btn peligro" type="button" data-acc="quitar" data-id="' + esc(l.id) + '">Quitar</button>';
+  }
+  return '<div class="linea-fila" data-linea="' + esc(l.id) + '" style="border:1px solid var(--borde,#d9dde3);border-radius:10px;padding:10px;margin:8px 0">' +
+    '<div class="acciones" style="align-items:center">' +
+      '<input class="corto" data-nombre="' + esc(l.id) + '" maxlength="80" value="' + esc(l.etiqueta) + '" aria-label="Nombre de la línea">' +
+      '<button class="btn" type="button" data-acc="renombrar" data-id="' + esc(l.id) + '">Guardar nombre</button>' +
+      '<span class="chip tono-' + tono + '">' + esc(l.habilitada ? (TEXTO_LINEA[l.estado] || l.estado) : 'Deshabilitada') + '</span>' +
+      (l.principal ? '<span class="chip tono-gris">Principal · activa</span>' : '') +
+    '</div>' +
+    '<p class="ayuda">' + (l.numero ? 'Número: +' + esc(l.numero) : 'Número: se completa al conectar') + ' · ' + (l.proveedor === 'local' ? 'QR / sesión vinculada' : l.proveedor === 'cloud' ? 'API oficial de Meta' : 'WAHA') + (l.principal ? ' · se conecta con la tarjeta de WhatsApp de arriba' : '') + '</p>' +
+    qr + codigo +
+    (botones ? '<div class="acciones">' + botones + '</div>' : '') +
+  '</div>';
+}
+async function cargarLineas() {
+  var lista = $('lineas-lista');
+  if (!lista) return;
+  try {
+    var r = await api('/admin/lineas');
+    lineasMax = r.max || 8;
+    var firma = JSON.stringify(r.lineas);
+    var chip = $('lineas-chip');
+    var conectadas = r.lineas.filter(function (l) { return l.estado === 'conectado'; }).length;
+    if (chip) { chip.textContent = conectadas + ' de ' + r.lineas.length + ' conectadas (máx. ' + lineasMax + ')'; chip.className = 'chip tono-' + (conectadas ? 'verde' : 'ambar'); }
+    ver('linea-agregar', r.lineas.length < lineasMax);
+    ver('linea-nueva', r.lineas.length < lineasMax);
+    /* No se repinta mientras alguien escribe un nombre: el cursor se perderia. */
+    var escribiendo = document.activeElement && lista.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+    if (firma !== lineasVistas && !escribiendo) { lineasVistas = firma; lista.innerHTML = r.lineas.map(filaLinea).join(''); }
+  } catch (error) { lineasMsg(error.message, 'rojo'); }
+}
+async function accionLinea(acc, id, valor) {
+  try {
+    if (acc === 'renombrar') {
+      var campo = document.querySelector('[data-nombre="' + id + '"]');
+      await api('/admin/lineas/' + id, { method: 'PATCH', body: { etiqueta: campo ? campo.value : '' } });
+      lineasMsg('Nombre guardado. Los mensajes viejos conservan el que tenían.');
+    } else if (acc === 'conectar') {
+      await api('/admin/lineas/' + id + '/conectar', { method: 'POST' });
+      lineasMsg('Escanea el QR con el teléfono de esta línea. Si caduca, sale otro solo.');
+    } else if (acc === 'desconectar') {
+      await api('/admin/lineas/' + id + '/desconectar', { method: 'POST' });
+      lineasMsg('Línea desvinculada. Las demás siguen conectadas.');
+    } else if (acc === 'habilitar') {
+      await api('/admin/lineas/' + id, { method: 'PATCH', body: { habilitada: valor === '1' } });
+      lineasMsg(valor === '1' ? 'Línea habilitada.' : 'Línea deshabilitada: no se enviará nada por ella.');
+    } else if (acc === 'quitar') {
+      await api('/admin/lineas/' + id, { method: 'DELETE' });
+      lineasMsg('Línea quitada. Sus mensajes quedan en los chats con su etiqueta.');
+    }
+    lineasVistas = '';
+    await cargarLineas();
+  } catch (error) { lineasMsg(error.message, 'rojo'); }
+}
+var MOTIVO_CAMBIO = { cliente_escribio: 'el cliente escribió por esa línea', persona: 'lo eligió una persona', linea_no_disponible: 'su línea se quitó o se deshabilitó', linea_caida: 'su línea seguía sin conexión' };
+async function cargarReparto() {
+  var caja = $('lineas-reparto');
+  if (!caja) return;
+  try {
+    var r = await api('/admin/lineas/reparto');
+    /* Con una sola línea no hay nada que repartir. */
+    caja.hidden = r.lineas.length < 2;
+    $('lineas-reparto-filas').innerHTML = r.lineas.map(function (l) {
+      return '<tr><td>' + esc(l.etiqueta) + (l.conectada ? '' : ' <span class="chip tono-ambar">sin conexión</span>') + (l.pausada ? ' <span class="chip tono-gris">pausada</span>' : '') + '</td><td>' + l.clientes + '</td><td>' + l.nuevosHoy + '</td><td>' + l.enviadosHoy + ' de ' + l.cupoDiario + '</td></tr>';
+    }).join('');
+    var espera = $('linea-espera');
+    if (espera && document.activeElement !== espera) espera.value = r.esperaCambioMinutos;
+    $('lineas-cambios').innerHTML = r.cambios.length ? r.cambios.map(function (c) {
+      return '<p>' + esc(new Date(c.createdAt).toLocaleString('es-PE')) + ' · ' + esc(c.nombre || ('+' + c.telefono)) + ': de <b>' + esc(c.desdeEtiqueta || 'una línea ya quitada') + '</b> a <b>' + esc(c.aEtiqueta || 'otra línea') + '</b> (' + esc(MOTIVO_CAMBIO[c.motivo] || c.motivo) + ')</p>';
+    }).join('') : '<p>Ningún cliente ha cambiado de línea.</p>';
+  } catch (error) { lineasMsg(error.message, 'rojo'); }
+}
+(function iniciarLineas() {
+  var lista = $('lineas-lista');
+  if (!lista) return;
+  $('linea-espera-guardar').onclick = async function () {
+    try {
+      await api('/admin/lineas/reparto', { method: 'PATCH', body: { esperaCambioMinutos: Number(val('linea-espera')) } });
+      lineasMsg('Guardado: se esperará ese tiempo antes de pasar clientes a otra línea.');
+    } catch (error) { lineasMsg(error.message, 'rojo'); }
+  };
+  cargarReparto();
+  setInterval(cargarReparto, 30000);
+  lista.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('[data-acc]') : null;
+    if (!b) return;
+    if (b.getAttribute('data-acc') === 'quitar' && !window.confirm('¿Quitar esta línea? Sus mensajes viejos se quedan en los chats.')) return;
+    accionLinea(b.getAttribute('data-acc'), b.getAttribute('data-id'), b.getAttribute('data-valor'));
+  });
+  $('linea-agregar').onclick = async function () {
+    var nombre = val('linea-nueva');
+    if (!nombre) { lineasMsg('Ponle un nombre a la línea, por ejemplo wsp-ali.', 'rojo'); return; }
+    try {
+      await api('/admin/lineas', { method: 'POST', body: { etiqueta: nombre, proveedor: 'local' } });
+      setVal('linea-nueva', '');
+      lineasMsg('Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.');
+      lineasVistas = '';
+      await cargarLineas();
+    } catch (error) { lineasMsg(error.message, 'rojo'); }
+  };
+  cargarLineas();
+  setInterval(cargarLineas, 4000);
+})();
+`;
   const scriptGsg = String.raw`
 /* En la pantalla de GSG no hay tarjeta de WhatsApp: el armazon se enseña aqui. */
 if (!document.getElementById('card-wa') && $('app')) $('app').classList.remove('hidden');
@@ -1744,6 +1910,16 @@ function pintarUrlIncidenciasGsg() {
   var ruta = $('gsg-ruta-incidencias').value.trim() || 'incidencias';
   var r = unirUrlGsg($('gsg-url').value.trim(), ruta);
   caja.textContent = r.ok ? 'Las incidencias se enviarán con POST a: ' + r.url : 'No vale: ' + r.error;
+  caja.className = r.ok ? 'ayuda' : 'ayuda error';
+}
+
+function pintarUrlWebhookGsg() {
+  var caja = $('gsg-url-webhook');
+  if (!caja) return;
+  var ruta = $('gsg-ruta-webhook').value.trim();
+  if (!ruta) { caja.textContent = 'Sin ruta de webhook.'; caja.className = 'ayuda'; return; }
+  var r = unirUrlGsg($('gsg-url').value.trim(), ruta);
+  caja.textContent = r.ok ? 'El webhook de GSG apunta a: ' + r.url : 'No vale: ' + r.error;
   caja.className = r.ok ? 'ayuda' : 'ayuda error';
 }
 
@@ -1799,6 +1975,10 @@ async function cargarGsg() {
     if (g.rutaEstado && !$('gsg-ruta-estado').value) $('gsg-ruta-estado').value = g.rutaEstado;
     if (g.rutaIncidencias && !$('gsg-ruta-incidencias').value) $('gsg-ruta-incidencias').value = g.rutaIncidencias;
     pintarUrlIncidenciasGsg();
+    if (g.rutaWebhook && !$('gsg-ruta-webhook').value) $('gsg-ruta-webhook').value = g.rutaWebhook;
+    pintarUrlWebhookGsg();
+    ver('gsg-webhook-caja', Boolean(g.destinoWebhook));
+    texto('gsg-webhook-destino', g.destinoWebhook ? 'GSGchat le manda los avisos con POST a: ' + g.destinoWebhook : '');
     if (g.paramTracking && !$('gsg-param-tracking').value) $('gsg-param-tracking').value = g.paramTracking;
     if (g.paramTelefono && !$('gsg-param-telefono').value) $('gsg-param-telefono').value = g.paramTelefono;
     pintarUrlFinalGsg();
@@ -1842,6 +2022,7 @@ if ($('gsg')) {
   $('gsg-ruta').oninput = pintarUrlFinalGsg;
   ['gsg-url', 'gsg-ruta-estado', 'gsg-param-tracking', 'gsg-param-telefono'].forEach(function (id) { $(id).addEventListener('input', pintarUrlEstadoGsg); });
   ['gsg-url', 'gsg-ruta-incidencias'].forEach(function (id) { $(id).addEventListener('input', pintarUrlIncidenciasGsg); });
+  ['gsg-url', 'gsg-ruta-webhook'].forEach(function (id) { $(id).addEventListener('input', pintarUrlWebhookGsg); });
   $('gsg-consulta-form').onsubmit = async function (ev) {
     ev.preventDefault();
     var salida = $('gsg-consulta-resultado');
@@ -1885,16 +2066,35 @@ if ($('gsg')) {
     resultadoGsg('Guardando…', 'espera');
     try {
       var token = $('gsg-token').value.trim();
-      await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), rutaIncidencias: $('gsg-ruta-incidencias').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
+      var guardado = await api('/admin/entregas/gsg', { method: 'POST', body: { modo: 'real', url: url, rutaUbicacion: $('gsg-ruta').value.trim(), rutaEstado: $('gsg-ruta-estado').value.trim(), rutaIncidencias: $('gsg-ruta-incidencias').value.trim(), rutaWebhook: $('gsg-ruta-webhook').value.trim(), paramTracking: $('gsg-param-tracking').value.trim() || undefined, paramTelefono: $('gsg-param-telefono').value.trim() || undefined, apiKey: token || undefined } });
       $('gsg-token').value = '';
+      if (guardado.webhookGsg && guardado.webhookGsg.secreto) mostrarSecretoWebhook(guardado.webhookGsg.secreto);
       await probarGsg();
     } catch (error) { resultadoGsg('✗ No se pudo guardar: ' + error.message, 'mal'); }
     boton.disabled = false;
   };
+  /* El secreto sale una sola vez: aqui se ve, y al cerrar o recargar ya no hay forma de verlo. */
+  function mostrarSecretoWebhook(secreto) {
+    texto('gsg-webhook-secreto', secreto);
+    ver('gsg-webhook-caja', true);
+    ver('gsg-webhook-secreto-caja', true);
+  }
+  function ocultarSecretoWebhook() { texto('gsg-webhook-secreto', ''); ver('gsg-webhook-secreto-caja', false); }
+  $('gsg-webhook-ocultar').onclick = ocultarSecretoWebhook;
+  $('gsg-webhook-copiar').onclick = async function () {
+    try { await navigator.clipboard.writeText($('gsg-webhook-secreto').textContent); this.textContent = 'Copiado'; }
+    catch (e) { this.textContent = 'Selecciónalo y cópialo a mano'; }
+  };
+  $('gsg-webhook-rotar').onclick = async function () {
+    var ok = await confirmarDialogo({ titulo: 'Generar un secreto nuevo', texto: 'El secreto anterior deja de valer en el acto: GSG tendrá que usar el nuevo.', boton: 'Generar', peligro: true });
+    if (!ok) return;
+    try { var r = await api('/admin/entregas/gsg/webhook/secreto', { method: 'POST', body: {} }); mostrarSecretoWebhook(r.secreto); }
+    catch (error) { resultadoGsg('✗ ' + error.message, 'mal'); }
+  };
   $('gsg-quitar').onclick = async function () {
     var ok = await confirmarDialogo({ titulo: 'Desconectar GSG', texto: 'Lo reportable se guarda en la cola y saldrá entero cuando se vuelva a conectar.', boton: 'Desconectar', peligro: true });
     if (!ok) return;
-    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); $('gsg-url').value = ''; $('gsg-ruta').value = ''; pintarUrlFinalGsg(); resultadoGsg('', ''); estado('gsg-state', 'Desconectado: lo que haya que mandarle a GSG se guarda y saldrá entero al volver a conectar.', 'verde'); cargarGsg(); }
+    try { await api('/admin/entregas/gsg', { method: 'DELETE' }); $('gsg-url').value = ''; $('gsg-ruta').value = ''; ocultarSecretoWebhook(); pintarUrlFinalGsg(); resultadoGsg('', ''); estado('gsg-state', 'Desconectado: lo que haya que mandarle a GSG se guarda y saldrá entero al volver a conectar.', 'verde'); cargarGsg(); }
     catch (error) { estado('gsg-state', error.message, 'rojo'); }
   };
 
@@ -1984,7 +2184,7 @@ if ($('gsg')) {
   if ($('gsg-envios-caja') && $('gsg-envios-caja').open) cargarEnvios();
 }
 `;
-  const script = scriptComun + (vistaWa ? scriptWa : '') + (tarjetaGsg ? scriptGsg : '');
+  const script = scriptComun + (vistaWa ? scriptWa + scriptLineas : '') + (tarjetaGsg ? scriptGsg : '');
 
   return appShell({
     titulo: vistaWa ? 'Conexión WhatsApp' : 'Conexión con GSG',

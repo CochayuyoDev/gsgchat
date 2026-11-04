@@ -42,7 +42,10 @@ import { ErrorApi, registrarCatalogoErrores } from '../errores.js';
 import type { ServicioPlan } from '../../plan/servicio.js';
 import type { ServicioVoz } from '../../voz/servicio.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
-import { MAX_BYTES_ADJUNTO, tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
+import { payloadExterno } from '../../util/payload-externo.js';
+import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
+import { obtenerMedia } from './media-saliente.js';
+import { archivoDeMensaje } from './archivos-gsg.js';
 import { crearIdempotencia } from './idempotencia.js';
 
 export interface ApiV1Deps {
@@ -69,6 +72,8 @@ export interface ApiV1Deps {
   plan?: ServicioPlan;
   /** La voz del asistente (ver src/voz): `voz: true` en POST /mensajes manda el texto como nota de voz. Sin ella, sale por escrito y se dice. */
   voz?: ServicioVoz;
+  /** Para el `archivo.url` de cada mensaje con foto, video o audio en el hilo (ver archivos-gsg.ts). Sin esto, el hilo sale sin enlaces. */
+  archivos?: { publicBase: string; secreto: string };
   /** Donde se guardan los ficheros que llegan por URL (`media`), para que el chat los pinte. */
   mediaDir?: string;
   /** Con que se bajan los ficheros de `media.url`. Para pruebas. */
@@ -77,7 +82,7 @@ export interface ApiV1Deps {
 }
 
 /** Los tipos de fichero con nombres en espanol (y en ingles, por si acaso). */
-const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
+export const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
   imagen: 'image',
   foto: 'image',
   image: 'image',
@@ -89,9 +94,18 @@ const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
   file: 'document',
 };
 
-const mediaSchema = z.object({
-  /** De donde se baja el fichero (http o https). */
-  url: z.string().trim().url().max(2000),
+/** Un archivo de 16 MB en base64 pesa ~21,4 MB: el limite general de 4 MB no alcanza para las rutas que lo reciben. */
+export const LIMITE_CUERPO_CON_ARCHIVO = 24 * 1024 * 1024;
+
+export const mediaSchema = z.object({
+  /** De donde se baja el fichero (http o https). Una de dos: `url` o `base64`. */
+  url: z.string().trim().url().max(2000).optional(),
+  /**
+   * El fichero mismo, en base64, dentro del JSON (con o sin el prefijo
+   * `data:image/jpeg;base64,`). Para quien no tiene una direccion publica.
+   * Hasta 16 MB ya decodificado.
+   */
+  base64: z.string().max(23_000_000).optional(),
   /** imagen | video | audio | documento. Sin el, se deduce del tipo del fichero. */
   tipo: z.string().trim().toLowerCase().max(20).optional(),
   caption: z.string().max(1024).optional(),
@@ -99,7 +113,7 @@ const mediaSchema = z.object({
   nombre: z.string().trim().max(200).optional(),
   /** Un audio como nota de voz (con la onda y el play). */
   voz: z.boolean().optional(),
-});
+}).refine((m) => Boolean(m.url) !== Boolean(m.base64), { message: 'media lleva url o base64 (una de las dos)' });
 
 const telefonoSchema = z.string().min(6).max(30).transform((v) => normalizePhone(v));
 
@@ -141,29 +155,6 @@ const mensajeSchema = z
   .refine((b) => b.texto || b.plantilla || b.ubicacion || b.pedirUbicacion || b.media, {
     message: 'hace falta texto, plantilla, ubicacion, pedirUbicacion o media',
   });
-
-/** Baja el fichero de `media.url`: como mucho 16 MB, y en 30 s. */
-async function bajarMedia(url: string, fetchImpl: typeof fetch): Promise<{ ok: true; datos: Buffer; mimeType: string } | { ok: false; error: string }> {
-  if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'media.url tiene que empezar por http:// o https://' };
-  const controlador = new AbortController();
-  const temporizador = setTimeout(() => controlador.abort(), 30_000);
-  try {
-    const r = await fetchImpl(url, { signal: controlador.signal, redirect: 'follow' });
-    if (!r.ok) return { ok: false, error: `no se pudo bajar media.url: respondio ${r.status}` };
-    const largo = Number(r.headers.get('content-length') ?? 0);
-    if (largo > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
-    const datos = Buffer.from(await r.arrayBuffer());
-    if (!datos.length) return { ok: false, error: 'media.url devolvio un fichero vacio' };
-    if (datos.length > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
-    const mimeType = (r.headers.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim().toLowerCase();
-    return { ok: true, datos, mimeType };
-  } catch (error) {
-    const abortado = error instanceof Error && error.name === 'AbortError';
-    return { ok: false, error: abortado ? 'media.url tardo mas de 30 s en responder' : `no se pudo bajar media.url: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    clearTimeout(temporizador);
-  }
-}
 
 /** Lo que devuelve un envio, con nombres que no cambian. */
 export function respuestaDeEnvio(outcome: SendOutcome) {
@@ -286,7 +277,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   // Un reintento del otro sistema con la misma Idempotency-Key no envia dos veces. Ver idempotencia.ts.
   const idempotencia = crearIdempotencia();
 
-  app.post('/api/v1/mensajes', { config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
+  app.post('/api/v1/mensajes', { bodyLimit: LIMITE_CUERPO_CON_ARCHIVO, config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
     const body = mensajeSchema.parse(request.body ?? {});
     const phone = body.telefono;
     if (fueraDeAlcance(request.usuario, phone)) return reply.code(403).send(ERROR_ALCANCE);
@@ -315,7 +306,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     } else if (body.media) {
       const kindPedido = body.media.tipo ? TIPOS_MEDIA[body.media.tipo] : undefined;
       if (body.media.tipo && !kindPedido) return reply.code(400).send({ error: 'media.tipo tiene que ser imagen, video, audio o documento' });
-      const bajado = await bajarMedia(body.media.url, deps.fetchImpl ?? fetch);
+      const bajado = await obtenerMedia(body.media, kindPedido, deps.fetchImpl ?? fetch);
       if (!bajado.ok) return reply.code(400).send({ error: bajado.error });
       const kind = kindPedido ?? tipoDeAdjuntoSaliente(bajado.mimeType);
       // Un tipo generico (octet-stream) con nombre: la extension del nombre manda.
@@ -420,7 +411,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           ? null
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
       mensajes: messages.map((m) => {
-        const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; media?: { voz?: unknown } };
+        const p = (m.payload ?? {}) as { origen?: unknown; textoFijo?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; media?: { voz?: unknown } };
         return {
           id: m.id,
           mensajeId: m.wamid,
@@ -428,12 +419,13 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           tipo: m.kind,
           texto: m.body,
           // Quien lo mando (solo salientes): persona | ia | sistema. Y lo que dijo en una nota de voz (solo entrantes transcritos).
-          autor: m.direction === 'out' ? (p.origen === 'persona' || p.origen === 'ia' ? p.origen : 'sistema') : null,
+          autor: m.direction === 'out' ? (p.origen === 'persona' || (p.origen === 'ia' && !p.textoFijo) ? p.origen : 'sistema') : null,
           autorNombre: m.direction === 'out' && typeof p.autorNombre === 'string' ? p.autorNombre : null,
           transcripcion: typeof p.transcripcion === 'string' ? p.transcripcion : null,
           anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,
           voz: p.media?.voz === true,
-          datos: m.payload,
+          archivo: deps.archivos ? archivoDeMensaje(m, deps.archivos) : null,
+          datos: payloadExterno(m.payload),
           estado: m.status,
           fecha: m.createdAt,
         };

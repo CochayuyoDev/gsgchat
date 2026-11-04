@@ -64,6 +64,7 @@ import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { entregasPage } from './entregas-page.js';
+import { embudoPage } from './embudo-page.js';
 
 import { fiabilidadPage } from './fiabilidad-page.js';
 import { fijarModoVigente } from './shell.js';
@@ -117,6 +118,10 @@ export interface WebDeps {
    * instalacion suelta.
    */
   sesionLocal?: SesionLocal;
+  geocodificador?: import('../entregas/geocodificar.js').Geocodificador | null;
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
+  registroClientes?: import('../whatsapp/registro.js').RegistroClientes;
+  repartoLineas?: import('../whatsapp/reparto-lineas.js').RepartoDeLineas;
   /**
    * Para apuntar el telefono vinculado en cuanto un proveedor lo cuenta: es la
    * clave con la que la salud guarda el riesgo del numero (src/salud/numero.ts).
@@ -271,6 +276,10 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     entregas: deps.entregas,
     autoConectar: deps.autoConectarLocal,
     sesion: deps.sesionLocal,
+    lineas: deps.lineas,
+    geocodificador: deps.geocodificador ?? undefined,
+    registroClientes: deps.registroClientes,
+    repartoLineas: deps.repartoLineas,
     authDir: deps.authDir,
     mediaDir: deps.mediaDir,
     prefijoLog: deps.prefijoLog,
@@ -291,6 +300,12 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
   });
 
   app.get('/envio-automatico', async (_request, reply) => reply.redirect('/automatizacion-gsg'));
+
+  // Pedidos GSG → Embudo de chats: los chats del dia por etiqueta (IA y a mano).
+  app.get('/embudo-chats', async (_request, reply) => {
+    const page = html(embudoPage({ demo: config.DEMO_MODE, nombreNegocio: negocio() }));
+    return reply.type(page.type).header('cache-control', 'no-store').send(page.body);
+  });
 
   // Hoy es la portada de GSGchat; /entregas es el mismo sitio con su nombre viejo.
   for (const ruta of ['/hoy', '/entregas']) {

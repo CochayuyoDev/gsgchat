@@ -32,6 +32,8 @@ export interface LlamadaPostman {
   query?: Array<[string, string]>;
   cuerpo?: unknown;
   sinClave?: boolean;
+  /** Estados con los que la llamada se da por buena en la corrida; por defecto, el del primer ejemplo. */
+  estados?: number[];
   descripcion: string;
   /** Respuestas de ejemplo: estado y cuerpo (en los errores, del catalogo). */
   ejemplos: Array<{ nombre: string; status: number; cuerpo: Json }>;
@@ -51,13 +53,15 @@ function errorDe(codigo: CodigoError, error = CATALOGO_ERRORES[codigo].significa
 const PEDIDO = { ...EJEMPLO_COURIER.pedidos[0], tracking: '{{tracking}}' };
 const { telefono: _sinTelefono, ...PEDIDO_SIN_TELEFONO } = PEDIDO;
 
-export const CARPETAS_POSTMAN: CarpetaPostman[] = [
+/** Orden de ejecución: lo que cancela un pedido va al final, para que lo demás corra sobre un pedido vivo. */
+export const CARPETAS_POSTMAN: CarpetaPostman[] = ([
   {
     nombre: '1. Recibir pedidos (API 1)',
     descripcion: 'GSG manda los pedidos del día a POST /api/v1/entregas. Hasta 600 por llamada; un pedido repetido el mismo día no se duplica.',
     llamadas: [
       {
         nombre: 'Crear un pedido',
+        estados: [200, 201],
         metodo: 'POST',
         ruta: '/entregas',
         cuerpo: PEDIDO,
@@ -87,7 +91,7 @@ export const CARPETAS_POSTMAN: CarpetaPostman[] = [
     ],
   },
   {
-    nombre: '2. Cancelar o reintentar (API 2)',
+    nombre: '4. Cancelar o reintentar (API 2)',
     descripcion: 'GSG pide dejar de escribirle a un tracking (CANCELAR) o volver a escribirle (REINTENTAR) en POST /api/v1/flujo. Actúa sobre un pedido que ya existe: primero se crea con la API 1. Misma clave que la API 1.',
     llamadas: [
       {
@@ -97,18 +101,6 @@ export const CARPETAS_POSTMAN: CarpetaPostman[] = [
         cuerpo: { tracking: '{{tracking}}', accion: 'CANCELAR', simular: true },
         descripcion: 'Con «simular: true» dice lo que haría sin tocar el pedido.',
         ejemplos: [{ nombre: 'Simulado', status: 200, cuerpo: { ok: true, simulado: true, accion: 'CANCELAR', tracking: TRACKING, detalle: 'Dejaría de escribirle por este tracking.' } }],
-      },
-      {
-        nombre: 'Cancelar',
-        metodo: 'POST',
-        ruta: '/flujo',
-        cuerpo: { ...EJEMPLO_FLUJO, tracking: '{{tracking}}' },
-        descripcion: 'El bot deja de escribirle por ese tracking. Repetirlo responde 200 con «sinCambios: true».',
-        ejemplos: [
-          { nombre: 'Cancelado', status: 200, cuerpo: { ok: true, accion: 'CANCELAR', tracking: TRACKING, detalle: 'Flujo cancelado.' } },
-          { nombre: 'Ya estaba cancelado', status: 200, cuerpo: { ok: true, accion: 'CANCELAR', tracking: TRACKING, sinCambios: true, detalle: 'El flujo ya estaba cancelado.' } },
-          { nombre: 'No hay pedido con ese tracking', ...errorDe('NO_EXISTE') },
-        ],
       },
       {
         nombre: 'Reintentar con el teléfono corregido',
@@ -129,10 +121,22 @@ export const CARPETAS_POSTMAN: CarpetaPostman[] = [
         descripcion: 'La acción solo puede ser CANCELAR o REINTENTAR.',
         ejemplos: [{ nombre: 'Acción no válida', ...errorDe('VALIDACION') }],
       },
+      {
+        nombre: 'Cancelar',
+        metodo: 'POST',
+        ruta: '/flujo',
+        cuerpo: { ...EJEMPLO_FLUJO, tracking: '{{tracking}}' },
+        descripcion: 'El bot deja de escribirle por ese tracking. Repetirlo responde 200 con «sinCambios: true».',
+        ejemplos: [
+          { nombre: 'Cancelado', status: 200, cuerpo: { ok: true, accion: 'CANCELAR', tracking: TRACKING, detalle: 'Flujo cancelado.' } },
+          { nombre: 'Ya estaba cancelado', status: 200, cuerpo: { ok: true, accion: 'CANCELAR', tracking: TRACKING, sinCambios: true, detalle: 'El flujo ya estaba cancelado.' } },
+          { nombre: 'No hay pedido con ese tracking', ...errorDe('NO_EXISTE') },
+        ],
+      },
     ],
   },
   {
-    nombre: '3. Consultar',
+    nombre: '2. Consultar',
     descripcion: 'Lo que GSG puede leer cuando quiera. GSGchat nunca se lo empuja.',
     llamadas: [
       {
@@ -150,6 +154,7 @@ export const CARPETAS_POSTMAN: CarpetaPostman[] = [
         metodo: 'GET',
         ruta: '/trackings',
         query: [['dia', '']],
+        estados: [200],
         descripcion: 'Por tracking: mensaje enviado, ubicación pedida o registrada, confirmación, agrupado y reportado. «dia» en AAAA-MM-DD; vacío, hoy.',
         ejemplos: [{ nombre: 'Hoy', status: 200, cuerpo: { ok: true, dia: '2026-10-17', total: 0, trackings: [] } }],
       },
@@ -164,7 +169,7 @@ export const CARPETAS_POSTMAN: CarpetaPostman[] = [
     ],
   },
   {
-    nombre: '4. Corregir datos',
+    nombre: '3. Corregir datos',
     descripcion: 'Cambiar los datos de un pedido de hoy o corregir un número reportado.',
     llamadas: [
       {
@@ -191,7 +196,7 @@ export const CARPETAS_POSTMAN: CarpetaPostman[] = [
       },
     ],
   },
-];
+] as CarpetaPostman[]).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { numeric: true }));
 
 function urlDe(l: LlamadaPostman): Json {
   const ruta = `/api/v1${l.ruta}`;
@@ -233,6 +238,7 @@ export function coleccionPostman(): Json {
       description: c.descripcion,
       item: c.llamadas.map((l) => ({
         name: l.nombre,
+        event: [{ listen: 'test', script: { type: 'text/javascript', exec: [`pm.test('responde ${(l.estados ?? [l.ejemplos[0]!.status]).join(' o ')}', function () { pm.expect(pm.response.code).to.be.oneOf([${(l.estados ?? [l.ejemplos[0]!.status]).join(', ')}]); });`] } }],
         request: peticionDe(l),
         response: l.ejemplos.map((e) => ({
           name: e.nombre,

@@ -40,6 +40,21 @@ export function tienePermiso(permisos: readonly string[] | undefined, permiso: P
   return permisos.includes('*') || permisos.includes(permiso);
 }
 
+/**
+ * Lo que necesita la clave de GSG para sus cuatro APIs (ver la pantalla GSG
+ * Courier): API 1 y API 2 piden entregas:gestionar, la consulta de pedidos
+ * entregas:leer, la API 3 conversaciones:leer y la API 4 mensajes:enviar.
+ * Cuando una API nueva pida otro permiso, se anade aqui y las claves de
+ * antes lo reciben con «Poner al dia», sin cambiar la clave.
+ */
+export const PERMISOS_GSG = ['entregas:gestionar', 'entregas:leer', 'conversaciones:leer', 'mensajes:enviar'] as const satisfies readonly Permiso[];
+
+/** Los permisos del paquete de GSG que le faltan a una clave ('*' ya lo tiene todo). */
+export function permisosGsgQueFaltan(permisos: readonly string[]): Permiso[] {
+  if (permisos.includes('*')) return [];
+  return PERMISOS_GSG.filter((p) => !permisos.includes(p));
+}
+
 /** Limpia y valida una lista que llega de fuera. Vacia = todo, como antes. */
 export function permisosAceptables(lista: unknown): { permisos: Permiso[] } | { error: string } {
   if (lista === undefined || lista === null) return { permisos: ['*'] };

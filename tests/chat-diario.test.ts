@@ -16,7 +16,7 @@ const config = loadConfig({ PUBLIC_BASE_URL: 'http://localhost:3000', DATABASE_U
 afterEach(() => vi.useRealTimers());
 
 describe('chat del día, iniciado únicamente por GSGchat', () => {
-  it('una cookie antigua autenticada abre el chat sin cursor y conserva el límite de 24 horas', async () => {
+  it('una cookie antigua autenticada abre el chat sin cursor y conserva el límite de 72 horas', async () => {
     const e = await crearEscenarioEntregas();
     try {
       const usuario = await e.repos.usuarios.crear({ usuario: 'operadorlegacy', nombre: 'Legacy', rol: 'admin', clave: hashClave('Clave-123-segura') });
@@ -25,7 +25,7 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
       const contacto = await e.repos.contacts.upsertFromInbound('51987603332', 'Cliente');
       await e.repos.messages.add({ contactId: contacto.id, direction: 'out', kind: 'text', wamid: 'legacy.actual', body: 'pedido vigente', payload: { origen: 'sistema' } });
       await e.repos.messages.add({ contactId: contacto.id, direction: 'out', kind: 'text', wamid: 'legacy.antiguo', body: 'pedido antiguo', payload: { origen: 'sistema' } });
-      e.repos.messages._all.find(m => m.wamid === 'legacy.antiguo')!.storedAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+      e.repos.messages._all.find(m => m.wamid === 'legacy.antiguo')!.storedAt = new Date(Date.now() - 73 * 60 * 60 * 1000);
       const lista = await e.app.inject({ url: '/admin/chat/conversations', headers: { cookie } });
       expect(lista.statusCode).toBe(200);
       expect(lista.json().items).toHaveLength(1);
@@ -95,7 +95,7 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
     expect(await perteneceAlChatActual(repos, settings, { ...entrada, viejo: true })).toBe(false);
   });
 
-  it('un nuevo login conserva los chats que aún están dentro de las últimas 24 horas', async () => {
+  it('un nuevo login conserva los chats que aún están dentro de las últimas 72 horas', async () => {
     const e = await crearEscenarioEntregas();
     try {
       const c = await e.repos.contacts.upsertFromInbound('51987603331', 'Sesión');
@@ -103,7 +103,7 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
       await e.repos.messages.add({ contactId: c.id, direction: 'in', kind: 'text', wamid: 'sesion.previo.in', body: 'respuesta anterior' });
       await e.repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', wamid: 'sesion.antiguo', body: 'fuera de retención', status: 'sent', payload: { origen: 'sistema' } });
       const filaAntigua = e.repos.messages._all.find(m => m.wamid === 'sesion.antiguo');
-      if (filaAntigua) filaAntigua.storedAt = new Date(Date.now() - 24 * 60 * 60 * 1000 - 1000);
+      if (filaAntigua) filaAntigua.storedAt = new Date(Date.now() - 72 * 60 * 60 * 1000 - 1000);
       await e.repos.usuarios.crear({ usuario: 'operadoruno', nombre: 'Uno', rol: 'admin', clave: hashClave('Clave-123-segura') });
       const login1 = await e.app.inject({ method: 'POST', url: '/login', payload: { usuario: 'operadoruno', clave: 'Clave-123-segura' } });
       const cookie1 = String(login1.headers['set-cookie']).split(';')[0]!;
@@ -120,14 +120,14 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
     } finally { await e.cerrar(); }
   });
 
-  it('elimina por lotes los mensajes que cumplieron 24 horas y mantiene los pedidos', async () => {
+  it('elimina por lotes los mensajes que cumplieron 72 horas y mantiene los pedidos', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-15T04:59:30Z'));
     const repos = createFakeRepos();
     const settings = await createSettingsService(createMemorySettingsRepo(), config, TEST_SETTINGS_KEY);
     await settings.iniciarVistaChat!(new Date('2026-10-14T05:00:00Z'));
     const c = await repos.contacts.upsertFromInbound('51987603111');
     await repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', wamid: 'dia14', body: 'pedido del sistema', createdAt: new Date('2026-10-15T04:00:00Z'), payload: { origen: 'sistema' } });
-    repos.messages._all[0]!.storedAt = new Date(Date.now() - 24 * 60 * 60 * 1000 + 60_000);
+    repos.messages._all[0]!.storedAt = new Date(Date.now() - 72 * 60 * 60 * 1000 + 60_000);
     const borrar = vi.spyOn(repos.messages, 'limpiarAntes');
     const app = Fastify({ logger: false });
     registrarLimpiezaChat(app, repos);
@@ -138,7 +138,7 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
       expect(repos.messages._all).toHaveLength(1);
       // La interfaz/API ya ocultan el mensaje al vencer; la siguiente pasada
       // física corre a los cinco minutos cuando no hay lotes atrasados.
-      expect(await repos.messages.listConversations({ alcance: { afterId: '0', retenidosDesde: new Date(Date.now() - 24 * 60 * 60 * 1000) }, limit: 100, offset: 0 })).toHaveLength(0);
+      expect(await repos.messages.listConversations({ alcance: { afterId: '0', retenidosDesde: new Date(Date.now() - 72 * 60 * 60 * 1000) }, limit: 100, offset: 0 })).toHaveLength(0);
       await vi.advanceTimersByTimeAsync(30_000);
       expect(repos.messages._all).toHaveLength(0);
       expect(await repos.messages.listConversations({ desde: settings.vistaChatDesde!(), limit: 100, offset: 0 })).toEqual([]);

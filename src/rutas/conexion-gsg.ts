@@ -70,6 +70,8 @@ const conexionSchema = z.object({
   rutaEstado: z.string().trim().max(300).default(''),
   /** La ruta, relativa a la base, del POST de cada incidencia ('' = la de siempre, /incidencias). */
   rutaIncidencias: z.string().trim().max(300).default(''),
+  /** La ruta, relativa a la base, del webhook de GSG ('' = sin webhook). */
+  rutaWebhook: z.string().trim().max(300).default(''),
   /** Los nombres de los parametros de ese GET (los da GSG). */
   paramTracking: z.string().trim().max(60).default('trackingCode'),
   paramTelefono: z.string().trim().max(60).default('phone'),
@@ -100,6 +102,9 @@ export interface EstadoConexionGsg {
   /** La ruta de las incidencias ('' = la de siempre) y a donde salen de verdad. */
   rutaIncidencias: string;
   destinoIncidencias: string | null;
+  /** La ruta del webhook de GSG ('' = sin webhook) y su URL completa (base + ruta), o null. */
+  rutaWebhook: string;
+  destinoWebhook: string | null;
   /** A donde sale de verdad la ubicacion (base + ruta), o null si no hay o la configuracion no vale. */
   destinoUbicacion: string | null;
   tieneToken: boolean;
@@ -130,7 +135,7 @@ export interface ServicioConexionGsg {
    * había; sin ruta conserva la guardada (o `sendLocation`). `urlUbicacion`
    * (la URL completa antigua) se acepta solo si se convierte sin adivinar.
    */
-  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaEstado?: string | null; paramTracking?: string | null; paramTelefono?: string | null; rutaIncidencias?: string | null }): Promise<EstadoConexionGsg>;
+  conectarReal(input: { url: string; token?: string | null; apiKey?: string | null; rutaUbicacion?: string | null; urlUbicacion?: string | null; rutaEstado?: string | null; paramTracking?: string | null; paramTelefono?: string | null; rutaIncidencias?: string | null; rutaWebhook?: string | null }): Promise<EstadoConexionGsg>;
   /** Apunta al simulador de este servidor. */
   usarSimulador(): Promise<EstadoConexionGsg>;
   /** Quita la conexión de la pantalla; si el `.env` tenía una, vuelve a mandar esa. */
@@ -303,6 +308,12 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
     consultarEstado: (c) => actual().consultarEstado?.(c) ?? Promise.resolve({ decision: 'desconocido', motivo: 'GSG no está conectado: no se consulta el estado.', configurada: false }),
   };
 
+  const destinoWebhook = (base: string, ruta: string): string | null => {
+    if (!base || !ruta) return null;
+    const u = unirUrlGsg(base, ruta);
+    return u.ok ? u.url : null;
+  };
+
   const estado = (): EstadoConexionGsg => {
     const e = efectiva();
     return {
@@ -317,6 +328,8 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
       destinoEstado: proxy.urlEstado?.() ?? null,
       rutaIncidencias: e.origen === 'pantalla' ? guardada.rutaIncidencias : '',
       destinoIncidencias: proxy.urlIncidencias?.() ?? null,
+      rutaWebhook: e.origen === 'pantalla' ? guardada.rutaWebhook : '',
+      destinoWebhook: destinoWebhook(e.origen === 'pantalla' ? e.url : '', guardada.rutaWebhook),
       tieneToken: Boolean(e.token),
       claveEnmascarada: enmascararClave(e.token),
       origenClave: e.origenClave,
@@ -431,10 +444,16 @@ export async function crearConexionGsg(deps: DepsConexionGsg): Promise<ServicioC
         const u = unirUrlGsg(urlBase, rutaIncidencias);
         if (!u.ok) throw new Error(`La ruta de las incidencias no vale: ${u.error}`);
       }
+      const rutaWebhook = input.rutaWebhook !== undefined && input.rutaWebhook !== null ? input.rutaWebhook.trim().replace(/^\/+/, '') : antes.rutaWebhook;
+      if (rutaWebhook) {
+        const u = unirUrlGsg(urlBase, rutaWebhook);
+        if (!u.ok) throw new Error(`La ruta del webhook no vale: ${u.error}`);
+      }
       guardada = {
         modo: 'real', url: urlBase, rutaUbicacion: ruta, urlUbicacion: '', conectadoEn: new Date().toISOString(),
         rutaEstado,
         rutaIncidencias,
+        rutaWebhook,
         paramTracking: param(input.paramTracking, antes.paramTracking, 'trackingCode'),
         paramTelefono: param(input.paramTelefono, antes.paramTelefono, 'phone'),
       };

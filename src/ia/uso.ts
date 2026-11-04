@@ -10,6 +10,7 @@
  *    entregas, los resumenes de las conversaciones guardadas, el resumen
  *    del dia);
  *  - `ordenes`: la IA operadora y el ayudante del panel;
+ *  - `etiquetas`: «Etiquetar chats con IA» (la nota de cada chat que lee GSG);
  *  - `pruebas`: lo que se prueba desde la pantalla (conversacion de prueba,
  *    examen, probar la conexion).
  * Y los tokens, si el proveedor los devuelve (la API de OpenAI y las
@@ -24,12 +25,13 @@ import type { FalloCuentaIA } from './proveedores.js';
 
 export const CLAVE_USO_IA = 'ia.uso';
 
-export type TipoUsoIA = 'respuestas' | 'lecturas' | 'ordenes' | 'pruebas';
+export type TipoUsoIA = 'respuestas' | 'lecturas' | 'ordenes' | 'etiquetas' | 'pruebas';
 
 export interface UsoDia {
   respuestas: number;
   lecturas: number;
   ordenes: number;
+  etiquetas: number;
   pruebas: number;
   fallos: number;
   tokensEntrada: number;
@@ -98,7 +100,7 @@ export interface ContadorUsoIA {
   guardado(): Promise<void>;
 }
 
-const DIA_VACIO = (): UsoDia => ({ respuestas: 0, lecturas: 0, ordenes: 0, pruebas: 0, fallos: 0, tokensEntrada: 0, tokensSalida: 0, ms: 0, ok: 0 });
+const DIA_VACIO = (): UsoDia => ({ respuestas: 0, lecturas: 0, ordenes: 0, etiquetas: 0, pruebas: 0, fallos: 0, tokensEntrada: 0, tokensSalida: 0, ms: 0, ok: 0 });
 
 /** AAAA-MM-DD en la zona horaria del negocio. */
 export function diaEn(fecha: Date, timezone: string): string {
@@ -114,6 +116,7 @@ function sumar(a: UsoDia, b: UsoDia): UsoDia {
     respuestas: a.respuestas + b.respuestas,
     lecturas: a.lecturas + b.lecturas,
     ordenes: a.ordenes + b.ordenes,
+    etiquetas: a.etiquetas + b.etiquetas,
     pruebas: a.pruebas + b.pruebas,
     fallos: a.fallos + b.fallos,
     tokensEntrada: a.tokensEntrada + b.tokensEntrada,

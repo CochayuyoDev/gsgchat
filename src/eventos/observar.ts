@@ -15,6 +15,9 @@
 import type { Repos } from '../db/repos.js';
 import type { Bus, ContactoEvento, Eventos } from './bus.js';
 import { trackingDeEntrega } from '../entregas/repo.js';
+import { archivoDeMensaje, type ArchivoDeMensaje } from '../api/v1/archivos-gsg.js';
+import { payloadExterno } from '../util/payload-externo.js';
+import type { Message } from '../db/messages.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
 
@@ -31,7 +34,16 @@ const esHistorial = (payload: unknown) => Boolean(payload && typeof payload === 
 /** Quien mando un saliente, con los tres valores del contrato (ver sender.ts `conOrigen`). */
 const autorDe = (origen: unknown): 'persona' | 'ia' | 'sistema' => (origen === 'persona' || origen === 'ia' ? origen : 'sistema');
 
-export function observarRepos(repos: Repos, bus: Bus): Repos {
+export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: string; secreto: string }): Repos {
+  /** El enlace firmado del archivo del mensaje (foto, video, audio...), o null. Nunca rompe el guardado. */
+  const archivoDe = (id: number, message: Parameters<Repos['messages']['add']>[0]): ArchivoDeMensaje | null => {
+    if (!archivos) return null;
+    try {
+      return archivoDeMensaje({ id, contactId: message.contactId, kind: message.kind, payload: message.payload ?? null } as Message, archivos);
+    } catch {
+      return null;
+    }
+  };
   const contacto = async (id: string): Promise<ContactoEvento | null> => {
     const c = await repos.contacts.getById(id);
     return c ? { id: c.id, telefono: c.phone, nombre: c.name } : null;
@@ -81,7 +93,8 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
             texto: message.body ?? null,
             transcripcion: typeof payload.transcripcion === 'string' ? payload.transcripcion : null,
             anuncio: payload.anuncio && typeof payload.anuncio === 'object' ? (payload.anuncio as Eventos['mensaje.recibido']['mensaje']['anuncio']) : null,
-            datos: message.payload ?? null,
+            datos: payloadExterno(message.payload) ?? null,
+            archivo: archivoDe(id, message),
             fecha,
           },
           ventanaAbierta: ventanaAbierta(c.lastInboundAt, message.createdAt ?? new Date()),
@@ -100,7 +113,8 @@ export function observarRepos(repos: Repos, bus: Bus): Repos {
             fecha,
             // El adjunto (datos.media: id, kind, mimeType...) tambien en lo que sale,
             // para que el otro sistema baje la foto o el sticker mandado desde el telefono.
-            datos: message.payload ?? null,
+            datos: payloadExterno(message.payload) ?? null,
+            archivo: archivoDe(id, message),
           },
           ...chat,
         });

@@ -139,14 +139,14 @@ describe('404', () => {
 });
 
 describe('la web: api() del panel', () => {
-  // La funcion api() tal cual sale en la pagina, con un fetch de mentira.
+  // La funcion api() tal cual sale en la pagina, con un fetch de mentira. Se llama con POST: los GET pasan por la cache de lecturas (window.leerPanel).
   const fuente = /async function api\(url,method,body\)\{[\s\S]*?return d;\}/.exec(panelPage({ configured: true, nombreNegocio: 'Prueba' }))![0];
   const llamar = async (status: number, cuerpo: string) => {
     const location = { href: '', pathname: '/panel', hash: '' };
     const fetch = async () => ({ status, ok: status < 400, json: async () => JSON.parse(cuerpo) });
-    const api = runInNewContext(`(${fuente})`, { fetch, location, encodeURIComponent, JSON, Error }) as (u: string) => Promise<unknown>;
+    const api = runInNewContext(`(${fuente})`, { fetch, location, encodeURIComponent, JSON, Error }) as (u: string, m?: string, b?: unknown) => Promise<unknown>;
     try {
-      return { ok: true, valor: await api('/admin/x'), location };
+      return { ok: true, valor: await api('/admin/x', 'POST', {}), location };
     } catch (e) {
       return { ok: false, e: e as Error & { status?: number; codigo?: string; ir?: string }, location };
     }

@@ -77,6 +77,7 @@ import { CLAVE_FRASES_PROPIAS, leerConfirmacion, leerConfirmacionConReglas, leer
 import { randomBytes } from 'node:crypto';
 import type { BoundingBox } from '../types.js';
 import { dentroDe } from '../geo/validate.js';
+import { canonicalMapsUrl } from '../geo/extract.js';
 import { distanciaEnPalabras, haversineKm } from './geo.js';
 import type { Bus, EventoEntregaDelDia } from '../eventos/bus.js';
 import { leerLote, type FilaLote } from '../rutas/lote.js';
@@ -106,6 +107,8 @@ import { desenlaceDeEnvio, esperaDelReintento, MENSAJE_EN_CURSO, MENSAJE_REINTEN
 import type { PrimerMensajeReparto } from '../rutas/motor.js';
 import { apartarPorMotorizado, resolverPorUbicacion, soltarSolicitudes, solicitudesAbiertasDe } from './ubicacion-unica.js';
 import { pareceNoSoyYo, TEXTO_NO_SOY_YO } from '../rutas/inbound.js';
+import { CATALOGO_POR_DEFECTO } from '../archive/clasificar.js';
+import { numeroNormalizado } from '../chat/etiquetar.js';
 import { distanciaAlDistrito, distritoDePedido, distritoEnDireccion } from './distritos-centro.js';
 import { ventanaDeEntrega, variablesDeVentana, fuenteEnPalabras } from './horario-distrito.js';
 import { limpiarDireccion, analizarNumeracion } from './direccion-escrita.js';
@@ -529,8 +532,6 @@ export interface ServicioEntregas {
   revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas>;
   /** Si ese cliente tiene un pin lejano esperando su SÍ o su NO. */
   pinLejosPendiente(phone: string): Promise<boolean>;
-  /** Mandó su ubicación en tiempo real: el texto que le pide la actual. null = no se le estaba pidiendo ubicación. */
-  alUbicacionEnVivo(phone: string): Promise<string | null>;
   /** Su respuesta a «¿es ahí donde recibes tu pedido?». null = no tenía nada por confirmar. */
   responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string, boton?: string, citaId?: string | null): Promise<RespuestaPinLejos | null>;
   /**
@@ -538,6 +539,11 @@ export interface ServicioEntregas {
    * registra tras confirmar SÍ. null = no hay un pedido esperando ubicación.
    */
   alDireccionEscrita(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, como: string): Promise<RespuestaDireccionEscrita | null>;
+  /**
+   * La dirección que trae un enlace de lugar compartido (sin coordenadas), en el
+   * mapa: solo si se encuentra con su número de puerta. null = no se usa.
+   */
+  ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null>;
   /**
    * El primer mensaje que le pide la ubicacion a un cliente con entrega (la
    * plantilla «solicitudUbicacion» con los datos del envio de GSG). null =
@@ -731,7 +737,8 @@ export interface ServicioEntregas {
 
   /** Todo lo que ensena la pantalla. */
   resumen(): Promise<ResumenEntregas>;
-  entrega(id: number): Promise<{ entrega: FilaEntrega; eventos: Awaited<ReturnType<EntregasRepo['eventos']>> } | null>;
+  /** El pedido, su actividad y todas las ubicaciones que tuvo (la primera y cada cambio). */
+  entrega(id: number): Promise<{ entrega: FilaEntrega; eventos: Awaited<ReturnType<EntregasRepo['eventos']>>; ubicaciones: Array<{ n: number; lat: number; lng: number; mapa: string; en: string; cambio: boolean; vigente: boolean; detalle: string | null }> } | null>;
   /** Para el prompt de la IA operadora y del asistente. */
   descripcionParaIA(): Promise<string>;
   /** Lo que el asistente puede decirle a ESTE cliente sobre su pedido de hoy. */
@@ -1265,6 +1272,33 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     await sender.send({ phone: destino, kind: 'freeform', category: 'UTILITY', text: texto, manual: true, origen: 'sistema' }).catch(() => undefined);
   }
 
+  /**
+   * Un pedido nuevo vuelve a encender el bot en el chat de ese cliente (pedido
+   * del dueño, 29/10): si quedó callado o con la IA cerrada por un pedido
+   * anterior, el primer mensaje del nuevo no salía. Es «Volver a empezar» del
+   * chat, solo para lo que se apagó ANTES de este pedido: si una persona se
+   * hizo cargo después, manda ella. La baja («no me escriban») no se toca.
+   */
+  async function despertarChat(e: Entrega): Promise<void> {
+    try {
+      const c = await repos.contacts.getByPhone(e.phone);
+      if (!c) return;
+      const desde = ahora();
+      const que: string[] = [];
+      if (c.botPausadoAt && c.botPausadoAt < desde) {
+        await repos.contacts.pausarBot(c.id, false, ahora());
+        que.push('el bot estaba callado');
+      }
+      if (c.iaCerradaAt && c.iaCerradaAt < desde) {
+        await repos.contacts.cerrarIA(c.id, false, ahora(), null);
+        que.push('el chat estaba cerrado');
+      }
+      if (que.length) await evento(e, 'nota', `pedido nuevo: ${que.join(' y ')} por un pedido anterior; se vuelve a encender para escribirle`);
+    } catch (error) {
+      deps.log?.('no se pudo volver a encender el bot del chat', { phone: e.phone, detalle: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   async function marcarIncidencia(e: Entrega, codigo: string, detalle: string, opts: { avisar?: boolean; cerradaPorDia?: boolean } = {}): Promise<Entrega> {
     const actualizada = (await repo.actualizar(e.id, { estado: 'incidencia', incidencia: codigo, incidenciaDetalle: detalle, requiereHumano: true, ...(opts.cerradaPorDia ? { cerradaPorDia: true } : {}) })) ?? e;
     await evento(e, 'incidencia', `${codigo}: ${detalle}`);
@@ -1377,6 +1411,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         if (e.envioRetenidoAt) resultado.retenidas = (resultado.retenidas ?? 0) + 1;
         if (conPin && que !== 'ubicacion') e = (await repo.actualizar(e.id, { ubicacionFuente: 'gsg', ubicacionAt: ahora(), mapsUrl: enlaceMapa(c.lat!, c.lng!) })) ?? e;
         await evento(e, 'sincronizada', `llegó de GSG: falta ${que === 'ubicacion' ? 'la ubicación' : 'confirmar'}`);
+        await despertarChat(e);
       } else {
         // Ya la teniamos: GSG puede decir ahora que ademas falta lo otro.
         const patch: Partial<Entrega> = {};
@@ -1847,6 +1882,29 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return { atendida: true, entrega: e, resultado: 'propuesta_no_clara', responder: textoDe('proponerUbicacion', ajustes, ctx), ...(ajustes.usarBotones ? { botones: botonesPropuesta(e) } : {}) };
   }
 
+  /**
+   * Todas las ubicaciones que tuvo el pedido, de la primera a la vigente: cada
+   * evento «ubicación» guarda sus coordenadas (la primera, cada cambio y la que
+   * puso una persona). La vigente es la que coincide con la del pedido.
+   */
+  function ubicacionesDe(e: Entrega, eventos: EventoEntrega[]): Array<{ n: number; lat: number; lng: number; mapa: string; en: string; cambio: boolean; vigente: boolean; detalle: string | null }> {
+    const conPunto = eventos
+      .filter((ev) => ev.tipo === 'ubicacion' && typeof ev.payload?.lat === 'number' && typeof ev.payload?.lng === 'number')
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
+    const lista: Array<{ n: number; lat: number; lng: number; mapa: string; en: string; cambio: boolean; vigente: boolean; detalle: string | null }> = [];
+    for (const ev of conPunto) {
+      const lat = ev.payload!.lat as number;
+      const lng = ev.payload!.lng as number;
+      const ultima = lista[lista.length - 1];
+      // El mismo punto dos veces seguidas (lo repitió) no es otra ubicación.
+      if (ultima && Math.abs(ultima.lat - lat) < 1e-6 && Math.abs(ultima.lng - lng) < 1e-6) continue;
+      lista.push({ n: lista.length + 1, lat, lng, mapa: enlaceMapa(lat, lng), en: ev.createdAt.toISOString(), cambio: ev.payload?.cambiada === true, vigente: false, detalle: ev.detalle });
+    }
+    const vigente = [...lista].reverse().find((u) => e.lat != null && e.lng != null && Math.abs(u.lat - e.lat) < 1e-6 && Math.abs(u.lng - e.lng) < 1e-6);
+    if (vigente) vigente.vigente = true;
+    return lista;
+  }
+
   /** "P-1001 y P-1002" / "P-1001, P-1002 y P-1003". */
   const enLista = (refs: string[]): string => (refs.length <= 1 ? refs.join('') : `${refs.slice(0, -1).join(', ')} y ${refs[refs.length - 1]}`);
   /** Las referencias de un grupo de entregas del mismo cliente, en el orden en que llegaron. */
@@ -1880,6 +1938,49 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   /** Ya pasó la hora límite para cambiar la ubicación (1:00 PM por defecto, en el reloj de la tienda). */
   function pasoLaHoraDeCambio(): boolean {
     return horaEnReloj(ahora(), tz()) >= ajustes.cambioUbicacionHasta;
+  }
+
+  /** Cuantas veces ya la cambio hoy (la que mas, si tiene varios pedidos: comparten la ubicacion). */
+  const cambiosHechos = (lista: Entrega[]): number => lista.reduce((n, x) => Math.max(n, x.ubicacionCambios ?? 0), 0);
+
+  /**
+   * Lo que va debajo de «Ubicación registrada» o de «nueva ubicación
+   * registrada» (regla del dueño, 28/10): cómo cambiarla («cambiar ubicación»),
+   * solo antes de la hora límite y mientras le queden cambios. Vacío si no.
+   */
+  function invitacionACambiar(lista: Entrega[], trasCambio: boolean): string {
+    const max = ajustes.cambiosUbicacionMax;
+    if (max <= 0 || pasoLaHoraDeCambio() || !lista.length) return '';
+    const quedan = max - cambiosHechos(lista);
+    if (quedan <= 0) return '';
+    const e = lista[0]!;
+    return textoDe(trasCambio ? 'invitarOtroCambioUbicacion' : 'invitarCambioUbicacion', ajustes, { ...contexto(e), cambiosQuedan: quedan, cambiosMax: max });
+  }
+  const conInvitacion = (texto: string, lista: Entrega[], trasCambio: boolean): string => {
+    const extra = invitacionACambiar(lista, trasCambio);
+    return extra ? `${texto}\n\n${extra}` : texto;
+  };
+
+  /**
+   * La nota del chat (la etiqueta que lee GSG en el historial): el cliente
+   * cambió su ubicación. La pone el bot, sin IA; no pisa una puesta a mano, y
+   * solo si el catálogo del negocio tiene «cambiar_ubicacion».
+   */
+  async function notaCambioUbicacion(phone: string, cambios: number): Promise<void> {
+    const etiquetas = repos.chatEtiquetas;
+    if (!etiquetas) return;
+    try {
+      const catalogo = (await etiquetas.catalogo()) ?? CATALOGO_POR_DEFECTO;
+      if (!catalogo.some((c) => c.codigo === 'cambiar_ubicacion')) return;
+      const numero = numeroNormalizado(phone);
+      const dia = hoy();
+      const ya = (await etiquetas.delDia(dia, [numero]))[0];
+      if (ya?.origen === 'manual') return;
+      await etiquetas.guardar({ phone: numero, dia, etiqueta: 'cambiar_ubicacion', origen: 'reglas', huella: `bot-cambio-ubicacion-${cambios}-${ahora().getTime()}`, mensajes: ya?.mensajes ?? 0, motivo: null, loteId: null });
+      await etiquetas.registrar({ loteId: null, phone: numero, fase: 'analisis', nivel: 'info', codigo: 'etiqueta_bot', detalle: `El bot puso «cambiar_ubicacion»: el cliente cambió su ubicación (${cambios} de ${ajustes.cambiosUbicacionMax}).` });
+    } catch (error) {
+      log('no se pudo poner la nota de cambio de ubicación', { detalle: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   /**
@@ -1924,23 +2025,44 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
   }
 
-  async function pedidoDeCambioDeUbicacion(phone: string, texto?: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean } | null> {
+  /**
+   * «cambiar ubicación» (regla del dueño, 28/10): antes de la hora límite y
+   * con cambios que le queden (2 al día por defecto), el bot le pide la nueva
+   * con el botón de ubicación y MIENTRAS se queda la que tenía: el pedido no
+   * pasa a una persona. El pin que mande se registra como cambio
+   * (registrarUbicacion). Sin cambios que le queden, se le dice y se queda la
+   * última. Después de la hora límite, como siempre: que coordine con el motorizado.
+   * `pedirPin`: el mensaje sale con el botón de ubicación.
+   */
+  async function pedidoDeCambioDeUbicacion(phone: string, texto?: string): Promise<{ texto: string; entrega: Entrega; tarde: boolean; pedirPin: boolean; agotado?: boolean } | null> {
     const enCurso = (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
     const vivas = enCurso.filter((x) => x.ubicacionEstado === 'recibida');
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
+    const max = ajustes.cambiosUbicacionMax;
+    const dijo = texto ? `: «${texto.slice(0, 160)}»` : '';
     if (!pasoLaHoraDeCambio()) {
-      // Con su ubicación registrada, o esperándola (la dirección que tenía GSG está mal).
-      const aCambiar = vivas.length ? enCurso.filter((x) => x.ubicacionEstado !== 'no_hace_falta') : enCurso.filter((x) => x.ubicacionEstado === 'pendiente');
-      if (!aCambiar.length) return null;
-      const e = aCambiar.find((x) => x.motorizadoId) ?? aCambiar[0]!;
       const en = ahora();
-      for (const x of aCambiar) {
-        await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
-        await evento(x, 'nota', `pidió cambiar su ubicación antes de la ${limite}: se le pidió la nueva`).catch(() => undefined);
+      if (!vivas.length) {
+        // Aún no la había mandado: se le vuelve a pedir, nada que cambiar todavía.
+        const esperando = enCurso.filter((x) => x.ubicacionEstado === 'pendiente');
+        if (!esperando.length) return null;
+        const e = esperando.find((x) => x.motorizadoId) ?? esperando[0]!;
+        for (const x of esperando) await evento(x, 'nota', `pidió cambiar su ubicación, pero aún no había mandado ninguna: se le pidió${dijo}`).catch(() => undefined);
+        return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false, pedirPin: true };
       }
-      await reportarCambioUbicacion(aCambiar, false, limite, texto ? `escribió: «${texto.slice(0, 200)}»` : undefined);
-      await quitarUbicacionPorCambio(aCambiar, `pidió cambiar su ubicación${texto ? `: «${texto.slice(0, 160)}»` : ''}`);
-      return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false };
+      const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
+      const hechos = cambiosHechos(vivas);
+      if (max <= 0 || hechos >= max) {
+        for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación otra vez, pero ya la cambió ${hechos} ${hechos === 1 ? 'vez' : 'veces'} (máximo ${max}): se queda la última y no se le contesta (lo ve soporte por la nota)${dijo}`).catch(() => undefined);
+        await reportarCambioUbicacion(vivas, false, limite, `pidió un cambio más de los ${max} permitidos${dijo}`);
+        // Con el último cambio registrado el bot ya se calla (regla del dueño, 29/10): no se le contesta.
+        return { texto: '', entrega: e, tarde: false, pedirPin: false, agotado: true };
+      }
+      for (const x of vivas) {
+        await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
+        await evento(x, 'nota', `pidió cambiar su ubicación (cambio ${hechos + 1} de ${max}): se le pidió la nueva; mientras, se queda la que tenía${dijo}`).catch(() => undefined);
+      }
+      return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false, pedirPin: true };
     }
     if (!vivas.length) return null;
     const e = vivas.find((x) => x.motorizadoId) ?? vivas[0]!;
@@ -1950,7 +2072,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
     await reportarCambioUbicacion(vivas, true, limite, texto ? `escribió: «${texto.slice(0, 200)}»` : undefined);
     await quitarUbicacionPorCambio(vivas, `pidió cambiar su ubicación después de la ${limite}${texto ? `: «${texto.slice(0, 160)}»` : ''}`);
-    return { texto: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero }), entrega: g, tarde: true };
+    return { texto: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero }), entrega: g, tarde: true, pedirPin: false };
   }
 
   /**
@@ -1982,6 +2104,25 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const vivas = (await repo.vivasPorTelefono(contact.phone).catch(() => [] as Entrega[])).filter((x) => !ESTADOS_FINALES.includes(x.estado) && !x.envioRetenidoAt);
     const distinto = (x: Entrega) => x.ubicacionEstado === 'recibida' && x.lat != null && x.lng != null && (Math.abs(x.lat - ubicacion.lat) >= 1e-6 || Math.abs(x.lng - ubicacion.lng) >= 1e-6);
     const yaTenian = vivas.filter(distinto);
+    // Antes de la hora límite el bot atiende el cambio (regla del dueño, 28/10):
+    // si dijo «cambiar ubicación», o si manda directamente otro pin, se registra
+    // como cambio mientras le queden; sin cambios que le queden, se le dice.
+    if (yaTenian.length && !pasoLaHoraDeCambio() && ajustes.cambiosUbicacionMax > 0) {
+      const hechos = cambiosHechos(yaTenian);
+      if (hechos < ajustes.cambiosUbicacionMax) {
+        const en = ahora();
+        for (const x of yaTenian) {
+          if (x.ubicacionCambioPedidoAt) continue;
+          await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
+          await evento(x, 'nota', `mandó otra ubicación sin decir «cambiar ubicación»: se toma como su cambio ${hechos + 1} de ${ajustes.cambiosUbicacionMax}`).catch(() => undefined);
+        }
+        return null;
+      }
+      const e = yaTenian[0]!;
+      for (const x of yaTenian) await evento(x, 'nota', `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}), pero ya la cambió ${hechos} veces (máximo ${ajustes.cambiosUbicacionMax}): no se registra, se queda la última`).catch(() => undefined);
+      // Sin cambios que le queden, el bot se calla: lo ve soporte por la nota (regla del dueño, 29/10).
+      return { atendida: true, entrega: e, resultado: 'cambio_ubicacion_agotado' };
+    }
     const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se registra`;
     const pendientes = vivas.some((x) => x.ubicacionEstado === 'pendiente');
     if (!yaTenian.length) {
@@ -1993,7 +2134,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       return { atendida: true, entrega: conError[0], resultado: 'cambio_reportado' };
     }
     const limite = horaEnPalabras(ajustes.cambioUbicacionHasta);
-    await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, detalle);
+    // A GSG solo el enlace de la ubicación que mandó (regla del dueño, 29/10).
+    await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, canonicalMapsUrl(ubicacion.lat, ubicacion.lng));
     await quitarUbicacionPorCambio(yaTenian, detalle);
     if (pendientes) return null;
     return { atendida: true, entrega: yaTenian[0], resultado: 'cambio_reportado' };
@@ -2048,7 +2190,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       // Un pin del cliente no pisa una ubicación ya registrada (16/10): eso
       // es un cambio y ya se le reportó a GSG (pinDeCambio). Una persona sí puede.
-      if (!ubicacion.aMano && e.ubicacionEstado === 'recibida') continue;
+      // Si pidió cambiarla («cambiar ubicación»), su pin sí la cambia (28/10).
+      if (!ubicacion.aMano && e.ubicacionEstado === 'recibida' && !e.ubicacionCambioPedidoAt) continue;
       const corrige = e.ubicacionEstado === 'recibida';
       // «Cambió su ubicación»: ya tenía una registrada, o pidió cambiarla
       // antes de que llegara (queda en el pedido y lo ven las pantallas).
@@ -2128,7 +2271,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       const act = tocadas[0]!;
       const m = await motorizadoDe(act).catch(() => null);
-      return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }) };
+      if (corrigeAlguna && !ubicacion.aMano) await notaCambioUbicacion(contact.phone, cambiosHechos(tocadas));
+      return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: conInvitacion(textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }), tocadas, corrigeAlguna) };
     }
 
     // Su ubicacion, cuando ya se le pedia confirmar, cuenta como confirmacion.
@@ -2164,7 +2308,8 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
     const act = tocadas[0]!;
     const m = await motorizadoDe(act).catch(() => null);
-    return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }) };
+    if (corrigeAlguna && !ubicacion.aMano) await notaCambioUbicacion(contact.phone, cambiosHechos(tocadas));
+    return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: conInvitacion(textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }), tocadas, corrigeAlguna) };
   }
 
   // ------------------------------------------- el pin tiene que tener sentido
@@ -2288,6 +2433,13 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   }
 
   // ------------------------------------------------ la dirección escrita
+
+  async function ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null> {
+    if (!deps.geocodificador || !ajustes.buscarDireccionEnMapa) return null;
+    const lugar = await deps.geocodificador.buscar(direccion, distritoEnDireccion(direccion)).catch(() => null);
+    // Solo con la puerta: «la calle» o «el distrito» mandaría al motorizado a otro sitio.
+    return lugar && lugar.precision === 'alta' ? { lat: lugar.lat, lng: lugar.lng } : null;
+  }
 
   async function alDireccionEscrita(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, como: string): Promise<RespuestaDireccionEscrita | null> {
     const vivas = await esperandoUbicacionDe(contact.phone);
@@ -2494,7 +2646,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // modos: con «Todo el sistema» caía al menú de la preventa (30/09).
     if (!opts.boton && pideCambioUbicacion(texto)) {
       const cambio = await pedidoDeCambioDeUbicacion(contact.phone, texto);
-      if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto, ...(cambio.tarde ? {} : { pedirUbicacion: true }) };
+      if (cambio) return { atendida: true, entrega: cambio.entrega, resultado: cambio.agotado ? 'cambio_ubicacion_agotado' : cambio.tarde ? 'pide_cambio_ubicacion_tarde' : 'pide_cambio_ubicacion', responder: cambio.texto, ...(cambio.pedirPin ? { pedirUbicacion: true } : {}) };
     }
     // "¿Dónde está mi pedido?": se contesta segun el estado, sin IA. Vale
     // para la viva de hoy y para la que ya figura como entregada hoy.
@@ -3789,6 +3941,7 @@ ${lista}
     let e = entrega;
     if (conPin) e = (await repo.actualizar(e.id, { mapsUrl: enlaceMapa(input.lat!, input.lng!), ubicacionFuente: `a mano (${quien})`, ubicacionAt: ahora() })) ?? e;
     await evento(e, 'sincronizada', `creada a mano por ${quien}`);
+    await despertarChat(e);
     const contacto = await repos.contacts.upsertFromInbound(e.phone, e.nombre ?? undefined);
     if (!contacto.optInAt) await repos.contacts.setOptIn(e.phone, `entrega: pedido ${e.referencia} (a mano)`);
     // Hoy ya mando su ubicacion (por otro pedido): vale la misma, no se le pide.
@@ -4680,6 +4833,7 @@ ${lista}
         continue;
       }
       await evento(entrega, 'sincronizada', `creada desde la lista pegada por ${quien}`);
+      await despertarChat(entrega);
       const contacto = await repos.contacts.upsertFromInbound(entrega.phone, entrega.nombre ?? undefined);
       if (!contacto.optInAt) await repos.contacts.setOptIn(entrega.phone, `entrega: pedido ${entrega.referencia} (lista pegada)`);
       resultado.creadas.push(entrega);
@@ -5075,14 +5229,9 @@ ${lista}
     async pinLejosPendiente(phone) {
       return (await esperandoUbicacionDe(phone)).some((x) => Boolean(x.pinPropuestoAt) && x.pinPropuestoLat != null);
     },
-    async alUbicacionEnVivo(phone) {
-      const vivas = await esperandoUbicacionDe(phone);
-      if (!vivas.length) return null;
-      for (const x of vivas) await evento(x, 'nota', 'mandó su ubicación en tiempo real: no se registra, se le pide la ubicación actual');
-      return textoDe('ubicacionEnVivo', ajustes, contexto(vivas[0]!));
-    },
     responderPinLejos,
     alDireccionEscrita,
+    ubicarDireccionDeEnlace,
     alTexto,
     alAdjuntoDeMotorizado: async () => ({ atendida: false }),
     nombreNegocio: () => deps.nombreNegocio(),
@@ -5113,7 +5262,8 @@ ${lista}
     },
     async cambioDeUbicacionDetalle(phone, texto) {
       const r = await pedidoDeCambioDeUbicacion(phone, texto);
-      return r ? { texto: r.texto, tarde: r.tarde } : null;
+      // `tarde` = sale sin el botón de ubicación (después de la hora, o sin cambios que le queden).
+      return r ? { texto: r.texto, tarde: !r.pedirPin } : null;
     },
     async tieneEntregaEnCurso(phone) {
       return (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).length > 0;
@@ -5388,7 +5538,8 @@ ${lista}
       const e = await repo.entrega(id);
       if (!e) return null;
       const motorizados = new Map<number, Motorizado>();
-      return { entrega: await fila(e, motorizados), eventos: await repo.eventos(id, 200) };
+      const eventos = await repo.eventos(id, 200);
+      return { entrega: await fila(e, motorizados), eventos, ubicaciones: ubicacionesDe(e, eventos) };
     },
     async descripcionParaIA() {
       const r = await resumen();
@@ -5455,7 +5606,7 @@ ${lista}
         // Lo que la consulta tras UBI REGISTRADA necesita: estado, motorizado y la hora del aviso.
         `Datos del pedido: estado ${e.estado}; código de seguimiento ${tracking}${(m?.nombre ?? e.datosEnvio?.motorizadoNombre) ? `; motorizado: ${m?.nombre ?? e.datosEnvio?.motorizadoNombre}` : '; motorizado: aún sin asignar o sin dato'}${e.avisoEnviadoAt ? `; aviso de llegada enviado a las ${horaEnReloj(e.avisoEnviadoAt, tz())}` : ''}.`,
         `Este cliente tiene hoy el pedido ${e.referencia}${e.nombre ? ` (a nombre de ${e.nombre})` : ''}. Situación: ${situacion}${e.llegaAproxAt && e.estado !== 'entregada' ? ` Hora aproximada de llegada: ${horaEnReloj(e.llegaAproxAt, tz())}.` : ''} Si pregunta por su pedido, responde con esto; no prometas otra hora ni otro día: eso lo coordina una persona.`,
-        !e.datosEnvio?.horarioEntregaFechaDesde ? `Horario de entrega de hoy: de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)} (${variablesDeVentana(h).horario}${h.distrito ? `, distrito ${h.distrito}` : ''}; sale de ${fuenteEnPalabras(h)}; por algunas casuísticas se puede extender hasta las ${horaEnPalabras(h.extendidoHasta)}). Si pregunta a qué hora llega o el horario y no hay hora aproximada, dale este horario tal cual. No inventes otro horario ni otras horas, ni el de otro distrito.` : '',
+        !e.datosEnvio?.horarioEntregaFechaDesde ? `Horario de entrega de hoy: de ${horaEnPalabras(h.desde)} a ${horaEnPalabras(h.hasta)} (${variablesDeVentana(h).horario}${h.distrito ? `, distrito ${h.distrito}` : ''}; sale de ${fuenteEnPalabras(h)}). Si pregunta a qué hora llega o el horario y no hay hora aproximada, dale este horario tal cual. No inventes otro horario ni otras horas, ni el de otro distrito.` : '',
         `Si quiere cambiar su ubicación: antes de la ${horaEnPalabras(ajustes.cambioUbicacionHasta)} que mande el pin nuevo por WhatsApp (clip 📎 → Ubicación) y se tiene en cuenta hoy; después de esa hora, que coordine con el motorizado.`,
         'Es un cliente con una entrega en curso: no le ofrezcas cotizar envíos, precios ni hacer pedidos. No digas que su pedido ya salió o está en camino si la situación no lo dice. Si pregunta si llegan a una zona o distrito y no está en lo que sabes, no lo afirmes: di que una persona se lo confirma.',
       ].join('\n');

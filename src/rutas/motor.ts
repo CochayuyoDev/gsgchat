@@ -107,6 +107,11 @@ export interface MotorDeps {
   repos: Repos;
   sender: Sender;
   wa?: WhatsAppClient;
+  /**
+   * Con varias lineas de WhatsApp: si queda alguna conectada. El motor solo se
+   * para cuando no queda ninguna; una linea caida frena a sus clientes, no al resto.
+   */
+  hayLineaConectada?: () => boolean;
   gsg: PuertoGsg;
   opciones: OpcionesMotor;
   /** Como se llama el negocio ahora (se cambia desde la pantalla). */
@@ -321,6 +326,21 @@ export interface Motor {
   proximoEnvioEn(): number;
   /** Milisegundos hasta la próxima tarea; null significa esperar una señal nueva. */
   proximoDespertarEn(): Promise<number | null>;
+}
+
+/**
+ * Sin socket de WhatsApp el motor no escribe. Excepcion: en una simulacion
+ * (NODE_ENV=test) lo siguiente es un cliente de prueba (51 000 0…), que nunca
+ * sale a WhatsApp (el sender lo guarda en el hilo): asi la demo enseña el
+ * primer mensaje aunque la tienda no tenga el numero vinculado.
+ */
+const sinSocket = (deps: Pick<MotorDeps, 'wa' | 'hayLineaConectada'>): boolean =>
+  deps.hayLineaConectada ? !deps.hayLineaConectada() : deps.wa?.conectado?.() === false;
+
+async function sigueSinSocketPorPrueba(repos: Repos, momento: Date): Promise<boolean> {
+  if (process.env.NODE_ENV !== 'test') return false;
+  const [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+  return Boolean(siguiente && esNumeroDePrueba(siguiente.phone));
 }
 
 export function crearMotor(deps: MotorDeps): Motor {
@@ -827,7 +847,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       await refrescarAjustes();
       // No inicia intentos ni escribe incidencias mientras no hay socket.
       // Al reconectarse continúa en la siguiente pasada, sin espera de 2 min.
-      if (deps.wa?.conectado?.() === false) {
+      if (sinSocket(deps) && !(await sigueSinSocketPorPrueba(repos, momento))) {
         const motivo = 'WhatsApp está desconectado; el envío continúa al reconectarse.';
         anotarEsperaGlobal(repos.rutas, { codigo: 'sin_conexion', motivo, hasta: null });
         return { accion: 'nada', motivo };
@@ -935,16 +955,19 @@ export function startMotorRutas(deps: MotorDeps): () => void {
   const programarDesconexion = () => {
     timer = setTimeout(() => {
       timer = null;
-      if (deps.wa?.conectado?.() === false) programarDesconexion();
-      else void despertar();
+      void (async () => {
+        if (sinSocket(deps) && !(await sigueSinSocketPorPrueba(deps.repos, new Date()).catch(() => false))) programarDesconexion();
+        else void despertar();
+      })();
     }, 30_000);
     timer.unref?.();
   };
 
   const dormirHastaProximaTarea = async () => {
     if (parado) return;
-    if (deps.wa?.conectado?.() === false) {
-      // Solo se comprueba el estado en memoria del socket: sin consultas SQL.
+    if (sinSocket(deps) && !(await sigueSinSocketPorPrueba(deps.repos, new Date()).catch(() => false))) {
+      // Solo se comprueba el estado en memoria del socket: sin consultas SQL
+      // (salvo en una simulacion, ver sigueSinSocketPorPrueba).
       programarDesconexion();
       return;
     }

@@ -123,10 +123,15 @@ export function decidirRitmo(foto: FotoRitmo, politica: Politica): DecisionRitmo
   const { ahora } = foto;
 
   if (!enHorario(ahora, politica)) {
+    // Si la hora esta bien y lo que frena es el dia, se dice el dia: «9:00 a 24:00» a las 23:00 confunde.
+    const { hora, dia } = horaLocal(ahora, politica.timezone);
+    const porElDia = hora >= politica.horaInicio && hora < politica.horaFin;
     return {
       ok: false,
       codigo: 'fuera_de_horario',
-      motivo: `fuera del horario de envio (${politica.horaInicio}:00 a ${politica.horaFin}:00)`,
+      motivo: porElDia
+        ? `hoy es ${['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][dia]}: ese día no se escribe a los clientes`
+        : `fuera del horario de envio (${politica.horaInicio}:00 a ${politica.horaFin}:00)`,
       esperaMs: msHastaApertura(ahora, politica),
     };
   }

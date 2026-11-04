@@ -140,7 +140,7 @@ export interface ServicioStickers {
   /** El fichero, para servirlo. */
   leer(archivo: string): Promise<Buffer | null>;
   /** Manda ese sticker a ese telefono. `manual`: desde el chat. */
-  enviar(phone: string, id: string, opts?: { manual?: boolean }): Promise<SendOutcome | { ok: false; error: string }>;
+  enviar(phone: string, id: string, opts?: { manual?: boolean; whatsappNumberId?: string }): Promise<SendOutcome | { ok: false; error: string }>;
   /**
    * El sticker automatico de ese momento, si esta configurado. Nunca lanza:
    * un adorno no puede romper el mensaje al que acompaña.
@@ -188,7 +188,7 @@ export function crearServicioStickers(deps: StickersDeps): ServicioStickers {
     }
   }
 
-  async function enviar(phone: string, id: string, opts: { manual?: boolean } = {}) {
+  async function enviar(phone: string, id: string, opts: { manual?: boolean; whatsappNumberId?: string } = {}) {
     const s = await repo.get(id);
     if (!s) return { ok: false as const, error: 'Ese sticker ya no existe.' };
     const datos = await leer(s.archivo);
@@ -198,6 +198,7 @@ export function crearServicioStickers(deps: StickersDeps): ServicioStickers {
       kind: 'sticker',
       category: 'UTILITY',
       manual: opts.manual,
+      ...(opts.whatsappNumberId ? { whatsappNumberId: opts.whatsappNumberId } : {}),
       // Va pegado al mensaje anterior: no cuenta como "otro mensaje" para la
       // separacion minima ni para el techo diario por contacto.
       limitesContacto: { separacionMs: 0, maxPorDia: 100 },

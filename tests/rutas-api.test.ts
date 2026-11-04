@@ -150,7 +150,7 @@ describe('cargar el lote', () => {
     expect(res.json().lote).toMatchObject({ origen: 'api', externoId: 'GSG-LOTE-9' });
   });
 
-  it('el mismo numero en un segundo lote no se escribe dos veces: queda como "ya en curso"', async () => {
+  it('el mismo numero y el mismo pedido en un segundo lote no se escribe dos veces: queda como "ya en curso"; otro pedido del mismo numero sigue su camino', async () => {
     const primero = await app.inject({
       method: 'POST',
       url: '/admin/rutas/lotes',
@@ -162,7 +162,7 @@ describe('cargar el lote', () => {
       method: 'POST',
       url: '/admin/rutas/lotes',
       headers: auth,
-      payload: { nombre: 'Martes', arrancar: true, filas: [{ telefono: '987654321', nombre: 'Ana', referencia: 'P-2' }, { telefono: '912345678', nombre: 'Luis', referencia: 'P-3' }] },
+      payload: { nombre: 'Martes', arrancar: true, filas: [{ telefono: '987654321', nombre: 'Ana', referencia: 'P-1' }, { telefono: '912345678', nombre: 'Luis', referencia: 'P-3' }] },
     });
     expect(segundo.statusCode).toBe(200);
     const loteB = segundo.json().lote.id as string;
@@ -174,6 +174,11 @@ describe('cargar el lote', () => {
     expect(repetida.incidenciaDetalle).toMatch(/P-1/);
     // El otro cliente del segundo lote sigue su camino normal.
     expect(items.find((s) => s.phone === '51912345678')?.estado).toBe('pendiente');
+    // Otro tracking del mismo numero es otro pedido: se le pide su ubicacion aparte.
+    const tercero = await app.inject({ method: 'POST', url: '/admin/rutas/lotes', headers: auth, payload: { nombre: 'Miercoles', arrancar: true, filas: [{ telefono: '987654321', nombre: 'Ana', referencia: 'P-2' }] } });
+    expect(tercero.statusCode).toBe(200);
+    const filasC = (await app.inject({ method: 'GET', url: `/admin/rutas/solicitudes?loteId=${tercero.json().lote.id}&limit=10`, headers: auth })).json().items as Array<{ phone: string; estado: string; incidencia: string | null }>;
+    expect(filasC.find((x) => x.phone === '51987654321')).toMatchObject({ estado: 'pendiente', incidencia: null });
   });
 
   it('una tabla sin telefonos se rechaza con el motivo', async () => {

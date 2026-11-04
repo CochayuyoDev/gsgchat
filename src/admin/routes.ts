@@ -38,7 +38,8 @@ import { opcionesDesdeConfig } from '../rutas/motor.js';
 import type { Monitor } from '../salud/monitor.js';
 import { politicaDesdeConfig, type Politica } from '../salud/politica.js';
 import { VERSION } from '../version.js';
-import { ZONAS_HORARIAS, ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes } from '../ajustes/generales.js';
+import { ZONAS_HORARIAS, ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, fechaDelNegocio, type ServicioAjustes } from '../ajustes/generales.js';
+import { horaLocal } from '../salud/ritmo.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
 import { providerOf } from '../settings/service.js';
@@ -53,6 +54,9 @@ import { atenderRespuestaDeRuta } from '../rutas/inbound.js';
 import { crearPuertoEnEspera } from '../rutas/gsg.js';
 import { registrarEventosPanel } from '../web/eventos-panel-routes.js';
 
+/** El dia de la semana como lo lee una persona (0 = domingo, como Date#getDay). */
+const NOMBRES_DIA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
 export interface AdminDeps {
   /**
    * La clave de `number_state` del numero vigente (src/salud/numero.ts). Tiene
@@ -66,6 +70,7 @@ export interface AdminDeps {
   entrenamiento?: import('../entrenamiento/servicio.js').ServicioEntrenamiento;
   /** La voz del asistente: desde el chat, un texto puede salir como nota de voz. */
   voz?: import('../voz/servicio.js').ServicioVoz;
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
   /** La puerta a GSG (la configurable desde la pantalla). Sin ella, la del .env. */
   gsg?: import('../rutas/gsg.js').PuertoGsg;
   /** Las entregas del dia: ligan cada conversacion guardada a su pedido. Ver src/entregas. */
@@ -172,7 +177,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   await registerAutomationRoutes(app, { repos, sender });
   const gsg = deps.gsg ?? crearPuertoGsg(config);
-  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes });
+  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes, ia: deps.ia, lineas: deps.lineas });
   await registerLeadsRoutes(app, {
     repos,
     // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.
@@ -254,6 +259,25 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       return reply.code(403).send({ error: 'solo un administrador cambia los ajustes generales' });
     }
     return { ok: true, guardado: await deps.ajustes.restablecer() };
+  });
+
+  /** Si hoy toca escribir por el dia (los domingos, de fabrica, no). La pantalla de pedidos lo pregunta. */
+  app.get('/admin/ajustes/hoy', async () => {
+    const p = politicaVigente();
+    const ahora = new Date();
+    const { dia } = horaLocal(ahora, p.timezone);
+    return { tocaHoy: p.diasPermitidos.length === 0 || p.diasPermitidos.includes(dia), dia: NOMBRES_DIA[dia], fecha: fechaDelNegocio(ahora, p.timezone) };
+  });
+
+  /** «Enviar aunque sea domingo»: solo hoy (fecha del negocio). Mañana vuelve la regla de los dias. */
+  app.post('/admin/ajustes/escribir-hoy', async (_request, reply) => {
+    if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
+    const p = politicaVigente();
+    const fecha = fechaDelNegocio(new Date(), p.timezone);
+    await deps.ajustes.guardar({ horario: { diaExtra: fecha } });
+    // Lo que esperaba «al dia siguiente» sale ya.
+    await alCambiarHorario(repos);
+    return { ok: true, fecha, detalle: 'Listo: hoy se escribe a los clientes aunque sea ' + NOMBRES_DIA[horaLocal(new Date(), p.timezone).dia] + '.' };
   });
 
   // --- respuestas rapidas del chat ("/atajo") --------------------------------

@@ -78,7 +78,8 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     }
   });
 
-  it('una tienda nueva no trae las entregas de courier: el menu no enseña Hoy, Números, Motorizados ni Mapa', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('una tienda nueva no trae las entregas de courier: el menu no enseña Hoy, Números, Motorizados ni Mapa', async () => {
     const r = await api('GET', '/admin/procesos');
     expect(r.status).toBe(200);
     expect(r.body.gsgActivo).toBe(false);
@@ -95,7 +96,8 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     expect(orden.every((x, i) => x >= 0 && (i === 0 || x > orden[i - 1]!))).toBe(true);
   });
 
-  it('al activar la plantilla GSG, el menu enseña sus pantallas (y al desactivarla se esconden)', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('al activar la plantilla GSG, el menu enseña sus pantallas (y al desactivarla se esconden)', async () => {
     const a = await api('POST', '/admin/procesos/desde-plantilla', { plantilla: 'gsg' });
     expect(a.status).toBe(200);
     expect(a.body.ir).toBe('/hoy');
@@ -112,7 +114,8 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
   });
 
   for (const plantilla of ['datos', 'confirmaciones', 'campo', 'cobranza'] as const) {
-    it(`Módulo desarrollador: simula «${plantilla}» con los cinco casos y cada uno termina donde debe`, async () => {
+    // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador y procesos.
+    it.skip(`Módulo desarrollador: simula «${plantilla}» con los cinco casos y cada uno termina donde debe`, async () => {
       const r = await api('POST', '/admin/desarrollador/procesos/simular', { plantilla, personas: 5, guion: 'mezcla' });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       const c = r.body.conversaciones as Array<{ caso: string; estado: string; mensajes: Array<{ de: string; texto: string }>; motivo: string | null }>;
@@ -142,7 +145,8 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     }, 600_000);
   }
 
-  it('la API pública: POST /api/v1/procesos/:id/personas con el permiso procesos:gestionar (y sin él, 403)', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('la API pública: POST /api/v1/procesos/:id/personas con el permiso procesos:gestionar (y sin él, 403)', async () => {
     const p = await api('POST', '/admin/procesos/desde-plantilla', { plantilla: 'confirmaciones', nombre: 'Citas por API' });
     const id = p.body.proceso.id;
     const k = await api('POST', '/admin/claves-api', { nombre: 'Sistema de citas', permisos: ['procesos:gestionar'] });
@@ -162,7 +166,8 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     expect(sin.status).toBe(403);
   });
 
-  it('el editor guarda por formulario y dice en palabras lo que falta', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('el editor guarda por formulario y dice en palabras lo que falta', async () => {
     const p = await api('POST', '/admin/procesos/desde-plantilla', { plantilla: 'datos', nombre: 'Fichas' });
     const id = p.body.proceso.id;
     const actual = (await api('GET', `/admin/procesos/${id}`)).body.proceso;
@@ -176,7 +181,8 @@ describe('procesos en una tienda (MySQL/MariaDB real)', () => {
     expect(leido.pasos).toHaveLength(2);
   });
 
-  it('las pantallas nuevas responden y llevan el armazón', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('las pantallas nuevas responden y llevan el armazón', async () => {
     for (const url of ['/procesos', '/procesos/editor?id=1', '/procesos/corrida?id=1', '/personas', '/respuestas', '/desarrollador']) {
       const r = await tienda.app.inject({ method: 'GET', url, headers: { cookie } });
       expect(r.statusCode, url).toBe(200);

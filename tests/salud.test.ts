@@ -213,6 +213,10 @@ describe('marcapasos: cuando puede salir el siguiente', () => {
     expect(enHorario(domingo, POLITICA_CLOUD)).toBe(false);
     expect(msHastaApertura(domingo, POLITICA_CLOUD)).toBeGreaterThan(12 * 60 * 60 * 1000);
     expect(enHorario(domingo, { ...POLITICA_CLOUD, diasPermitidos: [0, 1, 2, 3, 4, 5, 6] })).toBe(true);
+    // El aviso dice el día, no «fuera del horario (9:00 a ...)», porque la hora sí vale.
+    const d = decidirRitmo(foto({ ahora: domingo }), POLITICA_CLOUD);
+    expect(d.ok).toBe(false);
+    if (!d.ok) expect(d.motivo).toBe('hoy es domingo: ese día no se escribe a los clientes');
   });
 
   it('con el factor a cero esta parado', () => {

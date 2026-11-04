@@ -117,7 +117,7 @@ export interface EstadoIA extends ConfigIA {
 
 /**
  * Si la IA responde, en una palabra:
- *  - `apagada`: no está activa o le falta la clave.
+ *  - `apagada`: le falta la clave (con clave trabaja aunque no conteste: etiqueta los chats).
  *  - `conectada`: la última llamada real (o «Comprobar conexión») respondió bien.
  *  - `sin_conexion`: la última falló; `motivo` lo dice en cristiano, sin claves.
  *  - `sin_comprobar`: activa, pero desde que arrancó aún no se le ha preguntado nada.
@@ -249,7 +249,7 @@ export interface ServicioIA {
   /** Un mensaje del cliente: que contestar. No envia nada. `real` = un turno de verdad (se anota el uso de las lecciones). */
   responder(entrada: { contact: Contact; texto: string; historial?: MensajeIA[]; real?: boolean }): Promise<RespuestaIA>;
   /** El modelo a secas, para los trabajos del entrenamiento (pulir lecciones). */
-  completar(mensajes: MensajeIA[], opts?: { maxTokens?: number }): Promise<string>;
+  completar(mensajes: MensajeIA[], opts?: { maxTokens?: number; temperatura?: number; uso?: 'lecturas' | 'etiquetas' | 'pruebas' }): Promise<string>;
   /** El turno completo: contestar por WhatsApp y, si toca, derivar y avisar. `esAudio` = el cliente mando una nota de voz (transcrita en `texto`). */
   turno(contact: Contact, texto: string, opts?: { esAudio?: boolean; mensajes?: number }): Promise<TurnoIA>;
   /** Una prueba desde la pantalla, con un historial que trae el navegador. */
@@ -615,7 +615,9 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   }
   const huellaConexion = (): string => [cfg.activa, cfg.proveedor, cfg.servicio, cfg.modelo, cfg.baseUrl, cfg.razonamiento, token].join('|');
   function conexion(): ConexionIA {
-    if (!(cfg.activa && token)) return { estado: 'apagada', motivo: null, comprobada: ultimaConexion?.en.toISOString() ?? null, origen: ultimaConexion?.origen ?? null };
+    // Con la clave guardada la IA trabaja aunque no conteste a los clientes: etiqueta
+    // los chats (28/10). «Apagada» es solo sin clave.
+    if (!token) return { estado: 'apagada', motivo: null, comprobada: ultimaConexion?.en.toISOString() ?? null, origen: ultimaConexion?.origen ?? null };
     if (!ultimaConexion) {
       // Recién arrancado pero con el aviso de saldo guardado: ya se sabe que no responde.
       const sin = uso.resumen().sinSaldo;
@@ -630,7 +632,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
   // tokens si la API los dice y con el fallo si lo hubo. Es lo que ensena
   // "Uso de la IA" en la pantalla y lo que avisa cuando el proveedor cae.
   const uso: ContadorUsoIA = await crearContadorUsoIA({ settingsRepo, timezone: config.timezone, ahora: deps.ahora, log });
-  async function chatContado(tipo: TipoUsoIA, mensajes: MensajeIA[], opts: { maxTokens?: number; exigirCompleta?: boolean; validar?: (respuesta: string) => void } = {}): Promise<string> {
+  async function chatContado(tipo: TipoUsoIA, mensajes: MensajeIA[], opts: { maxTokens?: number; temperatura?: number; exigirCompleta?: boolean; validar?: (respuesta: string) => void } = {}): Promise<string> {
     // Sin saldo (o con la clave que ya no vale): entre prueba y prueba no se
     // llama al modelo; quien llama sigue con las reglas al instante y el
     // cliente no nota nada. Cada REINTENTO_SIN_SALDO_MS se vuelve a probar:
@@ -642,7 +644,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     const t0 = Date.now();
     let tokens: { tokensEntrada: number; tokensSalida: number } | undefined;
     try {
-      const r = await elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens, exigirCompleta: opts.exigirCompleta, alUso: (u) => { tokens = u; } });
+      const r = await elProveedor().chat(mensajes, { modelo: modeloEfectivo(), maxTokens: opts.maxTokens, temperatura: opts.temperatura, exigirCompleta: opts.exigirCompleta, alUso: (u) => { tokens = u; } });
       // Lo que no sirve (vacío tras quitar las marcas, JSON, demasiado largo)
       // cuenta como fallo, no como respuesta.
       opts.validar?.(r);
@@ -1191,7 +1193,7 @@ export async function crearServicioIA(deps: DepsIA): Promise<ServicioIA> {
     },
     responder,
     turno,
-    completar: (mensajes, opts) => chatContado('lecturas', mensajes, { maxTokens: opts?.maxTokens }),
+    completar: (mensajes, opts) => chatContado(opts?.uso ?? 'lecturas', mensajes, { maxTokens: opts?.maxTokens, temperatura: opts?.temperatura }),
     uso: () => uso.resumen(),
     noEntendido,
     corregirNoEntendido,
