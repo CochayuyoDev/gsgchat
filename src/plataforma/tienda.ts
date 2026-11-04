@@ -45,6 +45,7 @@ import type { WhatsAppClient } from '../whatsapp/client.js';
 import { crearSesionLocal, type SesionLocal } from '../whatsapp/local/session.js';
 import { crearServicioLineas } from '../whatsapp/lineas.js';
 import { crearRegistroClientes } from '../whatsapp/registro.js';
+import { crearRepartoDeLineas } from '../whatsapp/reparto-lineas.js';
 import { keyFromBase64 } from '../settings/crypto.js';
 
 import { type EstadoInstancia } from '../plan/servicio.js';
@@ -238,6 +239,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           telefono: proveedor === 'local' ? sesion.getLocalState().phone : numeroVigente.actual(),
         });
       };
+      const identidadDeLinea = (linea: { principal: boolean; id: string }) => (linea.principal ? phoneNumberId() : `linea:${linea.id}`);
       /**
        * Cada linea para el sender: su cliente y la identidad con la que se llevan
        * su cupo, su calentamiento y su estado (la principal conserva la de siempre).
@@ -251,9 +253,16 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           etiqueta: linea.etiqueta,
           numero: linea.telefono || (linea.principal ? sesion.getLocalState().phone : ''),
           cliente: t.cliente,
-          identidad: linea.principal ? phoneNumberId() : `linea:${linea.id}`,
+          identidad: identidadDeLinea(linea),
           ventanaAplica: linea.principal ? providerOf(settings.current()) === 'cloud' : linea.proveedor === 'cloud',
+          noDisponibleDesde: registro.sinConexionDesde(linea.id),
         };
+      };
+      const repartoLineas = crearRepartoDeLineas({ registro, repos, politica, identidadDe: identidadDeLinea });
+      /** Para un cliente nuevo, o uno cuya linea ya no esta disponible: la mas desahogada de las conectadas. */
+      const elegirLinea = async (excluir: string | null) => {
+        const id = await repartoLineas.elegir(excluir);
+        return id ? resolverLinea(id) : null;
       };
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
@@ -273,6 +282,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           repos,
           wa,
           resolverLinea,
+          elegirLinea,
+          esperaCambioLineaMs: () => ajustes.esperaCambioLineaMin() * 60_000,
           phoneNumberId,
           warmup: politica().warmup,
           maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,
@@ -492,6 +503,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         sesionLocal: sesion,
         lineas,
         registroClientes: registro,
+        repartoLineas,
         anotarNumeroVigente: numeroVigente.anotar,
         numeroDeSalud: phoneNumberId,
         authDir: o.authDir,
@@ -517,6 +529,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         repos,
         settings,
         wa,
+        hayLineaConectada: () => registro.algunaConectada(),
         sender,
         salud,
         politica,

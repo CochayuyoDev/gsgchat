@@ -134,6 +134,7 @@ export interface LocalRoutesDeps {
   /** Las lineas de la tienda: para anotar por cual llego cada entrante. */
   geocodificador?: import('../entregas/geocodificar.js').Geocodificador;
   lineas?: import('../whatsapp/lineas.js').ServicioLineas;
+  repartoLineas?: import('../whatsapp/reparto-lineas.js').RepartoDeLineas;
   registroClientes?: import('../whatsapp/registro.js').RegistroClientes;
   authDir?: string;
   mediaDir?: string;
@@ -348,7 +349,7 @@ export async function registerLocalRoutes(
       });
     }
 
-    await registerLineasRoutes(app, { lineas, registro, arrancarLinea });
+    await registerLineasRoutes(app, { lineas, registro, arrancarLinea, reparto: deps.repartoLineas, ajustes: deps.ajustes });
   }
 
   /**

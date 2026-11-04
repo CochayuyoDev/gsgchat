@@ -38,6 +38,17 @@ export interface RegistroClientes {
   /** Todas las lineas habilitadas con su estado vivo. */
   estados(): Promise<Array<{ linea: Linea; conectada: boolean }>>;
   /**
+   * Si queda alguna linea conectada, sin consultar la base: lo mira el motor en
+   * cada vuelta. Con la principal caida las demas siguen enviando.
+   */
+  algunaConectada(): boolean;
+  /**
+   * Desde cuando esta sin conexion una linea (lo apunta `sincronizar`). Vive en
+   * memoria a proposito: tras un reinicio toda linea tarda en reconectar, y con
+   * una fecha guardada sus clientes se irian a otra sin darle tiempo.
+   */
+  sinConexionDesde(id: string): Date | null;
+  /**
    * Pone al dia en la base el estado, el numero real y el proveedor de cada
    * linea a partir de su sesion viva. Es de donde lee la pantalla.
    */
@@ -67,6 +78,14 @@ export interface OpcionesRegistro {
 
 export function crearRegistroClientes(o: OpcionesRegistro): RegistroClientes {
   const guardados = new Map<string, TransporteLinea>();
+  const caidas = new Map<string, Date>();
+  const vive = (cliente: WhatsAppClient): boolean => {
+    try {
+      return cliente.conectado?.() ?? true;
+    } catch {
+      return false;
+    }
+  };
 
   async function armar(linea: Linea): Promise<TransporteLinea | null> {
     if (linea.proveedor === 'local') {
@@ -115,12 +134,13 @@ export function crearRegistroClientes(o: OpcionesRegistro): RegistroClientes {
     transporte,
     async conectada(id) {
       const t = await transporte(id);
-      if (!t) return false;
-      try {
-        return t.cliente.conectado?.() ?? true;
-      } catch {
-        return false;
-      }
+      return t ? vive(t.cliente) : false;
+    },
+    algunaConectada() {
+      return vive(o.principal.cliente) || [...guardados.values()].some((t) => vive(t.cliente));
+    },
+    sinConexionDesde(id) {
+      return caidas.get(id) ?? null;
     },
     async estados() {
       const salida: Array<{ linea: Linea; conectada: boolean }> = [];
@@ -146,12 +166,15 @@ export function crearRegistroClientes(o: OpcionesRegistro): RegistroClientes {
           const viva = (() => { try { return t.cliente.conectado?.(); } catch { return false; } })();
           estado = (ajustes ? ajustes.configurada : true) && viva !== false ? 'conectado' : 'desconectado';
         }
+        if (estado === 'conectado') caidas.delete(linea.id);
+        else if (!caidas.has(linea.id)) caidas.set(linea.id, new Date());
         await o.lineas.sincronizar(linea.id, { estado, telefono, proveedor: ajustes?.proveedor });
       }
     },
     olvidar(id) {
       guardados.get(id)?.sesion?.detener();
       guardados.delete(id);
+      caidas.delete(id);
     },
     detener() {
       for (const t of guardados.values()) t.sesion?.detener();

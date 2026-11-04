@@ -16,7 +16,10 @@ import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { alcanceChat } from '../web/alcance-chat.js';
 import { esperaDeEnvio } from '../rutas/espera-envio.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { extensionDe, idDeMedia, mediaDirectory } from '../whatsapp/local/media.js';
 import { despacharReportes, encolarProblemaGsg } from '../rutas/gsg.js';
 import { ERRORES_MANUALES_GSG } from '../rutas/errores-manuales.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
@@ -103,6 +106,22 @@ export function tipoDeAdjuntoSaliente(mimeType: string): 'image' | 'video' | 'au
   if (limpio.startsWith('audio/')) return 'audio';
   return 'document';
 }
+
+const adjuntoSchema = z.object({
+  contactId: z.string().min(1),
+  /** El fichero en base64 (con o sin el prefijo data:...;base64,). */
+  datos: z.string().min(1),
+  mimeType: z.string().trim().min(3).max(120),
+  filename: z.string().trim().max(200).optional(),
+  caption: z.string().trim().max(1024).optional(),
+  /** Un audio grabado aqui mismo: sale como nota de voz, con su onda y su play. */
+  voz: z.boolean().optional(),
+  citaId: z.coerce.number().int().positive().optional(),
+  autor: z.enum(['persona', 'ia', 'sistema']).optional(),
+  autorNombre: z.string().trim().max(80).optional(),
+  /** Por que linea de WhatsApp sale. Sin ella: la de la conversacion. */
+  lineaId: z.string().max(64).optional(),
+});
 
 const sendSchema = z.object({
   phone: z.string().min(6).optional(),
@@ -507,13 +526,16 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   const lineasActivas = async () => (deps.lineas ? (await deps.lineas.listar()).filter((l) => l.habilitada || l.principal) : []);
 
   /**
-   * La linea por la que se contesta un chat si nadie elige otra: la del ultimo
-   * mensaje que llego y, si el chat no tiene o esa ya no esta, la principal.
+   * La linea por la que se contesta un chat si nadie elige otra: la que el
+   * cliente tiene asignada. Null si el chat es nuevo: ahi el sistema le da la
+   * mas desahogada.
    */
   const lineaPorDefecto = async (contactId: string, activas: import('../whatsapp/lineas.js').Linea[]): Promise<string | null> => {
     if (!activas.length) return null;
-    const ultima = await repos.messages.lineaDelUltimoEntrante(contactId);
-    return activas.find((l) => l.id === ultima)?.id ?? activas.find((l) => l.principal)?.id ?? activas[0]!.id;
+    // Sin linea asignada no hay linea por defecto: el primer mensaje la decide
+    // (ver src/whatsapp/reparto-lineas.ts) y desde ahi el proceso sigue por esa.
+    const ultima = await repos.messages.lineaDeLaConversacion(contactId);
+    return activas.find((l) => l.id === ultima)?.id ?? null;
   };
 
   /** El proveedor de una linea; sin lineas montadas, el de los ajustes como siempre. */
@@ -1167,11 +1189,57 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), ...firma, ...(cita && !('error' in cita) ? { cita } : {}) });
   });
 
-  app.post('/admin/chat/adjunto', async (_request, reply) => reply.code(410).send({
-    ok: false,
-    codigo: 'MODULO_RETIRADO',
-    error: 'El envío de adjuntos desde el chat está retirado; el chat solo permite texto y ubicación.',
-  }));
+  /**
+   * Una foto, un video, un audio, un sticker o un documento escrito a mano desde el chat.
+   *
+   * Llega en base64 (pegado, arrastrado o elegido con el clip), se guarda en
+   * la misma carpeta que los adjuntos que entran -con el mismo tipo de id,
+   * para que el hilo lo pinte igual- y sale por el sender, con sus guardas y
+   * por la linea elegida. El fichero caduca con el chat: la limpieza diaria
+   * borra los de mas de 24 h. El limite del cuerpo va aparte del general:
+   * 4 MB no dan para un video.
+   */
+  app.post('/admin/chat/adjunto', { bodyLimit: Math.ceil(MAX_BYTES_ADJUNTO * 1.4) + 64 * 1024 }, async (request, reply) => {
+    const body = adjuntoSchema.parse(request.body ?? {});
+    const contact = await repos.contacts.getById(body.contactId);
+    if (!contact) return reply.code(404).send({ error: 'contacto no encontrado' });
+    if (contact.tipo === 'grupo' && !gruposDisponibles()) return reply.code(400).send({ error: SIN_GRUPOS });
+    if (body.lineaId && !(await lineasActivas()).some((l) => l.id === body.lineaId)) {
+      return reply.code(400).send({ error: 'esa linea de WhatsApp no existe o esta deshabilitada' });
+    }
+
+    const datos = Buffer.from(body.datos.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!datos.length) return reply.code(400).send({ error: 'El fichero llegó vacío.' });
+    if (datos.length > MAX_BYTES_ADJUNTO) return reply.code(400).send({ error: 'WhatsApp no acepta ficheros de más de 16 MB. Usa uno más ligero.' });
+
+    const kind = tipoDeAdjuntoSaliente(body.mimeType);
+    const mimeType = body.mimeType.split(';')[0]!.trim().toLowerCase();
+    const base = extensionDe(mimeType, kind === 'document' ? 'document' : kind);
+    const extension = base === '.bin' && body.filename?.includes('.')
+      ? `.${body.filename.split('.').pop()!.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'}`
+      : base;
+    const id = idDeMedia(`chat:${randomUUID()}`, extension);
+    await writeFile(path.join(deps.mediaDir ?? mediaDirectory(), id), datos);
+
+    let cita;
+    if (body.citaId) {
+      cita = await citaDelHilo(contact.id, body.citaId);
+      if ('error' in cita) return reply.code(400).send({ error: cita.error });
+    }
+
+    return sender.send({
+      phone: contact.phone,
+      kind: 'media',
+      category: 'UTILITY',
+      manual: aMano(),
+      ...quien(request, body),
+      ...(cita && !('error' in cita) ? { cita } : {}),
+      // Una nota de voz grabada aqui va como nota de voz de verdad (ptt), no
+      // como fichero de audio: es la diferencia entre la onda con el play y
+      // un adjunto que hay que descargar.
+      media: { id, kind, datos, mimeType, filename: body.filename || undefined, caption: body.caption || undefined, voz: body.voz === true && kind === 'audio' },
+    });
+  });
 
   /** Abrir un chat con alguien que todavia no existe en la libreta. */
   app.post('/admin/chat/start', async (request) => {

@@ -149,6 +149,7 @@ export interface ServerDeps {
   /** Las lineas de WhatsApp de la tienda (ver src/whatsapp/lineas.ts) y el cliente de cada una. */
   lineas?: import('./whatsapp/lineas.js').ServicioLineas;
   registroClientes?: import('./whatsapp/registro.js').RegistroClientes;
+  repartoLineas?: import('./whatsapp/reparto-lineas.js').RepartoDeLineas;
   /** Para apuntar el telefono vinculado: la salud guarda el riesgo por numero (src/salud/numero.ts). */
   anotarNumeroVigente?: (telefono: string | null | undefined) => void;
   /**
@@ -427,6 +428,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     lineas: deps.lineas,
     geocodificador: deps.geocodificador,
     registroClientes: deps.registroClientes,
+    repartoLineas: deps.repartoLineas,
     fiabilidad: Boolean(deps.fiabilidad),
     simulador: deps.simuladorGsg,
     settingsRepo: deps.settingsRepo,

@@ -124,22 +124,28 @@ ${bandaDemo}
     <button class="bajar hidden" id="bajar" title="Bajar al último mensaje" aria-label="Bajar al último mensaje">↓<span class="nuevos hidden" id="bajar-nuevos"></span></button>
 
 
+    <input type="file" id="archivo" class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip">
+
     <div class="cita-previa hidden" id="cita-previa">
       <div class="bloque"><span class="quien"></span><span class="que"></span></div>
       <button type="button" class="icon" id="cita-quitar" title="No responder a ese mensaje" aria-label="Quitar la cita">✕</button>
     </div>
+    <div class="previa hidden" id="adjunto-previa"></div>
     <div class="panel-bajo hidden" id="panel-atajos"></div>
+    <div class="panel-bajo hidden" id="panel-stickers"></div>
     <div class="panel-bajo emojis hidden" id="panel-emojis">
       <input class="buscador" id="emojis-buscar" placeholder="Buscar: caras, gestos, corazones, trabajo, comida" aria-label="Buscar emoji">
       <div id="emojis-rejillas"></div>
     </div>
     <div class="rapidas-barra hidden" id="rapidas-barra"></div>
 
+    <div class="grabando hidden" id="grabando"></div>
     <div class="composer hidden" id="composer">
-      <button class="ghost" id="boton-mas" title="Ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
+      <button class="ghost" id="boton-mas" title="Adjuntar, sticker, ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
       <button class="ghost" id="boton-emoji" title="Emoji" aria-label="Elegir un emoji" aria-expanded="false">😊</button>
       <select id="linea-sel" class="hidden" title="Por qué número de WhatsApp sale tu respuesta" aria-label="Línea de WhatsApp para responder"></select>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje  ·  / para respuestas rápidas" aria-label="Escribe un mensaje"></textarea>
+      <button id="grabar" title="Grabar una nota de voz" aria-label="Grabar una nota de voz">🎤</button>
       <button id="send" class="hidden" title="Enviar" aria-label="Enviar">➤</button>
     </div>
 
@@ -289,6 +295,12 @@ function lineaTagHtml(etiqueta, titulo) {
   return '<span class="linea-tag" style="background:' + colorDeLinea(etiqueta) + '" title="' + esc(titulo || etiqueta) + '">' + esc(etiqueta) + '</span>';
 }
 function lineaPorId(id) { return LINEAS.filter(function (l) { return l.id === id; })[0] || null; }
+/* Solo lo que eligio una persona viaja al servidor. Sin elegir, decide el sistema: asi puede pasar al cliente a otra linea si la suya ya no esta. */
+function lineaElegidaAMano() {
+  if (!current || !variasLineas()) return null;
+  var id = lineaElegida[current.id];
+  return id && lineaPorId(id) ? id : null;
+}
 /* La linea por la que saldra lo que se escriba ahora: la que se eligio en este chat o la de por defecto. */
 function lineaSeleccionada() {
   if (!current || !variasLineas()) return null;
@@ -1827,7 +1839,7 @@ async function enviar(payload) {
     payload.contactId = current.id;
     payload.atiendePersona = true;
     if (cita) payload.citaId = cita;
-    var lineaDeEnvio = lineaSeleccionada();
+    var lineaDeEnvio = lineaElegidaAMano();
     if (lineaDeEnvio) payload.lineaId = lineaDeEnvio;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
     if (r.ok === false) {
@@ -1876,18 +1888,18 @@ function pintarSelectorDeLinea(data) {
   if (!sel) return;
   if (!variasLineas()) { sel.classList.add('hidden'); return; }
   var elegida = lineaSeleccionada();
-  sel.innerHTML = LINEAS.map(function (l) {
+  sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (la más desahogada)</option>') + LINEAS.map(function (l) {
     var caida = l.estado !== 'conectado';
     return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
   }).join('');
-  sel.style.background = colorDeLinea((lineaPorId(elegida) || {}).etiqueta);
+  sel.style.background = elegida ? colorDeLinea((lineaPorId(elegida) || {}).etiqueta) : '#667781';
   sel.classList.remove('hidden');
   sel.onchange = function () {
     if (!current) return;
-    lineaElegida[current.id] = sel.value;
+    if (sel.value) lineaElegida[current.id] = sel.value; else delete lineaElegida[current.id];
     var l = lineaPorId(sel.value);
     if (l && l.puede) PUEDE = l.puede;
-    sel.style.background = colorDeLinea(l ? l.etiqueta : '');
+    sel.style.background = l ? colorDeLinea(l.etiqueta) : '#667781';
     pintarSubtitulo({ canWrite: true, reparto: current.reparto, windowOpen: current.windowOpen });
     renderMessages(hilo.mensajes, false, true);
   };
@@ -2043,6 +2055,7 @@ async function revisarConexion() {
  */
 function ocupado() {
   return Boolean(menuAbierto) || (seleccion && seleccion.length > 0) ||
+    Boolean(adjuntoPendiente) || Boolean(grabadora) ||
     !document.getElementById('buscar-hilo').classList.contains('hidden') ||
     document.querySelector('.dlg-fondo, .visor, .ayuda-teclas') !== null;
 }

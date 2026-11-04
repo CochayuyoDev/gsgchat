@@ -45,4 +45,17 @@ describe('entrada por linea', () => {
     const { rows } = await b.pool.query<{ whatsapp_number_id: string; linea_etiqueta: string; linea_numero: string }>('select whatsapp_number_id, linea_etiqueta, linea_numero from messages where id = $1', [id]);
     expect(rows[0]).toEqual({ whatsapp_number_id: ID_LINEA_PRINCIPAL, linea_etiqueta: 'Principal', linea_numero: '51922222222' });
   });
+
+  it('la conversacion recuerda su linea aunque los mensajes ya hayan caducado', async () => {
+    const repos = createRepos(b.pool);
+    const c = await repos.contacts.upsertFromInbound('51900000002', 'Otro');
+    expect(await repos.messages.lineaDeLaConversacion(c.id)).toBeNull();
+    await repos.messages.add({ contactId: c.id, direction: 'out', wamid: 'OUT1', kind: 'text', body: 'hola', lineaId: 'linea-ali' });
+    expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe('linea-ali');
+    await b.pool.query('delete from messages where contact_id = $1', [c.id]);
+    expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe('linea-ali');
+    // El cliente escribe por otra linea: la conversacion pasa a esa.
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'IN1', kind: 'text', body: 'hola', lineaId: 'linea-kevin' });
+    expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe('linea-kevin');
+  });
 });

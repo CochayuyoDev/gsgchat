@@ -13,12 +13,17 @@ import { z } from 'zod';
 import { LineasError, MAX_LINEAS, type Linea, type ServicioLineas } from '../whatsapp/lineas.js';
 import type { RegistroClientes } from '../whatsapp/registro.js';
 import { hayVinculacion } from '../whatsapp/local/session.js';
+import type { RepartoDeLineas } from '../whatsapp/reparto-lineas.js';
+import type { ServicioAjustes } from '../ajustes/generales.js';
 
 export interface LineasRoutesDeps {
   lineas: ServicioLineas;
   registro: RegistroClientes;
   /** Arranca el socket de una linea local secundaria con sus entrantes marcados con su id. */
   arrancarLinea: (id: string) => Promise<unknown>;
+  /** Como se reparten los clientes entre las lineas y los ultimos cambios. */
+  reparto?: RepartoDeLineas;
+  ajustes?: ServicioAjustes;
 }
 
 const crearSchema = z.object({
@@ -102,6 +107,26 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
     } catch (error) {
       return responderError(error, reply);
     }
+  });
+
+  /** Cuantos clientes lleva cada linea, cuanto se espera a una caida y los ultimos cambios de linea. */
+  app.get<{ Querystring: { contactId?: string } }>('/admin/lineas/reparto', async (request, reply) => {
+    const { reparto, ajustes } = deps;
+    if (!reparto || !ajustes) return reply.code(404).send({ error: 'El reparto de líneas no está disponible aquí.' });
+    const [cargas, cambios] = await Promise.all([reparto.cargas(), reparto.cambios({ limite: 20, contactId: request.query.contactId })]);
+    return {
+      esperaCambioMinutos: ajustes.esperaCambioLineaMin(),
+      lineas: cargas.map((c) => ({ ...c, sinConexionDesde: registro.sinConexionDesde(c.id) })),
+      cambios,
+    };
+  });
+
+  app.patch('/admin/lineas/reparto', async (request, reply) => {
+    if (!deps.ajustes) return reply.code(404).send({ error: 'El reparto de líneas no está disponible aquí.' });
+    const body = z.object({ esperaCambioMinutos: z.coerce.number().int().min(1).max(1440) }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'La espera tiene que ser de 1 a 1440 minutos.' });
+    await deps.ajustes.guardar({ lineas: { esperaCambioMinutos: body.data.esperaCambioMinutos } });
+    return { ok: true, esperaCambioMinutos: deps.ajustes.esperaCambioLineaMin() };
   });
 
   /** Abre la sesion de una linea local secundaria y devuelve su estado (con el QR si toca). */

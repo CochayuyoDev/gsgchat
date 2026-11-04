@@ -81,7 +81,7 @@ export function createMemoryOutboundQueue(opts: MemoryQueueOptions): MemoryOutbo
       if (outcome.ok) return;
 
       // El reintento sale por la linea del primer intento, no por la que toque despues.
-      const job = outcome.whatsappNumberId && !entrada.job.whatsappNumberId ? { ...entrada.job, whatsappNumberId: outcome.whatsappNumberId } : entrada.job;
+      const job = outcome.whatsappNumberId && (!entrada.job.whatsappNumberId || entrada.job.lineaDelSistema) ? { ...entrada.job, whatsappNumberId: outcome.whatsappNumberId, lineaDelSistema: true } : entrada.job;
 
       // Bloqueo con espera (cupo diario, calidad en amarillo): se reprograma.
       // Bloqueo en firme (baja, sin opt-in): se descarta, insistir suma bloqueos.

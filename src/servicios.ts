@@ -57,6 +57,8 @@ export interface ServiciosDeps {
   repos: Repos;
   settings: SettingsService;
   wa: WhatsAppClient;
+  /** Con varias lineas de WhatsApp: si queda alguna conectada (ver `MotorDeps.hayLineaConectada`). */
+  hayLineaConectada?: () => boolean;
   sender: Sender;
   salud: Monitor;
   politica: () => Politica;
@@ -135,6 +137,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     repos,
     sender,
     wa,
+    hayLineaConectada: deps.hayLineaConectada,
     gsg,
     opciones: opcionesDesdeConfig(config),
     nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,

@@ -2,11 +2,13 @@
 
 import type { Contact } from '../src/db/repos.js';
 import type { Conversation, Message, MessagesRepo, NewMessage } from '../src/db/messages.js';
+import type { CambioDeLinea, LineasContactoRepo, MotivoCambioLinea } from '../src/db/lineas-contacto.js';
 
 let seq = 1;
 
 export interface FakeMessages extends MessagesRepo {
   _all: Message[];
+  _lineasContacto: LineasContactoRepo;
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -15,6 +17,37 @@ export function createFakeMessages(
   contacts: () => Array<Contact & { chatReadAt?: Date | null }>,
 ): FakeMessages {
   const all: Message[] = [];
+  const asignadas = new Map<string, { linea: string; desde: Date }>();
+  const cambiosDeLinea: CambioDeLinea[] = [];
+  const moverLinea = (contactId: string, desde: string | null, a: string, motivo: MotivoCambioLinea, at: Date) => {
+    asignadas.set(contactId, { linea: a, desde: at });
+    cambiosDeLinea.unshift({ id: cambiosDeLinea.length + 1, contactId, telefono: contacts().find((c) => c.id === contactId)?.phone ?? '', nombre: null, desdeLineaId: desde, desdeEtiqueta: desde, aLineaId: a, aEtiqueta: a, motivo, createdAt: at });
+  };
+  const lineasContacto: LineasContactoRepo = {
+    async fijarSiNoTiene(contactId, lineaId, at) {
+      if (!asignadas.has(contactId)) moverLinea(contactId, null, lineaId, 'primer_contacto', at);
+      return asignadas.get(contactId)!.linea;
+    },
+    async cambiar(contactId, desde, a, motivo, at) {
+      const actual = asignadas.get(contactId)?.linea ?? null;
+      if (actual === null || actual === desde) moverLinea(contactId, desde, a, motivo, at);
+      return asignadas.get(contactId)!.linea;
+    },
+    async carga(desde) {
+      const porLinea = new Map<string, { lineaId: string; clientes: number; nuevos: number }>();
+      for (const [contactId, a] of asignadas) {
+        if (contacts().find((c) => c.id === contactId)?.tipo === 'grupo') continue;
+        const fila = porLinea.get(a.linea) ?? { lineaId: a.linea, clientes: 0, nuevos: 0 };
+        fila.clientes++;
+        if (a.desde >= desde) fila.nuevos++;
+        porLinea.set(a.linea, fila);
+      }
+      return [...porLinea.values()];
+    },
+    async cambios(opciones = {}) {
+      return cambiosDeLinea.filter((c) => c.desdeLineaId !== null && (!opciones.contactId || c.contactId === opciones.contactId)).slice(0, opciones.limite ?? 20);
+    },
+  };
   const receipts = new Map<string, { expiresAt: Date; estado: 'procesando' | 'aceptado' | 'incierto' }>();
   const controls = new Map<string, { expiresAt: Date; estado: 'procesando' | 'aceptado' | 'fallido' | 'incierto'; wamid: string | null }>();
   const visible = (m: Message, desde?: Date | null) => !desde || (m.createdAt >= desde && !m.payload?.historial && m.payload?.autorNombre !== 'Teléfono');
@@ -24,6 +57,7 @@ export function createFakeMessages(
 
   const repo: FakeMessages = {
     _all: all,
+    _lineasContacto: lineasContacto,
 
     async reservarEntrada(provider, wamid, recibidoAt, expiresAt) {
       const key = `${provider}:${wamid}`;
@@ -144,11 +178,20 @@ export function createFakeMessages(
         lineaNumero: message.lineaNumero ?? null,
       };
       all.push(row);
+      // Igual que seguirLineaDelMensaje: un mensaje anterior a la asignacion no mueve nada.
+      if (message.lineaId && !message.conservarLinea) {
+        const actual = asignadas.get(message.contactId);
+        if (actual?.linea !== message.lineaId && (!actual || row.createdAt.getTime() >= actual.desde.getTime())) {
+          moverLinea(message.contactId, actual?.linea ?? null, message.lineaId, message.direction === 'in' ? 'cliente_escribio' : 'persona', row.createdAt);
+        }
+      }
       return row.id;
     },
 
-    async lineaDelUltimoEntrante(contactId) {
-      const ultimo = all.filter((m) => m.contactId === contactId && m.direction === 'in' && m.lineaId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0];
+    async lineaDeLaConversacion(contactId) {
+      const asignada = asignadas.get(contactId);
+      if (asignada) return asignada.linea;
+      const ultimo = all.filter((m) => m.contactId === contactId && m.lineaId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0];
       return ultimo?.lineaId ?? null;
     },
 
