@@ -12,6 +12,7 @@ import { createDesarrolladorRepo, type DesarrolladorRepo } from './desarrollador
 import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
 import { createMessagesRepo, type MessagesRepo } from './messages.js';
+import { createLineasContactoRepo, type LineasContactoRepo } from './lineas-contacto.js';
 import { createLeadsRepo, type LeadsRepo } from './leads.js';
 import { createArchivesRepo, type ArchivesRepo } from './archives.js';
 import { createRutasRepo, type RutasRepo } from './rutas.js';
@@ -597,6 +598,7 @@ export interface Repos {
   campaigns: CampaignsRepo;
   automation: AutomationRepo;
   messages: MessagesRepo;
+  lineasContacto: LineasContactoRepo;
   leads: LeadsRepo;
   /** Indice de conversaciones respaldadas. Ver src/archive. */
   archives: ArchivesRepo;
@@ -2050,6 +2052,7 @@ export function createRepos(pool: Pool): Repos {
     campaigns,
     automation: createAutomationRepo(pool),
     messages: createMessagesRepo(pool),
+    lineasContacto: createLineasContactoRepo(pool),
     leads: createLeadsRepo(pool),
     archives: createArchivesRepo(pool),
     rutas: createRutasRepo(pool),

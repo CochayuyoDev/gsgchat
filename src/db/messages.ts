@@ -5,6 +5,7 @@
  * `Repos` lo expone como `repos.messages`.
  */
 
+import { seguirLineaDelMensaje } from './lineas-contacto.js';
 import type { Pool } from './pool.js';
 
 export type Direction = 'in' | 'out';
@@ -60,6 +61,8 @@ export interface NewMessage {
   lineaId?: string | null;
   lineaEtiqueta?: string | null;
   lineaNumero?: string | null;
+  /** El sistema ya decidio la linea de este cliente: guardar este mensaje no se la cambia. */
+  conservarLinea?: boolean;
 }
 
 /** Una fila de la lista de chats. */
@@ -116,7 +119,8 @@ export interface MessagesRepo {
   limpiarAccionesWhatsappAntes(ahora: Date): Promise<number>;
   add(message: NewMessage): Promise<number>;
   /**
-   * La linea con la que se lleva la conversacion de este cliente: la del ultimo
+   * La linea con la que se lleva la conversacion de este cliente: la que tiene
+   * asignada (ver src/db/lineas-contacto.ts) o, si no, la del ultimo
    * mensaje, entrante o saliente. Se recuerda en el contacto, asi que sigue
    * valiendo cuando los mensajes ya caducaron. Null = nunca se uso una linea.
    */
@@ -400,9 +404,9 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           message.lineaNumero ?? null,
         ],
       );
-      // La conversacion sigue por la linea del ultimo mensaje, entre o salga.
-      if (message.lineaId) {
-        await pool.query('update contacts set whatsapp_number_id = $2 where id = $1 and (whatsapp_number_id is null or whatsapp_number_id <> $2)', [message.contactId, message.lineaId]);
+      // Si el cliente escribe por otra linea o una persona elige otra, se sigue por esa.
+      if (message.lineaId && !message.conservarLinea) {
+        await seguirLineaDelMensaje(pool, { contactId: message.contactId, lineaId: message.lineaId, direction: message.direction, createdAt: message.createdAt });
       }
       return insertId;
     },

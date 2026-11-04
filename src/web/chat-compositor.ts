@@ -337,7 +337,7 @@ async function enviarNotaDeVoz() {
         filename: 'nota-de-voz.' + ((grabacion.blob.type || '').indexOf('ogg') >= 0 ? 'ogg' : 'webm'),
         voz: true,
         citaId: cita || undefined,
-        lineaId: lineaSeleccionada() || undefined,
+        lineaId: lineaElegidaAMano() || undefined,
       } });
       if (r.ok === false) { if (pendiente) pendiente.remove(); toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas')); }
       cancelarGrabacion();
@@ -438,7 +438,7 @@ async function enviarAdjunto() {
   enviando++;
   if (boton) boton.disabled = true;
   try {
-    var r = await api('/admin/chat/adjunto', { method: 'POST', body: { contactId: current.id, datos: a.datos, mimeType: a.mimeType, filename: a.filename, caption: caption || undefined, citaId: cita || undefined, lineaId: lineaSeleccionada() || undefined } });
+    var r = await api('/admin/chat/adjunto', { method: 'POST', body: { contactId: current.id, datos: a.datos, mimeType: a.mimeType, filename: a.filename, caption: caption || undefined, citaId: cita || undefined, lineaId: lineaElegidaAMano() || undefined } });
     if (r.ok === false) { if (pendiente) pendiente.remove(); toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas')); }
     await openChat(current.id, true);
     loadChats(true);
@@ -593,7 +593,7 @@ async function mandarSticker(id) {
   enviando++;
   if (barra) barra.classList.add('ocupada');
   try {
-    var r = await api('/admin/stickers/' + encodeURIComponent(id) + '/enviar', { method: 'POST', body: { phone: current.phone, lineaId: lineaSeleccionada() || undefined } });
+    var r = await api('/admin/stickers/' + encodeURIComponent(id) + '/enviar', { method: 'POST', body: { phone: current.phone, lineaId: lineaElegidaAMano() || undefined } });
     if (r.ok === false) { if (pendiente) pendiente.remove(); toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas')); }
     await openChat(current.id, true);
   } catch (error) { if (pendiente) pendiente.remove(); toast(error.message); }

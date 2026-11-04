@@ -498,12 +498,24 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
 <section class="tarjeta con-card" id="card-lineas">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📱</span><div class="con-tit"><h2>Líneas de WhatsApp</h2><span id="lineas-chip" class="chip tono-gris">Revisando…</span></div></div>
   <p class="con-frase">Hasta 8 números por tienda, todos en la misma bandeja y un solo hilo por cliente. La etiqueta (por ejemplo <b>wsp-ali</b>) aparece en cada chat y cada mensaje para saber qué celular revisar. Si una línea se cae, las demás siguen.</p>
+  <p class="con-frase">Cada cliente nuevo entra por la línea más desahogada y se queda con ella: siempre se le escribe desde el mismo número. Solo cambia si su línea se quita o se deshabilita, si sigue sin conexión pasado el tiempo que elijas abajo, si él escribe a otro de tus números o si tú eliges otra en el chat.</p>
   <div id="lineas-lista" class="lineas-lista"></div>
   <div class="acciones">
     <input id="linea-nueva" class="corto" maxlength="80" placeholder="Nombre de la línea (ej. wsp-kevin)" aria-label="Nombre de la nueva línea">
     <button class="btn primario" id="linea-agregar" type="button">Agregar línea</button>
   </div>
   <p class="ayuda" id="lineas-estado" role="status"></p>
+  <div id="lineas-reparto" hidden>
+    <h3>Cómo van repartidos los clientes</h3>
+    <div class="tablewrap"><table><thead><tr><th>Línea</th><th>Clientes</th><th>Nuevos hoy</th><th>Mensajes hoy</th></tr></thead><tbody id="lineas-reparto-filas"></tbody></table></div>
+    <div class="acciones" style="align-items:center">
+      <label for="linea-espera">Si una línea se cae, esperar</label>
+      <input id="linea-espera" class="corto" type="number" min="1" max="1440" style="width:90px">
+      <span>minutos antes de pasar sus clientes a otra</span>
+      <button class="btn" id="linea-espera-guardar" type="button">Guardar</button>
+    </div>
+    <details><summary>Últimos cambios de línea</summary><div id="lineas-cambios" class="ayuda"></div></details>
+  </div>
 </section>
 ` : ''}${tarjetaGsg ? `<section class="tarjeta con-card" id="gsg">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">${icono('moto')}</span><div class="con-tit"><h2>GSG</h2><span id="gsg-chip" class="chip tono-gris">Revisando…</span></div></div>
@@ -1823,9 +1835,35 @@ async function accionLinea(acc, id, valor) {
     await cargarLineas();
   } catch (error) { lineasMsg(error.message, 'rojo'); }
 }
+var MOTIVO_CAMBIO = { cliente_escribio: 'el cliente escribió por esa línea', persona: 'lo eligió una persona', linea_no_disponible: 'su línea se quitó o se deshabilitó', linea_caida: 'su línea seguía sin conexión' };
+async function cargarReparto() {
+  var caja = $('lineas-reparto');
+  if (!caja) return;
+  try {
+    var r = await api('/admin/lineas/reparto');
+    /* Con una sola línea no hay nada que repartir. */
+    caja.hidden = r.lineas.length < 2;
+    $('lineas-reparto-filas').innerHTML = r.lineas.map(function (l) {
+      return '<tr><td>' + esc(l.etiqueta) + (l.conectada ? '' : ' <span class="chip tono-ambar">sin conexión</span>') + (l.pausada ? ' <span class="chip tono-gris">pausada</span>' : '') + '</td><td>' + l.clientes + '</td><td>' + l.nuevosHoy + '</td><td>' + l.enviadosHoy + ' de ' + l.cupoDiario + '</td></tr>';
+    }).join('');
+    var espera = $('linea-espera');
+    if (espera && document.activeElement !== espera) espera.value = r.esperaCambioMinutos;
+    $('lineas-cambios').innerHTML = r.cambios.length ? r.cambios.map(function (c) {
+      return '<p>' + esc(new Date(c.createdAt).toLocaleString('es-PE')) + ' · ' + esc(c.nombre || ('+' + c.telefono)) + ': de <b>' + esc(c.desdeEtiqueta || 'una línea ya quitada') + '</b> a <b>' + esc(c.aEtiqueta || 'otra línea') + '</b> (' + esc(MOTIVO_CAMBIO[c.motivo] || c.motivo) + ')</p>';
+    }).join('') : '<p>Ningún cliente ha cambiado de línea.</p>';
+  } catch (error) { lineasMsg(error.message, 'rojo'); }
+}
 (function iniciarLineas() {
   var lista = $('lineas-lista');
   if (!lista) return;
+  $('linea-espera-guardar').onclick = async function () {
+    try {
+      await api('/admin/lineas/reparto', { method: 'PATCH', body: { esperaCambioMinutos: Number(val('linea-espera')) } });
+      lineasMsg('Guardado: se esperará ese tiempo antes de pasar clientes a otra línea.');
+    } catch (error) { lineasMsg(error.message, 'rojo'); }
+  };
+  cargarReparto();
+  setInterval(cargarReparto, 30000);
   lista.addEventListener('click', function (ev) {
     var b = ev.target.closest ? ev.target.closest('[data-acc]') : null;
     if (!b) return;

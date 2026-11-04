@@ -526,14 +526,14 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   const lineasActivas = async () => (deps.lineas ? (await deps.lineas.listar()).filter((l) => l.habilitada || l.principal) : []);
 
   /**
-   * La linea por la que se contesta un chat si nadie elige otra: la de la
-   * conversacion en curso (la del ultimo mensaje, entre o salga). Null si el
-   * chat es nuevo: ahi el sistema elige una al azar.
+   * La linea por la que se contesta un chat si nadie elige otra: la que el
+   * cliente tiene asignada. Null si el chat es nuevo: ahi el sistema le da la
+   * mas desahogada.
    */
   const lineaPorDefecto = async (contactId: string, activas: import('../whatsapp/lineas.js').Linea[]): Promise<string | null> => {
     if (!activas.length) return null;
-    // Sin conversacion en curso no hay linea por defecto: el primer mensaje abre por una al azar
-    // (ver `sortearLinea`) y desde ahi el proceso sigue por esa.
+    // Sin linea asignada no hay linea por defecto: el primer mensaje la decide
+    // (ver src/whatsapp/reparto-lineas.ts) y desde ahi el proceso sigue por esa.
     const ultima = await repos.messages.lineaDeLaConversacion(contactId);
     return activas.find((l) => l.id === ultima)?.id ?? null;
   };

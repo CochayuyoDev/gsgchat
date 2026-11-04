@@ -295,6 +295,12 @@ function lineaTagHtml(etiqueta, titulo) {
   return '<span class="linea-tag" style="background:' + colorDeLinea(etiqueta) + '" title="' + esc(titulo || etiqueta) + '">' + esc(etiqueta) + '</span>';
 }
 function lineaPorId(id) { return LINEAS.filter(function (l) { return l.id === id; })[0] || null; }
+/* Solo lo que eligio una persona viaja al servidor. Sin elegir, decide el sistema: asi puede pasar al cliente a otra linea si la suya ya no esta. */
+function lineaElegidaAMano() {
+  if (!current || !variasLineas()) return null;
+  var id = lineaElegida[current.id];
+  return id && lineaPorId(id) ? id : null;
+}
 /* La linea por la que saldra lo que se escriba ahora: la que se eligio en este chat o la de por defecto. */
 function lineaSeleccionada() {
   if (!current || !variasLineas()) return null;
@@ -1833,7 +1839,7 @@ async function enviar(payload) {
     payload.contactId = current.id;
     payload.atiendePersona = true;
     if (cita) payload.citaId = cita;
-    var lineaDeEnvio = lineaSeleccionada();
+    var lineaDeEnvio = lineaElegidaAMano();
     if (lineaDeEnvio) payload.lineaId = lineaDeEnvio;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
     if (r.ok === false) {
@@ -1882,7 +1888,7 @@ function pintarSelectorDeLinea(data) {
   if (!sel) return;
   if (!variasLineas()) { sel.classList.add('hidden'); return; }
   var elegida = lineaSeleccionada();
-  sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (al azar)</option>') + LINEAS.map(function (l) {
+  sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (la más desahogada)</option>') + LINEAS.map(function (l) {
     var caida = l.estado !== 'conectado';
     return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
   }).join('');

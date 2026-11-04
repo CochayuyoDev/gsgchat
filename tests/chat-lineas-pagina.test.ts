@@ -41,7 +41,7 @@ describe('adjuntos desde el chat', () => {
     for (const id of ['id="archivo"', 'id="grabar"', 'id="panel-stickers"', 'id="adjunto-previa"', 'id="grabando"']) expect(html).toContain(id);
     expect(html).toContain("addEventListener('paste'");
     expect(html).toContain("addEventListener('drop'");
-    expect(html).toContain('lineaId: lineaSeleccionada()');
+    expect(html).toContain('lineaId: lineaElegidaAMano()');
     const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).filter(Boolean);
     for (const js of scripts) expect(() => new Function(js)).not.toThrow();
   });
