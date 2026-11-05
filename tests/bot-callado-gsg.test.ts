@@ -60,6 +60,32 @@ describe('bot callado en «Solo lo de GSG» sin IA', () => {
     }
   });
 
+  it('ubicaciones que no son pin actual ni enlace de Google Maps, Apple Maps o Waze: silencio y se sigue esperando', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: MANANA });
+    try {
+      await e.api.post('/api/v1/entregas', { ...pedido, tracking: 'GSG-CALLADO-NOVALE' });
+      await e.trabajar();
+      const inicio = e.mensajesA(telefono).length;
+
+      for (const texto of [
+        'https://www.openstreetmap.org/?mlat=-12.046374&mlon=-77.042793',
+        'mi ubicacion es -12.046374, -77.042793',
+        `12°02'46.9"S 77°02'34.0"W`,
+        '8FVC2222+22 Lima',
+        'https://maps.google.com/?q=19.4326,-99.1332',
+      ]) {
+        await e.contesta(telefono, { texto });
+      }
+      expect(e.mensajesA(telefono)).toHaveLength(inicio);
+      expect((await e.entrega('GSG-CALLADO-NOVALE'))!.ubicacionEstado).toBe('pendiente');
+
+      await e.contesta(telefono, { texto: 'https://ul.waze.com/ul?ll=-12.046374%2C-77.042793&navigate=yes' });
+      expect((await e.entrega('GSG-CALLADO-NOVALE'))!.ubicacionEstado).toBe('recibida');
+    } finally {
+      await e.cerrar();
+    }
+  });
+
   it('«no soy yo» no recibe respuesta, pero el pedido pasa a incidencia y GSG se entera', async () => {
     const e = await crearEscenarioEntregas({ agente: true });
     try {

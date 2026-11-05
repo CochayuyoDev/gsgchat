@@ -59,7 +59,7 @@ ${bandaDemo}
     <header>
       <h1>Chats</h1>
       <span id="unread" class="badge hidden" aria-label="mensajes sin leer"></span>
-      <button type="button" id="etiquetar" class="etiquetar-boton" title="Clasifica con la IA los chats de hoy que aún no tienen etiqueta. GSG ve cada etiqueta como la nota del chat.">Etiquetar chats con IA</button>
+      <button type="button" id="etiquetar" class="etiquetar-boton" title="Clasifica con la IA los chats de hoy sin etiqueta y vuelve a leer los que tuvieron mensajes nuevos. GSG ve cada etiqueta como la nota del chat.">Etiquetar chats con IA</button>
       <button class="icon" id="nuevo" title="Escribir a un número nuevo" aria-label="Escribir a un número nuevo">✚</button>
       <button class="icon" id="menu-lista" title="Más opciones" aria-label="Más opciones" aria-haspopup="menu" aria-expanded="false">⋮</button>
     </header>
@@ -124,21 +124,28 @@ ${bandaDemo}
     <button class="bajar hidden" id="bajar" title="Bajar al último mensaje" aria-label="Bajar al último mensaje">↓<span class="nuevos hidden" id="bajar-nuevos"></span></button>
 
 
+    <input type="file" id="archivo" class="hidden" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip">
+
     <div class="cita-previa hidden" id="cita-previa">
       <div class="bloque"><span class="quien"></span><span class="que"></span></div>
       <button type="button" class="icon" id="cita-quitar" title="No responder a ese mensaje" aria-label="Quitar la cita">✕</button>
     </div>
+    <div class="previa hidden" id="adjunto-previa"></div>
     <div class="panel-bajo hidden" id="panel-atajos"></div>
+    <div class="panel-bajo hidden" id="panel-stickers"></div>
     <div class="panel-bajo emojis hidden" id="panel-emojis">
       <input class="buscador" id="emojis-buscar" placeholder="Buscar: caras, gestos, corazones, trabajo, comida" aria-label="Buscar emoji">
       <div id="emojis-rejillas"></div>
     </div>
     <div class="rapidas-barra hidden" id="rapidas-barra"></div>
 
+    <div class="grabando hidden" id="grabando"></div>
     <div class="composer hidden" id="composer">
-      <button class="ghost" id="boton-mas" title="Ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
+      <button class="ghost" id="boton-mas" title="Adjuntar, sticker, ubicación o respuesta rápida" aria-label="Más cosas que mandar" aria-haspopup="menu" aria-expanded="false">＋</button>
       <button class="ghost" id="boton-emoji" title="Emoji" aria-label="Elegir un emoji" aria-expanded="false">😊</button>
+      <select id="linea-sel" class="hidden" title="Por qué número de WhatsApp sale tu respuesta" aria-label="Línea de WhatsApp para responder"></select>
       <textarea id="text" rows="1" placeholder="Escribe un mensaje  ·  / para respuestas rápidas" aria-label="Escribe un mensaje"></textarea>
+      <button id="grabar" title="Grabar una nota de voz" aria-label="Grabar una nota de voz">🎤</button>
       <button id="send" class="hidden" title="Enviar" aria-label="Enviar">➤</button>
     </div>
 
@@ -274,6 +281,32 @@ var pintados = [];       /* lo que hay pintado en el hilo ahora mismo */
 var puedeEscribir = false;
 /* Lo que este proveedor sabe hacer. Lo dice el servidor al abrir el hilo; hasta
    entonces, lo minimo que todos pueden. Nada se pinta "por si acaso". */
+/* Las lineas de WhatsApp de la tienda. Con una sola no se rotula nada: la etiqueta solo aporta con varias. */
+var LINEAS = [];
+var lineaElegida = {};
+function variasLineas() { return LINEAS.length > 1; }
+function colorDeLinea(etiqueta) {
+  var h = 0, s = String(etiqueta || '');
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return 'hsl(' + h + ', 52%, 38%)';
+}
+function lineaTagHtml(etiqueta, titulo) {
+  if (!etiqueta) return '';
+  return '<span class="linea-tag" style="background:' + colorDeLinea(etiqueta) + '" title="' + esc(titulo || etiqueta) + '">' + esc(etiqueta) + '</span>';
+}
+function lineaPorId(id) { return LINEAS.filter(function (l) { return l.id === id; })[0] || null; }
+/* Solo lo que eligio una persona viaja al servidor. Sin elegir, decide el sistema: asi puede pasar al cliente a otra linea si la suya ya no esta. */
+function lineaElegidaAMano() {
+  if (!current || !variasLineas()) return null;
+  var id = lineaElegida[current.id];
+  return id && lineaPorId(id) ? id : null;
+}
+/* La linea por la que saldra lo que se escriba ahora: la que se eligio en este chat o la de por defecto. */
+function lineaSeleccionada() {
+  if (!current || !variasLineas()) return null;
+  var id = lineaElegida[current.id] || current.lineaPorDefecto;
+  return lineaPorId(id) ? id : null;
+}
 var PUEDE = { citar: false, reaccionar: false, eliminarParaTodos: false, editar: false, presencia: false };
 var filtroLista = 'todos';
 var enviando = 0;
@@ -345,6 +378,7 @@ async function loadChats(keepScroll, anexar) {
       conversations = Array.from(porId.values());
       offsetChats = offset + data.items.length;
     } else { conversations = data.items; offsetChats = data.items.length; }
+    if (data.lineas) LINEAS = data.lineas;
     hasMoreChats = Boolean(data.hasMore);
     if (window.actualizarNoLeidos) window.actualizarNoLeidos(data.unread || 0);
     var badge = document.getElementById('unread');
@@ -386,6 +420,7 @@ function filaDeChat(c) {
            : '<div class="avatar ' + colorDe(c.phone) + '" aria-hidden="true">' + esc(inicial(c.name, c.phone)) + '</div>') +
     '<div class="body"><div class="top">' +
       '<span class="name">' + esc(nombreDe(c)) + '</span>' +
+      (variasLineas() && c.linea ? lineaTagHtml(((lineaPorId(c.linea.id) || {}).etiqueta) || c.linea.etiqueta, 'Último mensaje por ' + (c.linea.etiqueta || '') + (c.linea.numero ? ' · +' + c.linea.numero : '')) : '') +
       (marcas ? '<span class="marcas">' + marcas + '</span>' : '') +
       '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
     '</div><div class="last"><span class="texto">' + prefijo + esc(texto.slice(0, 70)) + '</span>' + chipEtiqueta(c.etiqueta) +
@@ -483,7 +518,7 @@ function pintarEtiquetado(e, error) {
   } else {
     var partes = [];
     if (e.clasificadas) partes.push(e.clasificadas + ' etiquetado' + (e.clasificadas === 1 ? '' : 's'));
-    if (e.reutilizadas) partes.push(e.reutilizadas + ' ya tenían etiqueta (no se volvieron a leer)');
+    if (e.reutilizadas) partes.push(e.reutilizadas + ' sin cambios o con nota puesta a mano (no se volvieron a leer)');
     if (e.sinClasificar) partes.push(e.sinClasificar + ' sin clasificar (se reintentan la próxima vez)');
     texto = 'Listo: ' + e.total + ' chat' + (e.total === 1 ? '' : 's') + ' de hoy. ' + partes.join(' · ') + '.' +
       (e.recortado ? ' Hoy hay demasiados mensajes: se miraron los primeros.' : '') +
@@ -1118,6 +1153,10 @@ async function openChat(contactId, silent) {
     current.pedido = data.reparto ? data.reparto.referencia : null;
     current.reparto = data.reparto || null;
     PUEDE = data.puede || PUEDE;
+    if (data.lineas) LINEAS = data.lineas;
+    current.lineaPorDefecto = data.lineaPorDefecto || null;
+    var lineaSel = lineaSeleccionada();
+    if (lineaSel && lineaPorId(lineaSel)) PUEDE = lineaPorId(lineaSel).puede || PUEDE;
     puedeEscribir = Boolean(data.canWrite);
     if (nuevo) { ver('ficha', false); salirDeSeleccion(); quitarCita(); cerrarBusqueda(); cerrarPaneles(); nuevosSinVer = 0; ultimoPintadoId = 0; lastCount = 0; }
     ver('confirmar-cierre', false);
@@ -1155,7 +1194,9 @@ function pintarSubtitulo(data) {
   /* Arriba solo lo que importa: en que paso va su pedido y si lo tiene que atender una persona.
      Lo demas (ventana de 24 h, bot callado, baja, conversaciones anteriores) va en la ficha (ⓘ). */
   current.windowOpen = Boolean(data.windowOpen);
+  var lineaCab = variasLineas() ? lineaPorId(lineaSeleccionada() || current.lineaPorDefecto) : null;
   sub.innerHTML = '<span id="t-presencia"></span><span class="t-tel">' + esc(telefonoBonito(current.phone)) + '</span>' +
+    (lineaCab ? lineaTagHtml(lineaCab.etiqueta, 'Se le contesta por ' + lineaCab.etiqueta + (lineaCab.numero ? ' · +' + lineaCab.numero : '')) : '') +
     (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada') ? '<span class="pill warn t-marca" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
     (data.reparto ? '<a class="t-pedido" href="/hoy' + (data.reparto.referencia ? '?buscar=' + encodeURIComponent(data.reparto.referencia) : '') + '" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'Pedido ' + data.reparto.referencia : 'Reparto') + ': ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
     (data.reparto && data.reparto.esperaEnvio ? '<span class="t-tel">' + esc(data.reparto.esperaEnvio.motivo) + (data.reparto.esperaEnvio.hasta ? ' · ' + esc(new Date(data.reparto.esperaEnvio.hasta).toLocaleTimeString()) : '') + '</span>' : '');
@@ -1224,7 +1265,7 @@ document.getElementById('bajar').onclick = function () {
  * arriba, un refresco no le tira la vista al final.
  */
 function renderMessages(messages, scrollToEnd, mantenerVista) {
-  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive', 'image', 'audio', 'video'].indexOf(m.kind) >= 0; });
+  messages = messages.filter(function (m) { return ['text', 'location', 'location_request', 'buttons', 'template', 'interactive', 'image', 'audio', 'video', 'sticker'].indexOf(m.kind) >= 0; });
   messages = messages.filter(function (m) { return !m.expiresAt || Date.parse(m.expiresAt) > Date.now(); });
   pintados = messages;
   clearTimeout(expiryTimer);
@@ -1278,8 +1319,9 @@ function renderMessages(messages, scrollToEnd, mantenerVista) {
       resaltar(withLinks(cuerpoVisible(m))) +
       borradoHtml(m) +
       '<span class="meta">' +
+        (variasLineas() && m.lineaEtiqueta ? lineaTagHtml(m.lineaEtiqueta, (m.direction === 'out' ? 'Salió por ' : 'Llegó por ') + m.lineaEtiqueta + (m.lineaNumero ? ' · +' + m.lineaNumero : '')) : '') +
         (m.payload && m.payload.editadoAt ? '<span class="editado" title="Se editó después de enviarlo">editado</span>' : '') +
-        (m.direction === 'out' && m.payload && m.payload.origen === 'ia' && !m.payload.textoFijo ? '<span class="de-ia" title="Lo escribió el asistente IA">🤖</span>' : '') +
+        quienMando(m) +
         esc(hhmm(m.createdAt)) + (m.direction === 'out' ? ' ' + tick(m.status) : '') +
       '</span>' +
       reaccionesHtml(m) +
@@ -1362,6 +1404,136 @@ function cuerpoVisible(m) {
   return m.payload && m.payload.interactive && m.payload.interactive.locationRequest ? cuerpo + '\n\n📍 [Enviar ubicación]' : cuerpo;
 }
 
+/* ---- Nota de voz: el reproductor de WhatsApp (play, onda, tiempo y velocidad) ---- */
+var AU = { el: null, url: null, vel: 1 };
+function audioTiempo(s) {
+  s = Math.max(0, Math.round(Number(s) || 0));
+  return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+}
+/* La onda sale del enlace: la misma nota se ve siempre igual, sin bajar el audio. */
+function audioOnda(url, fraccion) {
+  var h = 7, barras = '', total = 34, activas = Math.round(total * fraccion);
+  for (var i = 0; i < url.length; i++) h = (h * 31 + url.charCodeAt(i)) >>> 0;
+  for (var j = 0; j < total; j++) {
+    h = (h * 1103515245 + 12345) >>> 0;
+    var alto = 22 + Math.round(((h >>> 8) % 100) * 0.7);
+    barras += '<b' + (j < activas ? ' class="on"' : '') + ' style="height:' + alto + '%"></b>';
+  }
+  return barras;
+}
+/* Lo que dura: el audio si ya lo sabe; si no (Chrome da Infinity en algunos ogg), lo que dijo el telefono. */
+var AUDUR = {};
+function audioDur(el, seg, url) {
+  var d = el ? el.duration : NaN;
+  return isFinite(d) && d > 0 ? d : (Number(seg) || (url && AUDUR[url]) || 0);
+}
+/* Los audios que llegan por Meta no traen su duracion: se lee de cada uno (solo la cabecera, gracias a los rangos) para mostrarla antes de dar play. */
+function audioPrecargar(url) {
+  if (AUDUR[url] !== undefined) return;
+  AUDUR[url] = 0;
+  var el = new Audio();
+  el.preload = 'metadata';
+  el.addEventListener('loadedmetadata', function () {
+    if (isFinite(el.duration) && el.duration > 0) { AUDUR[url] = el.duration; audioPintar(url); }
+  });
+  el.src = url;
+}
+function audioHtml(a, url) {
+  var activo = AU.url === a.url && AU.el;
+  var dur = audioDur(activo ? AU.el : null, a.segundos, a.url);
+  if (!dur) setTimeout(function () { audioPrecargar(a.url); }, 0);
+  var frac = activo && dur ? Math.min(1, AU.el.currentTime / dur) : 0;
+  var suena = activo && !AU.el.paused;
+  var tiempo = activo && (suena || AU.el.currentTime > 0) ? AU.el.currentTime : dur;
+  return '<div class="adjunto adjunto-audio wa-audio' + (suena ? ' sonando' : '') + '" data-url="' + url + '" data-seg="' + (a.segundos || '') + '">' +
+    '<button type="button" class="wa-a-play" aria-label="' + (suena ? 'Pausar' : 'Reproducir') + '"></button>' +
+    '<div class="wa-a-barra" role="slider" aria-label="Posicion de la nota de voz">' + audioOnda(a.url, frac) + '</div>' +
+    '<span class="wa-a-t">' + (tiempo ? audioTiempo(tiempo) : '🎤') + '</span>' +
+    '<button type="button" class="wa-a-vel"' + (activo ? '' : ' hidden') + ' aria-label="Velocidad">' + AU.vel + 'x</button>' +
+    '</div>';
+}
+function audioPintar(url) {
+  var nodos = document.querySelectorAll('.wa-audio');
+  for (var i = 0; i < nodos.length; i++) {
+    var w = nodos[i];
+    if (w.dataset.url !== url) continue;
+    var activo = AU.url === url && AU.el;
+    var dur = audioDur(activo ? AU.el : null, w.dataset.seg, url);
+    var frac = activo && dur ? Math.min(1, AU.el.currentTime / dur) : 0;
+    var barras = w.querySelectorAll('.wa-a-barra b'), n = Math.round(barras.length * frac);
+    for (var k = 0; k < barras.length; k++) barras[k].classList.toggle('on', k < n);
+    var suena = activo && !AU.el.paused;
+    w.classList.toggle('sonando', !!suena);
+    w.querySelector('.wa-a-play').setAttribute('aria-label', suena ? 'Pausar' : 'Reproducir');
+    var t = activo && (suena || AU.el.currentTime > 0) ? AU.el.currentTime : dur;
+    w.querySelector('.wa-a-t').textContent = t ? audioTiempo(t) : '🎤';
+    var v = w.querySelector('.wa-a-vel');
+    v.hidden = !activo; v.textContent = AU.vel + 'x';
+  }
+}
+function audioAlternar(url) {
+  if (AU.el && AU.url === url) {
+    if (AU.el.paused) AU.el.play().catch(function () {}); else AU.el.pause();
+    return;
+  }
+  if (AU.el) { var antes = AU.url; AU.el.pause(); AU.el = null; AU.url = null; audioPintar(antes); }
+  var el = new Audio(url);
+  el.preload = 'auto';
+  el.playbackRate = AU.vel;
+  AU.el = el; AU.url = url;
+  ['timeupdate', 'play', 'pause', 'loadedmetadata', 'durationchange'].forEach(function (e) { el.addEventListener(e, function () { audioPintar(url); }); });
+  el.addEventListener('ended', function () { el.currentTime = 0; audioPintar(url); });
+  el.addEventListener('error', function () {
+    AU.el = null; AU.url = null;
+    document.querySelectorAll('.wa-audio').forEach(function (w) { if (w.dataset.url === url) { w.classList.remove('sonando'); w.querySelector('.wa-a-t').textContent = 'No se pudo reproducir'; } });
+  });
+  audioPintar(url);
+  el.play().catch(function () {});
+}
+document.addEventListener('click', function (ev) {
+  var w = ev.target.closest && ev.target.closest('.wa-audio');
+  if (!w) return;
+  var url = w.dataset.url;
+  if (ev.target.closest('.wa-a-play')) { audioAlternar(url); return; }
+  if (ev.target.closest('.wa-a-vel')) {
+    AU.vel = AU.vel === 1 ? 1.5 : AU.vel === 1.5 ? 2 : 1;
+    if (AU.el) AU.el.playbackRate = AU.vel;
+    audioPintar(url);
+    return;
+  }
+  var barra = ev.target.closest('.wa-a-barra');
+  if (barra) {
+    if (AU.url !== url) audioAlternar(url);
+    var el = AU.el, r = barra.getBoundingClientRect();
+    var ir = function () { var d = audioDur(el, w.dataset.seg, url); if (el && d) el.currentTime = d * Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)); };
+    if (el && audioDur(el, w.dataset.seg, url)) ir(); else if (el) el.addEventListener('loadedmetadata', ir, { once: true });
+  }
+});
+
+/**
+ * Quien mando un mensaje saliente, como nota chica junto a la hora: el bot, la
+ * IA, una persona de aqui (con su rol) o una persona de GSG. Los entrantes no
+ * llevan nota: los manda el cliente.
+ */
+function quienMando(m) {
+  if (m.direction !== 'out') return '';
+  var p = m.payload || {};
+  var texto, titulo;
+  if (p.emisor && p.emisor.tipo === 'gsg') {
+    texto = 'GSG · ' + (p.autorNombre || 'usuario');
+    titulo = 'Usuario de GSG' + (p.emisor.rol ? ' (' + p.emisor.rol + ')' : '');
+  } else if (p.origen === 'ia' && !p.textoFijo) {
+    texto = 'IA'; titulo = 'Lo escribió el asistente IA';
+  } else if (p.origen === 'persona') {
+    var rol = p.autorRol === 'admin' ? 'administrador' : p.autorRol === 'operador' ? 'operador' : '';
+    if (p.autorNombre === 'Teléfono') { texto = 'Teléfono'; titulo = 'Se escribió desde el teléfono'; }
+    else { texto = (p.autorNombre || 'Usuario') + (rol ? ' · ' + rol : ''); titulo = 'Usuario de GSGchat' + (rol ? ' (' + rol + ')' : ''); }
+  } else {
+    texto = 'Bot'; titulo = 'Mensaje automático del sistema';
+  }
+  return '<span class="quien" title="' + esc(titulo) + '">' + esc(texto) + '</span>';
+}
+
 /**
  * La foto, el audio o el video que mando el cliente, para verlo o escucharlo
  * aqui. El enlace es el mismo que recibe GSG en el historial (firmado). Si el
@@ -1372,8 +1544,9 @@ function adjuntoHtml(m) {
   if (!a || !a.url) return '';
   var url = esc(a.url);
   if (m.kind === 'image') return '<a class="adjunto adjunto-foto" href="' + url + '" target="_blank" rel="noopener" title="Abrir la foto"><img src="' + url + '" alt="Foto del cliente" loading="lazy"></a>';
-  if (m.kind === 'audio') return '<div class="adjunto adjunto-audio"><span>🎤 Nota de voz</span><audio controls preload="none" src="' + url + '"></audio></div>';
+  if (m.kind === 'audio') return audioHtml(a, url);
   if (m.kind === 'video') return '<div class="adjunto adjunto-video"><video controls preload="metadata" src="' + url + '"></video></div>';
+  if (m.kind === 'sticker') return '<div class="adjunto adjunto-sticker"><img src="' + url + '" alt="Sticker del cliente" loading="lazy"></div>';
   return '';
 }
 
@@ -1666,6 +1839,8 @@ async function enviar(payload) {
     payload.contactId = current.id;
     payload.atiendePersona = true;
     if (cita) payload.citaId = cita;
+    var lineaDeEnvio = lineaElegidaAMano();
+    if (lineaDeEnvio) payload.lineaId = lineaDeEnvio;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
     if (r.ok === false) {
       if (pendiente) pendiente.remove();
@@ -1707,12 +1882,36 @@ input.addEventListener('keydown', function (e) {
 
 /* --------------------------------------------------- compositor bloqueado */
 
+/* El selector de linea: solo con varias. Elegir una cambia tambien lo que el chat permite (editar, reaccionar...). */
+function pintarSelectorDeLinea(data) {
+  var sel = document.getElementById('linea-sel');
+  if (!sel) return;
+  if (!variasLineas()) { sel.classList.add('hidden'); return; }
+  var elegida = lineaSeleccionada();
+  sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (al azar)</option>') + LINEAS.map(function (l) {
+    var caida = l.estado !== 'conectado';
+    return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
+  }).join('');
+  sel.style.background = elegida ? colorDeLinea((lineaPorId(elegida) || {}).etiqueta) : '#667781';
+  sel.classList.remove('hidden');
+  sel.onchange = function () {
+    if (!current) return;
+    if (sel.value) lineaElegida[current.id] = sel.value; else delete lineaElegida[current.id];
+    var l = lineaPorId(sel.value);
+    if (l && l.puede) PUEDE = l.puede;
+    sel.style.background = l ? colorDeLinea(l.etiqueta) : '#667781';
+    pintarSubtitulo({ canWrite: true, reparto: current.reparto, windowOpen: current.windowOpen });
+    renderMessages(hilo.mensajes, false, true);
+  };
+}
+
 function renderComposer(data) {
   var composer = document.getElementById('composer');
   var locked = document.getElementById('locked');
   var barra = document.getElementById('rapidas-barra');
   if (!composer || !locked) return;
 
+  pintarSelectorDeLinea(data);
   if (data.canWrite) {
     ver('composer', true);
     locked.classList.add('hidden');
@@ -1856,6 +2055,7 @@ async function revisarConexion() {
  */
 function ocupado() {
   return Boolean(menuAbierto) || (seleccion && seleccion.length > 0) ||
+    Boolean(adjuntoPendiente) || Boolean(grabadora) ||
     !document.getElementById('buscar-hilo').classList.contains('hidden') ||
     document.querySelector('.dlg-fondo, .visor, .ayuda-teclas') !== null;
 }

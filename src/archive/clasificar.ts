@@ -14,7 +14,6 @@
  * se distinguiria de una conversacion que de verdad no encaja en nada.
  */
 
-import { createHash } from 'node:crypto';
 import type { Message } from '../db/messages.js';
 import type { MensajeIA } from '../ia/proveedores.js';
 
@@ -151,13 +150,6 @@ export function validarCatalogo(items: Array<Partial<EtiquetaCatalogo>>): { ok: 
   }
   if (!vistos.has(CODIGO_OTRO)) return { ok: false, error: 'Falta la etiqueta «otro»: es la que se pone cuando ninguna corresponde. Puedes cambiarle el nombre, pero no quitarla.' };
   return { ok: true, catalogo };
-}
-
-/** Una huella del catalogo: si cambia un codigo o una descripcion, lo ya clasificado se vuelve a mirar. */
-export function firmaCatalogo(catalogo: Catalogo): string {
-  const h = createHash('sha256');
-  for (const e of catalogo) h.update(`${e.codigo}\u0000${e.descripcion}\u0001`);
-  return h.digest('hex');
 }
 
 /** El nombre para la pantalla y los exportes: del catalogo del negocio, del de fabrica o del de antes. */

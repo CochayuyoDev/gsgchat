@@ -332,6 +332,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
   const dayKey = (day: Date) => day.toISOString().slice(0, 10);
   const contactById = (id: string) => [...contactsByPhone.values()].find((c) => c.id === id);
 
+  const messages = createFakeMessages(() => [...contactsByPhone.values()]);
   const repos: FakeRepos = {
     _contacts: contactsByPhone,
     _deliveries: deliveries,
@@ -357,7 +358,8 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     envioAutomatico: createFakeEnvioAutomatico(),
     pedidos: createFakePedidos(() => [...contactsByPhone.values()]),
     automation: createFakeAutomation(contactById),
-    messages: createFakeMessages(() => [...contactsByPhone.values()]),
+    messages,
+    lineasContacto: messages._lineasContacto,
     entrenamiento: createFakeEntrenamiento(() => [...contactsByPhone.values()], () => repos.messages._all),
     codigosConexion: createFakeCodigos(),
     tiendas: createFakeTiendas(),

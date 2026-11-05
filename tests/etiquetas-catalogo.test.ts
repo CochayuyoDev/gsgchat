@@ -12,7 +12,6 @@ import {
   CATALOGO_POR_DEFECTO,
   CODIGO_OTRO,
   clasificarConIA,
-  firmaCatalogo,
   instruccionesDeEtiqueta,
   leerEtiqueta,
   nombreDeEtiqueta,
@@ -91,12 +90,6 @@ describe('el catalogo', () => {
     const sinSN = instruccionesDeEtiqueta(false, PROPIO).join('\n');
     expect(sinSN).not.toContain('sin_novedad');
     expect(sinSN).toMatch(/agradecimientos, preguntas ajenas\) o no se entiende, usa otro/);
-  });
-
-  it('la firma cambia con un codigo o una descripcion, no con el nombre', () => {
-    const f = firmaCatalogo(PROPIO);
-    expect(firmaCatalogo(PROPIO.map((e) => ({ ...e, nombre: `${e.nombre}!` })))).toBe(f);
-    expect(firmaCatalogo(PROPIO.map((e, i) => (i ? e : { ...e, descripcion: 'otra cosa' })))).not.toBe(f);
   });
 });
 

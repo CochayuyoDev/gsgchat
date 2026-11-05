@@ -201,7 +201,9 @@ export async function registerWahaWebhookRoutes(
       void (async () => {
         const value = toChangeValue(event);
         if (!value) return;
-        await processChange('messages', value, withSeen);
+        // Cada sesion de WAHA es una linea: el aviso sabe de cual viene.
+        const deLinea = event.session && deps.lineas ? await deps.lineas.porIdExterno('waha', event.session) : null;
+        await processChange('messages', deLinea ? { ...value, lineaId: deLinea.id } : value, withSeen);
       })().catch((error) => {
         request.log.error({ err: error }, 'fallo procesando el webhook de WAHA');
       });

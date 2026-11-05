@@ -199,14 +199,14 @@ describe('conectar sin importar el WhatsApp personal', () => {
     fake.emitir('messaging-history.set', { messages: Array.from({length: 3000}, (_,i) => mensaje('51987603222', 'h'+i)), syncType: 3, progress: 100 });
     fake.emitir('messages.upsert', { type: 'notify', messages: ['audioMessage', 'videoMessage', 'stickerMessage', 'imageMessage', 'documentMessage'].map((type,i) => ({ ...mensaje('51987603111', 'archivo'+i), message: { [type]: { url: 'https://archivo.invalid', mimetype: 'audio/ogg' } } })) });
     fake.emitir('messages.upsert', { type: 'notify', messages: [mensaje('51987603222', 'personal'), mensaje('51987603222', 'propio', true), mensaje('51987603111', 'cliente')] });
-    // Fotos, audios y videos se reciben (regla del dueño, 28/10); stickers y documentos no.
-    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(4));
+    // Fotos, audios, videos y stickers se reciben (regla del dueño, 28/10); los documentos no.
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(5), { timeout: 8000 });
     const tipos = onChange.mock.calls.map((c) => c[0].messages[0].type);
-    expect(tipos.sort()).toEqual(['audio', 'image', 'text', 'video']);
+    expect(tipos.sort()).toEqual(['audio', 'image', 'sticker', 'text', 'video']);
     expect(onChange.mock.calls.every((c) => c[0].messages[0].from === '51987603111')).toBe(true);
     expect(onPropio).not.toHaveBeenCalled();
     expect(onSincronizacionInicial).not.toHaveBeenCalled();
-    expect(aceptarEntrante).toHaveBeenCalledTimes(5);
+    expect(aceptarEntrante).toHaveBeenCalledTimes(6);
     resetLocalForTests();
   });
 });
@@ -369,9 +369,28 @@ describe('la sesion local', () => {
     await promesa;
 
     expect(getLocalState().status).toBe('STOPPED');
+    expect(getLocalState().bloqueado).toBe(true);
     expect(hayVinculacion(authDir)).toBe(true);
     expect(vinculacionMuerta(403)).toBe(false);
     expect([401, 411, 500].every(vinculacionMuerta)).toBe(true);
+
+    // Al volver a conectar deja de contar como bloqueado.
+    const otro = fakeSocket();
+    const reconexion = startLocal({ authDir, createSocket: async () => ({ sock: otro.sock, saveCreds: async () => {} }) });
+    await otro.listo();
+    otro.emitir('connection.update', { connection: 'open' });
+    await reconexion;
+    expect(getLocalState().bloqueado).toBe(false);
+  });
+
+  it('desvincular desde el telefono (401) no cuenta como bloqueo', async () => {
+    const { sock, emitir, listo } = fakeSocket();
+    const promesa = startLocal({ authDir: mkdtempSync(join(tmpdir(), 'wa-auth-401-')), createSocket: async () => ({ sock, saveCreds: async () => {} }) });
+    await listo();
+    emitir('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+    await promesa;
+    expect(getLocalState().status).toBe('STOPPED');
+    expect(getLocalState().bloqueado).toBe(false);
   });
 
   it('los entrantes se entregan ya traducidos', async () => {

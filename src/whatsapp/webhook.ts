@@ -12,17 +12,22 @@
  * se recuerda un rato y la repeticion se ignora.
  */
 
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Repos, TemplateQuality, TemplateStatus } from '../db/repos.js';
 import { verifyChallenge, verifySignature } from './signature.js';
 import type { ChangeValue, WebhookPayload } from './types.js';
-import { handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
+import { claveEntrada, handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
+import type { ServicioLineas } from './lineas.js';
+import type { LineaDeMensaje } from './types.js';
 import type { SettingsService } from '../settings/service.js';
 import { TtlCache } from '../util/cache.js';
 import { esPausaAutomatica } from '../salud/monitor.js';
 import { perteneceAlChatActual } from './alcance-chat.js';
 import { entradaAdmitida } from './entradas-admitidas.js';
+import { tamanoMedia, conCupoDeDescarga, extensionDe, idDeMedia, mediaDirectory, type MediaKind } from './local/media.js';
 
 export interface WebhookDeps extends InboundDeps {
   repos: Repos;
@@ -30,6 +35,10 @@ export interface WebhookDeps extends InboundDeps {
   settings: SettingsService;
   /** Ids de mensajes ya procesados; si falta, no se deduplica. */
   seen?: TtlCache<true>;
+  /** Donde se guardan los ficheros que llegan (por defecto, el de siempre). */
+  mediaDir?: string;
+  /** Las lineas de la tienda, para saber por cual llego cada mensaje. Sin ellas, no se anota. */
+  lineas?: ServicioLineas;
 }
 
 type RawRequest = FastifyRequest & { rawBody?: Buffer };
@@ -130,6 +139,21 @@ export function qualityFromEvent(event: string | undefined): 'GREEN' | 'YELLOW' 
   return null;
 }
 
+/**
+ * La linea por la que llego un aviso: la que diga el transporte (`lineaId`:
+ * WAHA por sesion, local por socket) o, en Meta, la del `phone_number_id` de
+ * los metadatos. Si no se reconoce, es la principal: asi lo de siempre sigue
+ * funcionando aunque llegue algo que no encaja con ninguna linea.
+ */
+export async function lineaDelAviso(value: ChangeValue, lineas: ServicioLineas | undefined): Promise<LineaDeMensaje | undefined> {
+  if (!lineas) return undefined;
+  const linea =
+    (value.lineaId ? await lineas.obtener(value.lineaId) : null) ??
+    (value.metadata?.phone_number_id ? await lineas.porIdExterno('cloud', value.metadata.phone_number_id) : null) ??
+    (await lineas.principal());
+  return { id: linea.id, etiqueta: linea.etiqueta, numero: linea.telefono };
+}
+
 export async function processChange(
   field: string,
   value: ChangeValue,
@@ -157,17 +181,22 @@ export async function processChange(
       }
 
       const profileName = value.contacts?.[0]?.profile?.name;
-      for (const message of value.messages ?? []) {
+      const linea = (value.messages ?? []).length ? await lineaDelAviso(value, deps.lineas) : undefined;
+      for (const recibido of value.messages ?? []) {
+        const message = linea ? { ...recibido, linea } : recibido;
         if (!entradaAdmitida(message)) continue;
         if (!(await perteneceAlChatActual(repos, deps.settings, message))) continue;
         // La segunda entrega de un mensaje (el telefono reenvio un "ver una
         // vez") lleva el mismo id a proposito: no es un duplicado, es el
         // fichero que faltaba.
         if (seen && message.id && !message.reenvio) {
-          if (seen.get(message.id)) continue;
-          seen.set(message.id, true);
+          const clave = claveEntrada(message);
+          if (seen.get(clave)) continue;
+          seen.set(clave, true);
         }
-        await handleInboundMessage(conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' }), profileName, deps);
+        const entrante = conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' });
+        await guardarMediaDeMeta(entrante, deps);
+        await handleInboundMessage(entrante, profileName, deps);
       }
       return;
     }
@@ -350,13 +379,42 @@ export async function processChange(
 }
 
 /**
+ * Meta solo guarda el fichero un tiempo (unos 30 dias): si nadie lo abre antes,
+ * la foto, el video o el audio desaparecen del chat. Por eso se baja en cuanto
+ * llega y se deja en el disco, con el nombre que ya busca `GET /archivos/:token`
+ * (ver src/api/v1/archivos-gsg.ts). Si falla no se pierde nada: se vuelve a
+ * intentar cuando alguien lo abra.
+ */
+async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, deps: WebhookDeps): Promise<void> {
+  const media = message.media as { id?: unknown; mimeType?: unknown } | undefined;
+  if (!media || typeof media.id !== 'string' || typeof media.mimeType !== 'string' || (!deps.wa.downloadMedia && !deps.wa.downloadMediaToFile)) return;
+  try {
+    const dir = deps.mediaDir ?? mediaDirectory();
+    const copia = idDeMedia(`meta:${media.id}`, extensionDe(media.mimeType, message.type as MediaKind));
+    // Ya esta en disco: lo del QR se guarda al recibirlo (su id es el nombre del fichero) y lo de Meta, la vez anterior. No se baja nada.
+    if ((await tamanoMedia(dir, media.id)) !== null || (await tamanoMedia(dir, copia)) !== null) return;
+    await mkdir(dir, { recursive: true });
+    await conCupoDeDescarga(async () => {
+      if (deps.wa.downloadMediaToFile) {
+        await deps.wa.downloadMediaToFile(media.id as string, path.join(dir, copia));
+        return;
+      }
+      const bajado = await deps.wa.downloadMedia!(media.id as string);
+      await writeFile(path.join(dir, copia), bajado.datos);
+    });
+  } catch (error) {
+    console.warn('[webhook] no se pudo guardar el archivo de Meta al recibirlo', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
  * La API de Meta trae el adjunto como `image: { id, mime_type, caption }` (o
  * `audio`, `video`): solo el id, el fichero se baja aparte cuando alguien lo
  * abre (ver src/api/v1/archivos-gsg.ts). Aqui se pasa a `media`, la forma
  * comun con la que se guarda en el chat.
  */
 export function conMediaDeMeta<T extends { type?: string; media?: unknown }>(message: T): T {
-  if (message.media || !message.type || !['image', 'audio', 'video'].includes(message.type)) return message;
+  if (message.media || !message.type || !['image', 'audio', 'video', 'sticker'].includes(message.type)) return message;
   const crudo = (message as Record<string, unknown>)[message.type] as { id?: unknown; mime_type?: unknown; caption?: unknown; voice?: unknown } | undefined;
   if (!crudo || typeof crudo.id !== 'string') return message;
   return {

@@ -144,6 +144,12 @@ export interface ServerDeps {
    * directorio de usuarios compartido. Sin esto, una instalacion suelta.
    */
   sesionLocal?: SesionLocal;
+  /** El buscador de direcciones (lee enlaces de mapa que solo traen una direccion). */
+  geocodificador?: import('./entregas/geocodificar.js').Geocodificador | null;
+  /** Las lineas de WhatsApp de la tienda (ver src/whatsapp/lineas.ts) y el cliente de cada una. */
+  lineas?: import('./whatsapp/lineas.js').ServicioLineas;
+  registroClientes?: import('./whatsapp/registro.js').RegistroClientes;
+  repartoLineas?: import('./whatsapp/reparto-lineas.js').RepartoDeLineas;
   /** Para apuntar el telefono vinculado: la salud guarda el riesgo por numero (src/salud/numero.ts). */
   anotarNumeroVigente?: (telefono: string | null | undefined) => void;
   /**
@@ -320,7 +326,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas, mediaDir, lineas: deps.lineas });
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
   if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, webhooks: repos.webhooks, simulador: deps.simuladorGsg, config });
   if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });
@@ -355,9 +361,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // seguidos sin que el haya escrito nada en medio (ver rafaga.ts).
     rafagaMs: config.RAFAGA_MS,
     hmacKey: () => settings.current().verifyToken,
+    lineas: deps.lineas,
+    geocodificador: deps.geocodificador ?? undefined,
   });
 
   await registerAdminRoutes(app, {
+    lineas: deps.lineas,
     numeroDeSalud: deps.numeroDeSalud,
     bus: deps.bus,
     repos,
@@ -385,10 +394,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
-  await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
+  await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
-  await registerApiConversacionesGsg(app, { repos, sender, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
+  await registerApiConversacionesGsg(app, { repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
   // Los archivos de ese historial (`archivo.url`): enlace firmado, sin clave. Ver src/api/v1/archivos-gsg.ts.
   await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa });
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
@@ -416,6 +425,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     voz,
     entregas,
     autoConectarLocal: deps.autoConectarLocal,
+    lineas: deps.lineas,
+    geocodificador: deps.geocodificador,
+    registroClientes: deps.registroClientes,
+    repartoLineas: deps.repartoLineas,
     fiabilidad: Boolean(deps.fiabilidad),
     simulador: deps.simuladorGsg,
     settingsRepo: deps.settingsRepo,

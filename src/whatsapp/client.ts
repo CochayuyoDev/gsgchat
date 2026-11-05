@@ -6,7 +6,9 @@
  * justo el problema que este proyecto intenta evitar.
  */
 
+import { Readable } from 'node:stream';
 import type { TemplateComponent } from './types.js';
+import { guardarFlujo } from './local/media.js';
 
 export interface SendResult {
   wamid: string;
@@ -195,6 +197,11 @@ export interface WhatsAppClient {
    * solo trae su id. Los demás proveedores ya lo guardan al recibirlo.
    */
   downloadMedia?(mediaId: string): Promise<{ datos: Buffer; mimeType: string }>;
+  /**
+   * Lo mismo, pero directo al disco y por trozos: no entra entero en memoria,
+   * sea cual sea su tamaño. Es lo que usa el servidor.
+   */
+  downloadMediaToFile?(mediaId: string, destino: string): Promise<{ mimeType: string; bytes: number }>;
   sendButtons(
     to: string,
     body: string,
@@ -475,6 +482,22 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
         const response = await fetchImpl(info.url, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal });
         if (!response.ok) throw new WhatsAppApiError(`no se pudo bajar el archivo (HTTP ${response.status})`, response.status, undefined, undefined, response.status >= 500);
         return { datos: Buffer.from(await response.arrayBuffer()), mimeType: info.mime_type ?? response.headers.get('content-type') ?? 'application/octet-stream' };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+
+    async downloadMediaToFile(mediaId, destino) {
+      const info = await call<{ url?: string; mime_type?: string }>(`${baseUrl}/${graphVersion}/${encodeURIComponent(mediaId)}`, { method: 'GET' });
+      if (!info.url) throw new WhatsAppApiError('Meta no devolvió la dirección del archivo', 502, undefined, undefined, true);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs * 4);
+      try {
+        const response = await fetchImpl(info.url, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal });
+        if (!response.ok) throw new WhatsAppApiError(`no se pudo bajar el archivo (HTTP ${response.status})`, response.status, undefined, undefined, response.status >= 500);
+        if (!response.body) throw new WhatsAppApiError('Meta no mandó el archivo', 502, undefined, undefined, true);
+        const bytes = await guardarFlujo(Readable.fromWeb(response.body as never), destino);
+        return { mimeType: info.mime_type ?? response.headers.get('content-type') ?? 'application/octet-stream', bytes };
       } finally {
         clearTimeout(timer);
       }

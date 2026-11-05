@@ -35,6 +35,17 @@ export interface SendJob {
   kind: MessageKind;
   category: TemplateCategory;
   campaignId?: string | null;
+  /**
+   * Por que linea de WhatsApp sale. Indicarla es elegirla (una persona, desde el
+   * chat): si no esta disponible no se sustituye. Sin indicarla: la que el
+   * cliente tiene asignada o, si es nuevo, una conectada al azar.
+   */
+  whatsappNumberId?: string | null;
+  /**
+   * `whatsappNumberId` lo fijo la cola para que un reintento no cambie de numero,
+   * no lo eligio nadie: si esa linea deja de estar disponible, se puede cambiar.
+   */
+  lineaDelSistema?: boolean;
   /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
   manual?: boolean;
   /** Envío con cadencia propia: el transporte no añade escritura artificial. */
@@ -55,6 +66,8 @@ export interface SendJob {
   atiendePersona?: boolean;
   /** Si lo escribio un usuario de otro sistema (GSG): quien, con que rol y para que tracking. Se guarda en el hilo (payload.emisor). */
   emisor?: { tipo: string; usuarioId: string; rol: string | null; tracking: string; idExterno: string };
+  /** El rol de quien escribe desde el chat de aqui ('admin' u 'operador'): se guarda para que el hilo diga quien fue. */
+  autorRol?: string;
   /**
    * Limites por contacto propios de quien manda, por encima de la politica.
    *
@@ -161,6 +174,7 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
     // Un texto fijo del negocio que manda el asistente: en el chat y para GSG es del sistema, no de la IA.
     ...(job.textoFijo ? { textoFijo: true } : {}),
     ...(nombre ? { autorNombre: nombre } : {}),
+    ...(job.autorRol ? { autorRol: job.autorRol } : {}),
     ...(job.emisor ? { emisor: job.emisor } : {}),
     // La cita se guarda con lo justo para pintarla: de quien era y que decia.
     // El id tambien, para poder saltar al original si sigue en el hilo.
@@ -180,6 +194,8 @@ function conOrigen(job: SendJob, payload: Record<string, unknown> | null): Recor
  */
 export interface AccionMensaje {
   phone: string;
+  /** La linea por la que se hace; la del mensaje original. Sin ella, la principal. */
+  whatsappNumberId?: string | null;
   mensaje: CitaSaliente;
   tipo: 'reaccion' | 'eliminar' | 'editar';
   /** Para 'reaccion'. Cadena vacia = quitarla. */
@@ -189,7 +205,7 @@ export interface AccionMensaje {
 }
 
 export type SendOutcome =
-  | { ok: true; wamid: string; deliveryId: number }
+  | { ok: true; wamid: string; deliveryId: number; whatsappNumberId?: string | null }
   | {
       ok: false;
       blocked: true;
@@ -197,6 +213,8 @@ export type SendOutcome =
       reason: string;
       retryAfterMs?: number;
       deliveryId: number;
+      /** La linea del intento: la cola la fija en el trabajo para que el reintento no cambie de numero. */
+      whatsappNumberId?: string | null;
     }
   | {
       ok: false;
@@ -204,6 +222,7 @@ export type SendOutcome =
       error: string;
       retryable: boolean;
       deliveryId: number | null;
+      whatsappNumberId?: string | null;
       /** Codigo de Meta (131026...) o del cliente, normalizado; null si no se reconocio. */
       code?: string | null;
       /**
@@ -214,7 +233,37 @@ export type SendOutcome =
       incierto?: boolean;
     };
 
+/** Una linea de WhatsApp lista para enviar: su cliente y lo que la identifica ante los controles. */
+export interface LineaDeEnvio {
+  id: string;
+  etiqueta: string;
+  numero: string;
+  cliente: WhatsAppClient;
+  /** Con que id se llevan su estado, su cupo y su calentamiento (numberState, counters). */
+  identidad: string;
+  /** Si la ventana de 24 h de Meta aplica a esta linea (solo la API oficial). */
+  ventanaAplica: boolean;
+  /** Desde cuando esta sin conexion; null si esta conectada o aun no se sabe. */
+  noDisponibleDesde?: Date | null;
+  /** WhatsApp rechazo este numero: sus clientes pasan a otra linea sin esperar. */
+  bloqueada?: boolean;
+}
+
+/** Lo que dura sin conexion una linea antes de pasar sus clientes a otra: un corte breve no los mueve. */
+const ESPERA_CAMBIO_LINEA_MS = 2 * 60_000;
+
 export interface SenderDeps {
+  /**
+   * Resuelve una linea (null = la principal). Devuelve null si no existe, esta
+   * deshabilitada o no se puede armar. Sin esto, todo sale por `wa`, como siempre.
+   */
+  resolverLinea?: (id: string | null) => Promise<LineaDeEnvio | null>;
+  /**
+   * La linea conectada que toca (ver src/whatsapp/reparto-lineas.ts), sin contar
+   * `excluir`. Se usa con un cliente nuevo o cuando la suya ya no esta
+   * disponible. Null = ninguna disponible.
+   */
+  elegirLinea?: (excluir: string | null) => Promise<LineaDeEnvio | null>;
   repos: Repos;
   wa: WhatsAppClient;
   /** Funcion si el numero puede cambiar desde /setup sin reiniciar. */
@@ -255,7 +304,7 @@ export interface Sender {
    * puerta al cliente de WhatsApp que tienen las pantallas: meter una segunda
    * seria abrir dos caminos hacia lo mismo.
    */
-  presencia?(phone: string): Promise<{ estado: string; desde: string } | null>;
+  presencia?(phone: string, whatsappNumberId?: string | null): Promise<{ estado: string; desde: string } | null>;
 }
 
 export function createSender(deps: SenderDeps): Sender {
@@ -272,6 +321,73 @@ export function createSender(deps: SenderDeps): Sender {
       ? deps.serviceWindowApplies()
       : deps.serviceWindowApplies !== false;
 
+  /** El cliente de una linea (null = la principal); undefined si no hay lineas montadas o no existe. */
+  const clienteDeLinea = async (id: string | null | undefined): Promise<WhatsAppClient | undefined> =>
+    deps.resolverLinea ? (await deps.resolverLinea(id ?? null))?.cliente : undefined;
+
+  const estaConectada = (linea: LineaDeEnvio) => linea.cliente.conectado?.() !== false;
+
+  /** Una linea distinta de `excluir` que pueda enviar ahora mismo. */
+  async function otraLineaViva(excluir: string | null): Promise<LineaDeEnvio | null> {
+    const elegida = deps.elegirLinea ? await deps.elegirLinea(excluir) : null;
+    if (elegida) return elegida;
+    const principal = await deps.resolverLinea!(null);
+    return principal && principal.id !== excluir && estaConectada(principal) ? principal : null;
+  }
+
+  /**
+   * Por que linea sale un trabajo. La regla: un cliente no cambia de numero sin
+   * necesidad.
+   *
+   *  - Una linea PEDIDA por una persona manda, y si no esta disponible no se
+   *    sustituye: seria salir desde un numero que nadie eligio.
+   *  - Un cliente con linea sigue por ella. Un corte breve se espera; un cupo
+   *    gastado o una pausa de salud tampoco lo mueven (pasar sus mensajes a otro
+   *    numero solo quemaria ese tambien).
+   *  - La excepcion: su linea lleva mas de 2 minutos sin conexion, WhatsApp la
+   *    bloqueo, o se quito o se deshabilito. Ahi pasa a otra linea activa y se
+   *    queda en ella.
+   *  - Un grupo vive en la linea de la que es miembro: nunca se reparte ni se cambia.
+   *
+   * `confirmar` guarda la decision justo antes de enviar, para que lo que frena
+   * el modo prueba no cuente como cliente repartido. `pedida` y `sinAsignar` le
+   * dicen al envio que no debe fijar esa linea ni al cliente ni al reintento.
+   */
+  async function lineaDelTrabajo(job: SendJob, contact: { id: string; tipo?: string }, at: Date): Promise<{
+    linea: LineaDeEnvio | null;
+    pedida?: boolean;
+    sinAsignar?: boolean;
+    confirmar?: () => Promise<LineaDeEnvio | null>;
+  }> {
+    if (!deps.resolverLinea) return { linea: { id: '', etiqueta: '', numero: '', cliente: wa, identidad: phoneId(), ventanaAplica: ventanaAplica() } };
+    const resolver = deps.resolverLinea;
+    if (job.whatsappNumberId && !job.lineaDelSistema) return { linea: await resolver(job.whatsappNumberId), pedida: true };
+
+    const propia = job.whatsappNumberId ?? (await repos.messages.lineaDeLaConversacion(contact.id));
+    if (contact.tipo === 'grupo') return { linea: (propia ? await resolver(propia) : null) ?? (await resolver(null)) };
+
+    /** Lo que quedo guardado manda: otro envio a la vez pudo decidir antes. */
+    const conLaVigente = (elegida: LineaDeEnvio, vigente: string | null) => (vigente && vigente !== elegida.id ? resolver(vigente) : Promise.resolve(elegida));
+
+    if (!propia) {
+      const nueva = await otraLineaViva(null);
+      if (!nueva) return { linea: await resolver(null), sinAsignar: true };
+      return { linea: nueva, confirmar: async () => conLaVigente(nueva, await repos.lineasContacto.fijarSiNoTiene(contact.id, nueva.id, at)) };
+    }
+
+    const actual = await resolver(propia);
+    const caidaDeMas = Boolean(
+      actual && !estaConectada(actual) && (actual.bloqueada || (actual.noDisponibleDesde && at.getTime() - actual.noDisponibleDesde.getTime() >= ESPERA_CAMBIO_LINEA_MS)),
+    );
+    if (actual && !caidaDeMas) return { linea: actual };
+
+    const otra = await otraLineaViva(propia);
+    // No hay ninguna otra: no se le toca la asignacion y se espera a que vuelva alguna.
+    if (!otra) return actual ? { linea: actual } : { linea: await resolver(null), sinAsignar: true };
+    const motivo = actual ? 'linea_caida' : 'linea_no_disponible';
+    return { linea: otra, confirmar: async () => conLaVigente(otra, await repos.lineasContacto.cambiar(contact.id, propia, otra.id, motivo, at)) };
+  }
+
   const permitidos = () => (typeof deps.soloNumeros === 'function' ? deps.soloNumeros() : deps.soloNumeros) ?? [];
 
   const puerto: Sender = {
@@ -283,6 +399,7 @@ export function createSender(deps: SenderDeps): Sender {
      * al operador creyendo que borro algo que sigue en el telefono del cliente.
      */
     async accion(accion) {
+      const wa = (await clienteDeLinea(accion.whatsappNumberId)) ?? deps.wa;
       if (accion.tipo === 'reaccion') {
         if (!wa.sendReaction) throw new Error('este proveedor no manda reacciones');
         const r = await wa.sendReaction(accion.phone, accion.mensaje, accion.emoji ?? '');
@@ -298,7 +415,8 @@ export function createSender(deps: SenderDeps): Sender {
       return { ok: true, wamid: r.wamid };
     },
 
-    async presencia(phone) {
+    async presencia(phone, lineaId) {
+      const wa = (await clienteDeLinea(lineaId)) ?? deps.wa;
       // Sin soporte del proveedor no se inventa nada: null es "no se sabe".
       return (await wa.presencia?.(phone).catch(() => null)) ?? null;
     },
@@ -385,16 +503,30 @@ export function createSender(deps: SenderDeps): Sender {
       // Sin socket no hay nada que intentar: se devuelve "espera" sin dejar
       // una entrega fallida que el monitor contaria como rechazo de WhatsApp
       // y que el motor de rutas contaria como intento gastado.
-      if (wa.conectado?.() === false) {
+      const decidida = await lineaDelTrabajo(job, contact, at);
+      const candidata = decidida.linea;
+      if (!candidata) {
         return {
           ok: false,
           blocked: true,
           code: 'sin_conexion',
-          reason: 'WhatsApp no esta conectado: se reintenta en cuanto vuelva la sesion',
+          reason: 'La linea de WhatsApp elegida no esta disponible (no existe, esta deshabilitada o le faltan datos)',
           retryAfterMs: 2 * 60_000,
           deliveryId: -1,
+          whatsappNumberId: job.whatsappNumberId ?? null,
         };
       }
+      // Sin linea asignada todavia, el reintento vuelve a decidir: la cola no la fija.
+      const sinConexion = (l: LineaDeEnvio): SendOutcome => ({
+        ok: false,
+        blocked: true,
+        code: 'sin_conexion',
+        reason: `${l.etiqueta ? `La linea «${l.etiqueta}»` : 'WhatsApp'} no esta conectada: se reintenta en cuanto vuelva la sesion`,
+        retryAfterMs: 2 * 60_000,
+        deliveryId: -1,
+        whatsappNumberId: decidida.sinAsignar ? null : l.id || null,
+      });
+      if (candidata.cliente.conectado?.() === false) return sinConexion(candidata);
 
       // La lista blanca va por delante de todo, manual incluido: en modo
       // prueba no sale nada a nadie que no este en ella, y queda anotado.
@@ -414,11 +546,21 @@ export function createSender(deps: SenderDeps): Sender {
           category: job.category,
           variables: job.variables,
           businessInitiated: false,
+          whatsappNumberId: candidata.id || null,
         });
         const reason = `modo prueba: a ${contact.phone} no se le escribe porque no esta en la lista de numeros permitidos`;
         await repos.deliveries.markBlocked(deliveryId, `allowlist: ${reason}`);
-        return { ok: false, blocked: true, code: 'allowlist', reason, deliveryId };
+        return { ok: false, blocked: true, code: 'allowlist', reason, deliveryId, whatsappNumberId: candidata.id || null };
       }
+
+      // Desde aqui el trabajo queda atado a esta linea: si espera o se reintenta,
+      // sale por el mismo numero y no por otro (la cola copia este id al trabajo).
+      const linea = (await decidida.confirmar?.()) ?? candidata;
+      if (linea !== candidata && linea.cliente.conectado?.() === false) return sinConexion(linea);
+      const lineaId = linea.id || null;
+      const wa = linea.cliente;
+      const phoneId = () => linea.identidad;
+      const ventanaAplica = () => linea.ventanaAplica;
 
       const template =
         job.kind === 'template' && job.templateName
@@ -458,6 +600,7 @@ export function createSender(deps: SenderDeps): Sender {
         category: job.category,
         variables: job.variables,
         businessInitiated,
+        whatsappNumberId: lineaId,
       });
 
       const decision = evaluateGates(
@@ -489,6 +632,7 @@ export function createSender(deps: SenderDeps): Sender {
           reason: decision.reason,
           retryAfterMs: decision.retryAfterMs,
           deliveryId,
+          whatsappNumberId: lineaId,
         };
       }
 
@@ -523,6 +667,11 @@ export function createSender(deps: SenderDeps): Sender {
           status: 'sent',
           deliveryId,
           createdAt: enviadoAt,
+          lineaId,
+          lineaEtiqueta: linea.etiqueta || null,
+          lineaNumero: linea.numero || null,
+          // Solo una linea elegida por una persona le cambia la suya al cliente.
+          conservarLinea: !decidida.pedida,
         });
 
         // Solo lo iniciado por la empresa consume cupo diario: responder
@@ -536,7 +685,7 @@ export function createSender(deps: SenderDeps): Sender {
         // Una persona acaba de escribir en este chat: el bot se calla (lo atiende ella). Se reactiva a mano.
         if (job.atiendePersona) await repos.contacts.pausarBot(contact.id, true, enviadoAt).catch(() => undefined);
 
-        return { ok: true, wamid: result.wamid, deliveryId };
+        return { ok: true, wamid: result.wamid, deliveryId, whatsappNumberId: lineaId };
       } catch (error) {
         const retryable = error instanceof WhatsAppApiError ? error.retryable : false;
         const message = error instanceof Error ? error.message : 'error desconocido';
@@ -564,7 +713,7 @@ export function createSender(deps: SenderDeps): Sender {
         // Sin respuesta del proveedor (no es un WhatsAppApiError: red, tiempo
         // agotado) o un 200 sin wamid: puede que el mensaje si saliera.
         const incierto = !(error instanceof WhatsAppApiError) || error.httpStatus === 200;
-        return { ok: false, blocked: false, error: message, retryable: insistir, deliveryId, code, ...(incierto ? { incierto: true } : {}) };
+        return { ok: false, blocked: false, error: message, retryable: insistir, deliveryId, whatsappNumberId: lineaId, code, ...(incierto ? { incierto: true } : {}) };
       }
     },
   };

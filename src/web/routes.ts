@@ -118,6 +118,10 @@ export interface WebDeps {
    * instalacion suelta.
    */
   sesionLocal?: SesionLocal;
+  geocodificador?: import('../entregas/geocodificar.js').Geocodificador | null;
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
+  registroClientes?: import('../whatsapp/registro.js').RegistroClientes;
+  repartoLineas?: import('../whatsapp/reparto-lineas.js').RepartoDeLineas;
   /**
    * Para apuntar el telefono vinculado en cuanto un proveedor lo cuenta: es la
    * clave con la que la salud guarda el riesgo del numero (src/salud/numero.ts).
@@ -272,6 +276,10 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
     entregas: deps.entregas,
     autoConectar: deps.autoConectarLocal,
     sesion: deps.sesionLocal,
+    lineas: deps.lineas,
+    geocodificador: deps.geocodificador ?? undefined,
+    registroClientes: deps.registroClientes,
+    repartoLineas: deps.repartoLineas,
     authDir: deps.authDir,
     mediaDir: deps.mediaDir,
     prefijoLog: deps.prefijoLog,

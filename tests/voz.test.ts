@@ -254,7 +254,7 @@ async function build() {
 /** Los ficheros que `media.url` puede bajar. */
 const fetchDeFicheros = (async (input: string | URL | Request) => {
   const url = String(input);
-  if (url === 'https://stoky.test/fotos/zapato.png') return new Response(new Uint8Array(Buffer.from('PNGFALSO'.repeat(10))), { status: 200, headers: { 'content-type': 'image/png' } });
+  if (url === 'https://stoky.test/fotos/zapato.png') return new Response(new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('PNG-DE-PRUEBA'.repeat(10))])), { status: 200, headers: { 'content-type': 'image/png' } });
   if (url === 'https://stoky.test/nota.ogg') return new Response(new Uint8Array(OGG), { status: 200, headers: { 'content-type': 'audio/ogg' } });
   return new Response('no', { status: 404 });
 }) as typeof fetch;

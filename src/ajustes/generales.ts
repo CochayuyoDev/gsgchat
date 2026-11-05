@@ -310,6 +310,7 @@ export interface ServicioAjustes {
   zonaHoraria(): string;
   /** A cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). */
   guardadosDias(): number;
+  /** Cuantos minutos se espera a una linea sin conexion antes de pasar sus clientes a otra. */
   /** El resumen del dia por WhatsApp: si esta encendido y a que horas (HH:MM). */
   resumenes(): { activo: boolean; horaManana: string; horaTarde: string };
   supervisor(): string;

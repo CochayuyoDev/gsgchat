@@ -10,14 +10,15 @@
  *     como "987654321" y como "51987654321" es UNA conversacion.
  *  3. Se guarda la copia de los mensajes de cada una (chat_etiquetas_lote_chats)
  *     y el lote procesa ESA copia: lo que entre mientras corre no lo cambia.
- *  4. Solo se leen los chats que aun no tienen etiqueta de hoy (nuevos, o que
- *     la IA no pudo clasificar). Un chat ya etiquetado se queda con su
- *     etiqueta aunque le lleguen mensajes: no vuelve a la IA. La excepcion es
- *     una etiqueta que ya no esta en el catalogo del negocio, que ya no vale.
+ *  4. Se leen los chats sin etiqueta de hoy (nuevos, o que la IA no pudo
+ *     clasificar) y los que cambiaron desde la ultima lectura: la conversacion
+ *     sigue y puede traer datos nuevos. Tambien una etiqueta que ya no esta en
+ *     el catalogo del negocio, que ya no vale. Lo que no cambio no gasta IA.
  *  5. Las demas van a la IA con el catalogo, pocas a la vez. La IA devuelve
  *     el codigo de una etiqueta (o `otro` si ninguna corresponde); se valida
  *     contra el catalogo. Si la IA falla o contesta algo que no vale, el chat
- *     queda como error, sin etiqueta: aqui no hay reglas que adivinen.
+ *     queda como error: aqui no hay reglas que adivinen. Si ya tenia una
+ *     etiqueta valida la conserva, y el siguiente lote lo vuelve a intentar.
  *
  * GSG no recibe nada aparte: lee la etiqueta como la nota del chat en el
  * historial que ya pide al abrirlo (GET /api/v1/historial, ver
@@ -29,7 +30,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { CATALOGO_POR_DEFECTO, clasificarConIA, firmaCatalogo, nombreDeEtiqueta, type Catalogo, type IAQueCompleta } from '../archive/clasificar.js';
+import { CATALOGO_POR_DEFECTO, clasificarConIA, nombreDeEtiqueta, type Catalogo, type IAQueCompleta } from '../archive/clasificar.js';
 import type { AlcanceMensajes, ChatEtiquetasRepo, EstadoLote, EtiquetaChat, EventoEtiquetas, LoteEtiquetas, MensajeCapturado, MensajeDelDia, TipoLote } from '../db/chat-etiquetas.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import { fechaDelNegocio } from '../ajustes/generales.js';
@@ -65,14 +66,10 @@ export function numeroNormalizado(phone: string): string {
   return soloDigitos(phone) || phone.trim();
 }
 
-/**
- * La huella de una conversacion: cambia si entra, sale, se edita o se borra un
- * mensaje (los checks no cuentan) y, con `catalogo`, si cambia el catalogo.
- */
-export function huellaDe(mensajes: Pick<MensajeDelDia, 'id' | 'direction' | 'kind' | 'body'>[], catalogo?: string): string {
+/** La huella de una conversacion: cambia si entra, sale, se edita o se borra un mensaje (los checks no cuentan). */
+export function huellaDe(mensajes: Pick<MensajeDelDia, 'id' | 'direction' | 'kind' | 'body'>[]): string {
   const h = createHash('sha256');
   for (const m of mensajes) h.update(JSON.stringify([m.id, m.direction, m.kind, m.body ?? null])).update('\n');
-  if (catalogo) h.update(`catalogo:${catalogo}`);
   return h.digest('hex');
 }
 
@@ -106,21 +103,12 @@ export function agruparPorNumero(mensajes: MensajeDelDia[]): ConversacionDelDia[
   return [...porNumero.values()];
 }
 
-/**
- * Si un chat ya esta etiquetado y no hay que volver a leerlo: tiene etiqueta
- * de hoy, no la puso un respaldo por fallo de la IA (`motivo`) y sigue en el
- * catalogo. Lo que quedo sin clasificar se vuelve a leer. Aunque el chat haya
- * cambiado, no se relee: asi lo pidio el negocio (solo lo que falta).
- */
-export function yaEtiquetado(guardada: EtiquetaChat | undefined, catalogo?: Catalogo): boolean {
-  if (!guardada?.etiqueta || guardada.motivo) return false;
-  return !catalogo || catalogo.some((e) => e.codigo === guardada.etiqueta);
+/** Una etiqueta de hoy que todavia vale: no la puso un respaldo por fallo de la IA y sigue en el catalogo. */
+function etiquetaVigente(guardada: EtiquetaChat | undefined, catalogo: Catalogo): boolean {
+  return Boolean(guardada?.etiqueta && !guardada.motivo && catalogo.some((e) => e.codigo === guardada.etiqueta));
 }
 
-/**
- * Lo de antes: reutilizar solo con la misma huella. Se conserva para quien
- * compare conversaciones; el lote usa `yaEtiquetado`.
- */
+/** Si la etiqueta se leyo de estos mismos mensajes: un chat que cambio se vuelve a leer. */
 export function sePuedeReutilizar(guardada: EtiquetaChat | undefined, huella: string): boolean {
   return Boolean(guardada && guardada.huella === huella && guardada.etiqueta && !guardada.motivo);
 }
@@ -219,7 +207,7 @@ export async function etiquetarDelDia(
   deps: EtiquetadoDeps,
   alcance: AlcanceMensajes,
   alAvanzar: (estado: EstadoEtiquetado) => void = () => undefined,
-  /** releer = volver a leer TODOS los chats de hoy, tambien los ya etiquetados (p. ej. tras cambiar el catalogo). */
+  /** releer = volver a leer TODOS los chats de hoy, tambien los que no cambiaron (p. ej. tras cambiar el catalogo). */
   opciones: { iniciadoPor?: string | null; releer?: boolean } = {},
 ): Promise<EstadoEtiquetado> {
   const ia = deps.ia();
@@ -238,7 +226,6 @@ export async function etiquetarDelDia(
     // La copia de los mensajes no dura mas que el chat: lo que paso la retencion se vacia.
     await deps.repo.vaciarCopiasAntes(new Date(ahora.getTime() - RETENCION_CHAT_MS)).catch(() => 0);
     const catalogo = await catalogoVigente(deps.repo);
-    const firma = firmaCatalogo(catalogo);
     // Los ejemplos que enseñó el negocio (Entrenamiento IA): van en cada llamada.
     const ejemplos = await ejemplosParaIA(deps.repo, catalogo);
     const mensajes = await deps.repo.mensajesDelDia(inicioDelDia(ahora, zona), alcance, TOPE_MENSAJES);
@@ -250,20 +237,20 @@ export async function etiquetarDelDia(
     await deps.repo.capturar(
       lote.id,
       dia,
-      conversaciones.map((c) => ({ phone: c.phone, nombre: c.nombre, huella: huellaDe(c.mensajes, firma), mensajes: c.mensajes.map(capturaDe) })),
+      conversaciones.map((c) => ({ phone: c.phone, nombre: c.nombre, huella: huellaDe(c.mensajes), mensajes: c.mensajes.map(capturaDe) })),
     );
     const copia = await deps.repo.chatsDelLote(lote.id, true);
     estado.total = copia.length;
     await registrar({ phone: null, fase: 'analisis', nivel: 'info', codigo: 'lote_capturado', detalle: `${copia.length} chat(s) con ${copia.reduce((n, c) => n + c.totalMensajes, 0)} mensaje(s) copiados para este lote.` });
     const ya = new Map((await deps.repo.delDia(dia, copia.map((c) => c.phone))).map((e) => [e.phone, e]));
 
-    // 2. Lo que ya tiene etiqueta no se vuelve a leer: solo va a la IA lo que falta.
+    // 2. Lo que ya se leyo y no cambio no se vuelve a leer: a la IA va lo nuevo y lo que cambio.
     const pendientes: ChatDeLoteConMensajes[] = [];
     for (const c of copia) {
       const antes = ya.get(c.phone);
       // Lo que puso una persona a mano no lo pisa la IA, ni al «volver a etiquetar todo».
       // Tampoco lo que puso el bot (el cliente cambió su ubicación): es un hecho, no una lectura.
-      if (antes?.origen === 'manual' || esDelBot(antes) || (!opciones.releer && yaEtiquetado(antes, catalogo))) {
+      if (antes?.origen === 'manual' || esDelBot(antes) || (!opciones.releer && etiquetaVigente(antes, catalogo) && sePuedeReutilizar(antes, c.huella))) {
         await deps.repo.marcarChatLote(lote.id, c.phone, { estado: 'reutilizada', etiqueta: antes!.etiqueta });
         estado.reutilizadas++;
         estado.hechas++;
@@ -287,7 +274,9 @@ export async function etiquetarDelDia(
           estado.clasificadas++;
           estado.porIA++;
         } else {
-          await deps.repo.guardar({ ...base, etiqueta: null, origen: 'ia', motivo: r.motivo });
+          // Si ya tenia una etiqueta valida, un fallo de la IA no se la quita a GSG:
+          // queda con su huella de antes y el siguiente lote lo vuelve a intentar.
+          if (!etiquetaVigente(mientras, catalogo)) await deps.repo.guardar({ ...base, etiqueta: null, origen: 'ia', motivo: r.motivo });
           await deps.repo.marcarChatLote(lote.id, c.phone, { estado: 'error', error: r.motivo });
           estado.sinClasificar++;
           await registrar({ phone: c.phone, fase: 'analisis', nivel: 'error', codigo: 'ia_fallo', detalle: r.motivo });

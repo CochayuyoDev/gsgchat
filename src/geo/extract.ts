@@ -18,7 +18,7 @@ import { enlacesDeLaPagina, needsResolution, resolveShortLink } from './resolve.
 import { isAllowedHost } from '../util/net-guard.js';
 import { precisionFromDecimals, validate } from './validate.js';
 
-const URL_RE = /\b(?:https?:\/\/|www\.|(?:maps\.app\.)?goo\.gl\/|maps\.google\.[a-z.]{2,6}\/)[^\s<>"']+/gi;
+const URL_RE = /\b(?:https?:\/\/|www\.|(?:maps\.app\.)?goo\.gl\/|maps\.google\.[a-z.]{2,6}\/|google\.[a-z.]{2,6}\/maps|maps\.apple\.com\/|(?:ul\.)?waze\.com\/)[^\s<>"']+/gi;
 const GEO_URI_RE = /\bgeo:-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?[^\s<>"']*/i;
 
 /** Enlace canonico para reenviar por WhatsApp. */
@@ -43,12 +43,13 @@ function urlsDe(text: string): URL[] {
   return salida;
 }
 
+/** El primer enlace de Google Maps, Apple Maps o Waze del texto: cualquier otro se ignora. */
 function firstUrl(text: string): URL | null {
-  return urlsDe(text)[0] ?? null;
+  return urlsDe(text).find((u) => isAllowedHost(u.hostname)) ?? null;
 }
 
 /**
- * Los enlaces de mapa (Google Maps, Waze, Apple Maps, OpenStreetMap) que hay
+ * Los enlaces de mapa (Google Maps, Waze, Apple Maps) que hay
  * en un mensaje, sin repetir. Lo que no es de un mapa no cuenta, ni un
  * enlace con usuario y contraseña o con un puerto que no sea el de https.
  * Sirve para saber si el cliente mando UN enlace (se lee) o varios distintos
@@ -163,11 +164,12 @@ export function extractLocationSync(input: string, opts: ExtractOptions = {}): E
   }
 
   const url = firstUrl(input) ?? matchGeoUri(input);
-  const decoded = [safeDecode(input), url ? safeDecode(url.toString()) : '']
+  if (!url) return { ok: false, reason: 'no_coordinates_found', warnings: [] };
+  const decoded = [safeDecode(input), safeDecode(url.toString())]
     .filter(Boolean)
     .join('\n');
 
-  return runParsers({ decoded, url }, { originalUrl: url?.toString(), warnings: [] }, opts.bbox, opts.pais);
+  return runParsers({ decoded, url }, { originalUrl: url.toString(), warnings: [] }, opts.bbox, opts.pais);
 }
 
 /**
@@ -183,6 +185,7 @@ export async function extractLocation(
   }
 
   const url = firstUrl(input) ?? matchGeoUri(input);
+  if (!url) return { ok: false, reason: 'no_coordinates_found', warnings: [] };
   const warnings: string[] = [];
   let resolvedUrl: string | undefined;
   let effectiveUrl = url;

@@ -23,9 +23,6 @@ const ALLOWED_HOST_PATTERNS: RegExp[] = [
   /^(?:www\.)?waze\.com$/i,
   /^ul\.waze\.com$/i,
   /^maps\.apple\.com$/i,
-  /^(?:www\.)?openstreetmap\.org$/i,
-  /^osm\.org$/i,
-  /^plus\.codes$/i,
 ];
 
 export function isAllowedHost(hostname: string): boolean {

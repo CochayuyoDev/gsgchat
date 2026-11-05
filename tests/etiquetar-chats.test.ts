@@ -146,13 +146,14 @@ describe('el lote del dia', () => {
     expect(segunda.llamadas).toHaveLength(0);
     expect(r2).toMatchObject({ total: 3, reutilizadas: 3, clasificadas: 0 });
 
-    // Luis escribe otra vez: ya tenia etiqueta, asi que NO se vuelve a leer (solo se lee lo que falta).
+    // Luis escribe otra vez: la conversacion cambio, asi que solo el vuelve a la IA y su etiqueta se actualiza.
     mensajes.push(msg('51911000003', 'in', '¿dónde está el motorizado?', 9));
     const tercera = iaDePrueba(porTexto);
     const r3 = await etiquetarDelDia(deps(repo, () => tercera.ia), ALCANCE);
-    expect(tercera.llamadas).toHaveLength(0);
-    expect(r3).toMatchObject({ reutilizadas: 3, clasificadas: 0 });
-    expect((await repo.ultimas(['51911000003'])).get('51911000003')!.etiqueta).toBe('horario_fijo');
+    expect(tercera.llamadas).toHaveLength(1);
+    expect(tercera.llamadas[0]).toContain('¿dónde está el motorizado?');
+    expect(r3).toMatchObject({ reutilizadas: 2, clasificadas: 1 });
+    expect((await repo.ultimas(['51911000003'])).get('51911000003')!.etiqueta).toBe('consultar_entrega');
 
     // Un chat nuevo: solo ese va a la IA.
     mensajes.push(msg('51911000006', 'in', 'mejor mañana', 10));
@@ -160,6 +161,35 @@ describe('el lote del dia', () => {
     const r4 = await etiquetarDelDia(deps(repo, () => cuarta.ia), ALCANCE);
     expect(cuarta.llamadas).toHaveLength(1);
     expect(r4).toMatchObject({ total: 4, reutilizadas: 3, clasificadas: 1 });
+  });
+
+  it('si la IA falla al releer un chat que cambio, conserva su etiqueta y el siguiente lote lo reintenta', async () => {
+    const primera = iaDePrueba(porTexto);
+    await etiquetarDelDia(deps(repo, () => primera.ia), ALCANCE);
+    mensajes.push(msg('51911000003', 'in', '¿dónde está el motorizado?', 9));
+
+    const caida = iaDePrueba(() => new Error('sin saldo'));
+    const r = await etiquetarDelDia(deps(repo, () => caida.ia), ALCANCE);
+    expect(caida.llamadas).toHaveLength(1);
+    expect(r).toMatchObject({ reutilizadas: 2, clasificadas: 0, sinClasificar: 1 });
+    expect((await repo.ultimas(['51911000003'])).get('51911000003')).toMatchObject({ etiqueta: 'horario_fijo', motivo: null });
+
+    const vuelve = iaDePrueba(porTexto);
+    await etiquetarDelDia(deps(repo, () => vuelve.ia), ALCANCE);
+    expect(vuelve.llamadas).toHaveLength(1);
+    expect((await repo.ultimas(['51911000003'])).get('51911000003')!.etiqueta).toBe('consultar_entrega');
+  });
+
+  it('un mensaje nuevo tampoco pisa la nota puesta a mano o por el bot', async () => {
+    await repo.guardar({ phone: '51911000002', dia: '2026-10-27', etiqueta: 'reclamo', origen: 'manual', huella: 'manual-1', mensajes: 2, motivo: null, loteId: null });
+    await repo.guardar({ phone: '51911000003', dia: '2026-10-27', etiqueta: 'cambiar_ubicacion', origen: 'reglas', huella: 'bot-cambio-ubicacion-1-1', mensajes: 1, motivo: null, loteId: null });
+    mensajes.push(msg('51911000002', 'in', 'hola otra vez', 9), msg('51911000003', 'in', 'hola otra vez', 10));
+    const { ia, llamadas } = iaDePrueba(porTexto);
+    await etiquetarDelDia(deps(repo, () => ia), ALCANCE);
+    expect(llamadas).toHaveLength(1);
+    const hoy = new Map((await repo.delDia('2026-10-27')).map((e) => [e.phone, e.etiqueta]));
+    expect(hoy.get('51911000002')).toBe('reclamo');
+    expect(hoy.get('51911000003')).toBe('cambiar_ubicacion');
   });
 
   it('un fallo de la IA es un error, no "otro" ni una etiqueta de reglas, y se reintenta aunque nada cambie', async () => {
