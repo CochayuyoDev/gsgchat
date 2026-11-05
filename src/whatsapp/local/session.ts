@@ -29,6 +29,8 @@ export type LocalStatus = 'STOPPED' | 'STARTING' | 'SCAN_QR_CODE' | 'WORKING' | 
 
 export interface LocalState {
   status: LocalStatus;
+  /** WhatsApp rechazo este numero (403, casi siempre un baneo). Se quita al volver a conectar. */
+  bloqueado?: boolean;
   /** QR en base64 (PNG), listo para un <img src="data:image/png;base64,...">. */
   qr: string | null;
   /** Codigo de ocho caracteres cuando se vincula por numero. */
@@ -1175,6 +1177,7 @@ export function crearSesionLocal(): SesionLocal {
 
           if (update.connection === 'open') {
             estado.status = 'WORKING';
+            estado.bloqueado = false;
             estado.qr = null;
             estado.pairingCode = null;
             estado.phone = fromJid(sock.user?.id ?? '');
@@ -1197,6 +1200,7 @@ export function crearSesionLocal(): SesionLocal {
               return;
             }
             conectadaHastaMs = Date.now();
+            estado.bloqueado = code === 403;
             try {
               opts.onDisconnect?.(code, update.lastDisconnect?.error?.message ?? explicacion);
             } catch {

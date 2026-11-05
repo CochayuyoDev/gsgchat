@@ -349,7 +349,7 @@ export async function registerLocalRoutes(
       });
     }
 
-    await registerLineasRoutes(app, { lineas, registro, arrancarLinea, reparto: deps.repartoLineas, ajustes: deps.ajustes });
+    await registerLineasRoutes(app, { lineas, registro, arrancarLinea, reparto: deps.repartoLineas });
   }
 
   /**

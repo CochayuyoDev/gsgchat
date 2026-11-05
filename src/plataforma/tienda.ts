@@ -256,10 +256,11 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           identidad: identidadDeLinea(linea),
           ventanaAplica: linea.principal ? providerOf(settings.current()) === 'cloud' : linea.proveedor === 'cloud',
           noDisponibleDesde: registro.sinConexionDesde(linea.id),
+          bloqueada: Boolean(t.sesion?.getLocalState().bloqueado),
         };
       };
       const repartoLineas = crearRepartoDeLineas({ registro, repos, politica, identidadDe: identidadDeLinea });
-      /** Para un cliente nuevo, o uno cuya linea ya no esta disponible: la mas desahogada de las conectadas. */
+      /** Para un cliente nuevo, o uno cuya linea ya no esta disponible: una de las conectadas, al azar. */
       const elegirLinea = async (excluir: string | null) => {
         const id = await repartoLineas.elegir(excluir);
         return id ? resolverLinea(id) : null;
@@ -283,7 +284,6 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           wa,
           resolverLinea,
           elegirLinea,
-          esperaCambioLineaMs: () => ajustes.esperaCambioLineaMin() * 60_000,
           phoneNumberId,
           warmup: politica().warmup,
           maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,

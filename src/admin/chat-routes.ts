@@ -205,7 +205,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const etiquetador = etiquetadorDe();
     if (!etiquetador) return reply.code(409).send({ error: SIN_ETIQUETAS });
     const alcance = alcanceChat(request.usuario);
-    // releer: tambien los ya etiquetados (por ejemplo tras cambiar el catalogo). Por defecto, solo lo que falta.
+    // releer: tambien los que no cambiaron (por ejemplo tras cambiar el catalogo). Por defecto, lo nuevo y lo que cambio.
     const { releer } = z.object({ releer: z.boolean().optional() }).parse(request.body ?? {});
     try {
       return reply.code(202).send(etiquetador.iniciar(alcance, { iniciadoPor: quienEs(request.usuario), releer }));
@@ -527,8 +527,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
 
   /**
    * La linea por la que se contesta un chat si nadie elige otra: la que el
-   * cliente tiene asignada. Null si el chat es nuevo: ahi el sistema le da la
-   * mas desahogada.
+   * cliente tiene asignada. Null si el chat es nuevo: ahi el sistema le da
+   * una conectada al azar.
    */
   const lineaPorDefecto = async (contactId: string, activas: import('../whatsapp/lineas.js').Linea[]): Promise<string | null> => {
     if (!activas.length) return null;

@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSender, type LineaDeEnvio, type SendJob } from '../src/outbound/sender.js';
 import { createMemoryOutboundQueue } from '../src/outbound/memory-queue.js';
-import { crearRepartoDeLineas, elegirLineaEquilibrada, type CargaDeLinea } from '../src/whatsapp/reparto-lineas.js';
+import { crearRepartoDeLineas, elegirLineaAlAzar, type CargaDeLinea } from '../src/whatsapp/reparto-lineas.js';
 import { crearMotor } from '../src/rutas/motor.js';
 import type { Linea } from '../src/whatsapp/lineas.js';
 import type { RegistroClientes } from '../src/whatsapp/registro.js';
@@ -22,15 +22,15 @@ const IDS = ['a', 'b', 'c'] as const;
 function montar(opciones: { soloNumeros?: string[] } = {}) {
   const repos = createFakeRepos();
   let ahora = new Date('2026-11-04T15:00:00Z');
-  const estado: Record<string, { conectada: boolean; existe: boolean; desde: Date | null; cupo: number }> = {};
+  const estado: Record<string, { conectada: boolean; existe: boolean; bloqueada: boolean; desde: Date | null; cupo: number }> = {};
   const clientes: Record<string, ReturnType<typeof createFakeWhatsApp>> = {};
   const lineas: Linea[] = IDS.map((id, i) => {
-    estado[id] = { conectada: true, existe: true, desde: null, cupo: 200 };
+    estado[id] = { conectada: true, existe: true, bloqueada: false, desde: null, cupo: 200 };
     clientes[id] = Object.assign(createFakeWhatsApp(), { conectado: () => estado[id]!.conectada });
     return { id, etiqueta: `wsp-${id}`, telefono: `5190000000${i}`, proveedor: 'local', idExterno: null, estado: 'conectado', principal: i === 0, habilitada: true, posicion: i };
   });
   const aLinea = (l: Linea): LineaDeEnvio => ({
-    id: l.id, etiqueta: l.etiqueta, numero: l.telefono, cliente: clientes[l.id]!, identidad: `linea:${l.id}`, ventanaAplica: false, noDisponibleDesde: estado[l.id]!.desde,
+    id: l.id, etiqueta: l.etiqueta, numero: l.telefono, cliente: clientes[l.id]!, identidad: `linea:${l.id}`, ventanaAplica: false, noDisponibleDesde: estado[l.id]!.desde, bloqueada: estado[l.id]!.bloqueada,
   });
   const registro = {
     estados: async () => lineas.filter((l) => estado[l.id]!.existe).map((linea) => ({ linea, conectada: estado[linea.id]!.conectada })),
@@ -44,7 +44,6 @@ function montar(opciones: { soloNumeros?: string[] } = {}) {
     warmup: WARMUP,
     maxMarketingPerContact7d: 2,
     now: () => ahora,
-    esperaCambioLineaMs: () => 30 * MIN,
     soloNumeros: opciones.soloNumeros,
     resolverLinea: async (id) => {
       const l = lineas.find((x) => x.id === (id ?? 'a'));
@@ -59,12 +58,17 @@ function montar(opciones: { soloNumeros?: string[] } = {}) {
     estado[id]!.conectada = false;
     estado[id]!.desde = ahora;
   };
+  const bloquear = (id: string) => {
+    caer(id);
+    estado[id]!.bloqueada = true;
+  };
   const volver = (id: string) => {
     estado[id]!.conectada = true;
+    estado[id]!.bloqueada = false;
     estado[id]!.desde = null;
   };
   return {
-    repos, sender, clientes, estado, reparto, caer, volver,
+    repos, sender, clientes, estado, reparto, caer, bloquear, volver,
     pasar: (ms: number) => { ahora = new Date(ahora.getTime() + ms); },
     ahora: () => ahora,
     enviadosPor: (id: string) => clientes[id]!.sent.length,
@@ -75,32 +79,36 @@ const texto = (phone: string, extra: Partial<SendJob> = {}): SendJob => ({ phone
 const carga = (id: string, extra: Partial<CargaDeLinea> = {}): CargaDeLinea => ({ id, etiqueta: id, numero: '', posicion: 0, conectada: true, clientes: 0, nuevosHoy: 0, enviadosHoy: 0, cupoDiario: 100, pausada: false, ...extra });
 
 describe('que linea le toca a un cliente nuevo', () => {
-  it('la menos ocupada segun su cupo del dia', () => {
-    expect(elegirLineaEquilibrada([carga('a', { nuevosHoy: 10 }), carga('b', { nuevosHoy: 2 })])).toBe('b');
-    // Una linea que se esta calentando tiene poco cupo: 5 de 10 pesa mas que 20 de 100.
-    expect(elegirLineaEquilibrada([carga('nueva', { nuevosHoy: 5, cupoDiario: 10 }), carga('veterana', { nuevosHoy: 20, cupoDiario: 100 })])).toBe('veterana');
+  it('sale del sorteo, sin importar cuanto lleve cada una', () => {
+    const lineas = [carga('a', { nuevosHoy: 50, clientes: 90 }), carga('b'), carga('c', { nuevosHoy: 5, cupoDiario: 10 })];
+    expect(elegirLineaAlAzar(lineas, () => 0)).toBe('a');
+    expect(elegirLineaAlAzar(lineas, () => 0.5)).toBe('b');
+    expect(elegirLineaAlAzar(lineas, () => 0.999)).toBe('c');
   });
 
   it('no le da clientes a una linea pausada ni a una con el cupo gastado', () => {
-    expect(elegirLineaEquilibrada([carga('a', { pausada: true }), carga('b', { nuevosHoy: 50 })])).toBe('b');
-    expect(elegirLineaEquilibrada([carga('a', { enviadosHoy: 100 }), carga('b', { enviadosHoy: 90 })])).toBe('b');
+    expect(elegirLineaAlAzar([carga('a', { pausada: true }), carga('b', { nuevosHoy: 50 })], () => 0)).toBe('b');
+    expect(elegirLineaAlAzar([carga('a', { enviadosHoy: 100 }), carga('b', { enviadosHoy: 90 })], () => 0)).toBe('b');
   });
 
   it('si todas gastaron el cupo se reparte igual, y si todas estan pausadas no elige ninguna', () => {
-    expect(elegirLineaEquilibrada([carga('a', { enviadosHoy: 120 }), carga('b', { enviadosHoy: 100 })])).toBe('b');
-    expect(elegirLineaEquilibrada([carga('a', { pausada: true })])).toBeNull();
-    expect(elegirLineaEquilibrada([])).toBeNull();
+    expect(elegirLineaAlAzar([carga('a', { enviadosHoy: 120 }), carga('b', { enviadosHoy: 100 })], () => 0.999)).toBe('b');
+    expect(elegirLineaAlAzar([carga('a', { pausada: true })])).toBeNull();
+    expect(elegirLineaAlAzar([])).toBeNull();
   });
 
-  it('a igual carga decide quien lleva menos clientes y luego el orden, sin azar', () => {
-    expect(elegirLineaEquilibrada([carga('a', { clientes: 9 }), carga('b', { clientes: 3 })])).toBe('b');
-    expect(elegirLineaEquilibrada([carga('b', { posicion: 1 }), carga('a', { posicion: 0 })])).toBe('a');
-  });
-
-  it('treinta clientes nuevos se reparten a partes iguales entre tres lineas', async () => {
+  it('cien clientes nuevos se reparten segun caiga el sorteo: 50, 30 y 20, no a partes iguales', async () => {
     const { sender, enviadosPor } = montar();
-    for (let i = 0; i < 30; i++) await sender.send(texto(`519100000${String(i).padStart(2, '0')}`));
-    expect(IDS.map(enviadosPor)).toEqual([10, 10, 10]);
+    const sorteo = vi.spyOn(Math, 'random');
+    try {
+      for (let i = 0; i < 100; i++) {
+        sorteo.mockReturnValue(i < 50 ? 0 : i < 80 ? 0.5 : 0.9);
+        await sender.send(texto(`51910000${String(i).padStart(3, '0')}`));
+      }
+    } finally {
+      sorteo.mockRestore();
+    }
+    expect(IDS.map(enviadosPor)).toEqual([50, 30, 20]);
   });
 
   it('una tanda a la vez tampoco deja a un cliente en dos lineas', async () => {
@@ -123,13 +131,16 @@ describe('que linea le toca a un cliente nuevo', () => {
 });
 
 describe('el cliente se queda con su numero', () => {
-  it('sigue por su linea aunque otra este mas desahogada', async () => {
-    const { sender, enviadosPor } = montar();
+  it('sigue por su linea aunque el sorteo de los demas caiga en otra', async () => {
+    const { sender, repos, enviadosPor } = montar();
     await sender.send(texto('51910000010'));
+    const c = await repos.contacts.upsertFromInbound('51910000010');
+    const suya = (await repos.messages.lineaDeLaConversacion(c.id))!;
     for (let i = 0; i < 20; i++) await sender.send(texto(`519100001${String(i).padStart(2, '0')}`));
-    const antes = enviadosPor('a');
+    const antes = enviadosPor(suya);
     for (let i = 0; i < 5; i++) await sender.send(texto('51910000010'));
-    expect(enviadosPor('a')).toBe(antes + 5);
+    expect(enviadosPor(suya) - antes).toBe(5);
+    expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe(suya);
   });
 
   it('el cliente que escribe primero recibe la respuesta por la linea a la que escribio', async () => {
@@ -182,11 +193,11 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     return c;
   }
 
-  it('una caida corta espera: no cambia de numero y sale al volver', async () => {
+  it('un corte de menos de 2 minutos espera: no cambia de numero y sale al volver', async () => {
     const m = montar();
     const c = await conLinea(m, '51910000020', 'b');
     m.caer('b');
-    m.pasar(10 * MIN);
+    m.pasar(1.5 * MIN);
     expect(await m.sender.send(texto('51910000020'))).toMatchObject({ ok: false, blocked: true, code: 'sin_conexion', whatsappNumberId: 'b' });
     m.volver('b');
     expect((await m.sender.send(texto('51910000020'))).ok).toBe(true);
@@ -194,11 +205,21 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(0);
   });
 
-  it('pasado el plazo sale por otra activa, queda anotado el motivo y ya no vuelve aunque la vieja regrese', async () => {
+  it('si WhatsApp bloquea su numero sale en el acto por otra', async () => {
+    const m = montar();
+    const c = await conLinea(m, '51910000028', 'b');
+    m.bloquear('b');
+    const r = await m.sender.send(texto('51910000028'));
+    expect(r).toMatchObject({ ok: true });
+    expect((r as { whatsappNumberId: string }).whatsappNumberId).not.toBe('b');
+    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(1);
+  });
+
+  it('pasados 2 minutos sin conexion sale por otra activa, queda anotado el motivo y ya no vuelve aunque la vieja regrese', async () => {
     const m = montar();
     const c = await conLinea(m, '51910000021', 'b');
     m.caer('b');
-    m.pasar(31 * MIN);
+    m.pasar(2 * MIN);
     const r = await m.sender.send(texto('51910000021'));
     expect(r).toMatchObject({ ok: true });
     const nueva = (r as { whatsappNumberId: string }).whatsappNumberId;
@@ -254,7 +275,7 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toMatchObject([{ desdeLineaId: 'b', aLineaId: 'c', motivo: 'persona' }]);
   });
 
-  it('un reintento en cola tambien cambia si su linea se cayo del todo', async () => {
+  it('un reintento en cola tambien cambia si su linea sigue sin conexion', async () => {
     vi.useFakeTimers();
     try {
       const m = montar();
@@ -264,7 +285,7 @@ describe('la excepcion: su numero ya no esta disponible', () => {
       await cola.enqueue(texto('51910000027'));
       await vi.advanceTimersByTimeAsync(500);
       expect(cola.size()).toBe(1);
-      m.pasar(31 * MIN);
+      m.pasar(3 * MIN);
       await vi.advanceTimersByTimeAsync(3 * MIN);
       expect(cola.size()).toBe(0);
       expect(m.enviadosPor('a') + m.enviadosPor('c')).toBe(1);
