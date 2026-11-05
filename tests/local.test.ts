@@ -369,9 +369,28 @@ describe('la sesion local', () => {
     await promesa;
 
     expect(getLocalState().status).toBe('STOPPED');
+    expect(getLocalState().bloqueado).toBe(true);
     expect(hayVinculacion(authDir)).toBe(true);
     expect(vinculacionMuerta(403)).toBe(false);
     expect([401, 411, 500].every(vinculacionMuerta)).toBe(true);
+
+    // Al volver a conectar deja de contar como bloqueado.
+    const otro = fakeSocket();
+    const reconexion = startLocal({ authDir, createSocket: async () => ({ sock: otro.sock, saveCreds: async () => {} }) });
+    await otro.listo();
+    otro.emitir('connection.update', { connection: 'open' });
+    await reconexion;
+    expect(getLocalState().bloqueado).toBe(false);
+  });
+
+  it('desvincular desde el telefono (401) no cuenta como bloqueo', async () => {
+    const { sock, emitir, listo } = fakeSocket();
+    const promesa = startLocal({ authDir: mkdtempSync(join(tmpdir(), 'wa-auth-401-')), createSocket: async () => ({ sock, saveCreds: async () => {} }) });
+    await listo();
+    emitir('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+    await promesa;
+    expect(getLocalState().status).toBe('STOPPED');
+    expect(getLocalState().bloqueado).toBe(false);
   });
 
   it('los entrantes se entregan ya traducidos', async () => {

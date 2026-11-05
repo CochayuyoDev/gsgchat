@@ -118,17 +118,17 @@ describe('el lote', () => {
     expect(codigos).toContain('lote_inicio');
   });
 
-  it('sin cambios no se vuelve a llamar a la IA; un chat nuevo, solo ese', async () => {
+  it('sin cambios no se vuelve a llamar a la IA; un chat nuevo o que cambio, solo esos', async () => {
     await etiquetarDelDia(deps(repo, () => iaDePrueba().ia), ALCANCE);
     const ia2 = iaDePrueba();
     expect(await etiquetarDelDia(deps(repo, () => ia2.ia), ALCANCE)).toMatchObject({ estado: 'completado', reutilizadas: 3, clasificadas: 0 });
     expect(ia2.llamadas).toHaveLength(0);
-    // Luis escribe otra vez: ya estaba etiquetado; no se relee.
+    // Luis escribe otra vez: su chat cambio y se relee, igual que el chat nuevo.
     mensajes.push(msg('51911000003', 'in', '¿dónde está el motorizado?', 9));
     mensajes.push(msg('51911000009', 'in', 'mejor mañana', 10));
     const ia3 = iaDePrueba();
-    expect(await etiquetarDelDia(deps(repo, () => ia3.ia), ALCANCE)).toMatchObject({ reutilizadas: 3, clasificadas: 1 });
-    expect(ia3.llamadas).toHaveLength(1);
+    expect(await etiquetarDelDia(deps(repo, () => ia3.ia), ALCANCE)).toMatchObject({ reutilizadas: 2, clasificadas: 2 });
+    expect(ia3.llamadas).toHaveLength(2);
     expect((await repo.ultimas(['51911000009'])).get('51911000009')).toMatchObject({ etiqueta: 'reagendar_entrega' });
   });
 

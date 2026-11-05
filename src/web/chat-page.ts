@@ -59,7 +59,7 @@ ${bandaDemo}
     <header>
       <h1>Chats</h1>
       <span id="unread" class="badge hidden" aria-label="mensajes sin leer"></span>
-      <button type="button" id="etiquetar" class="etiquetar-boton" title="Clasifica con la IA los chats de hoy que aún no tienen etiqueta. GSG ve cada etiqueta como la nota del chat.">Etiquetar chats con IA</button>
+      <button type="button" id="etiquetar" class="etiquetar-boton" title="Clasifica con la IA los chats de hoy sin etiqueta y vuelve a leer los que tuvieron mensajes nuevos. GSG ve cada etiqueta como la nota del chat.">Etiquetar chats con IA</button>
       <button class="icon" id="nuevo" title="Escribir a un número nuevo" aria-label="Escribir a un número nuevo">✚</button>
       <button class="icon" id="menu-lista" title="Más opciones" aria-label="Más opciones" aria-haspopup="menu" aria-expanded="false">⋮</button>
     </header>
@@ -518,7 +518,7 @@ function pintarEtiquetado(e, error) {
   } else {
     var partes = [];
     if (e.clasificadas) partes.push(e.clasificadas + ' etiquetado' + (e.clasificadas === 1 ? '' : 's'));
-    if (e.reutilizadas) partes.push(e.reutilizadas + ' ya tenían etiqueta (no se volvieron a leer)');
+    if (e.reutilizadas) partes.push(e.reutilizadas + ' sin cambios o con nota puesta a mano (no se volvieron a leer)');
     if (e.sinClasificar) partes.push(e.sinClasificar + ' sin clasificar (se reintentan la próxima vez)');
     texto = 'Listo: ' + e.total + ' chat' + (e.total === 1 ? '' : 's') + ' de hoy. ' + partes.join(' · ') + '.' +
       (e.recortado ? ' Hoy hay demasiados mensajes: se miraron los primeros.' : '') +
@@ -1888,7 +1888,7 @@ function pintarSelectorDeLinea(data) {
   if (!sel) return;
   if (!variasLineas()) { sel.classList.add('hidden'); return; }
   var elegida = lineaSeleccionada();
-  sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (la más desahogada)</option>') + LINEAS.map(function (l) {
+  sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (al azar)</option>') + LINEAS.map(function (l) {
     var caida = l.estado !== 'conectado';
     return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
   }).join('');

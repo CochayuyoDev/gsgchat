@@ -38,7 +38,7 @@ export interface SendJob {
   /**
    * Por que linea de WhatsApp sale. Indicarla es elegirla (una persona, desde el
    * chat): si no esta disponible no se sustituye. Sin indicarla: la que el
-   * cliente tiene asignada o, si es nuevo, la mas desahogada.
+   * cliente tiene asignada o, si es nuevo, una conectada al azar.
    */
   whatsappNumberId?: string | null;
   /**
@@ -245,10 +245,12 @@ export interface LineaDeEnvio {
   ventanaAplica: boolean;
   /** Desde cuando esta sin conexion; null si esta conectada o aun no se sabe. */
   noDisponibleDesde?: Date | null;
+  /** WhatsApp rechazo este numero: sus clientes pasan a otra linea sin esperar. */
+  bloqueada?: boolean;
 }
 
-/** Lo que dura sin conexion una linea antes de pasar sus clientes a otra, si nadie dice otra cosa. */
-const ESPERA_CAMBIO_LINEA_MS = 30 * 60_000;
+/** Lo que dura sin conexion una linea antes de pasar sus clientes a otra: un corte breve no los mueve. */
+const ESPERA_CAMBIO_LINEA_MS = 2 * 60_000;
 
 export interface SenderDeps {
   /**
@@ -262,8 +264,6 @@ export interface SenderDeps {
    * disponible. Null = ninguna disponible.
    */
   elegirLinea?: (excluir: string | null) => Promise<LineaDeEnvio | null>;
-  /** Cuanto se espera a una linea sin conexion antes de pasar sus clientes a otra. */
-  esperaCambioLineaMs?: () => number;
   repos: Repos;
   wa: WhatsAppClient;
   /** Funcion si el numero puede cambiar desde /setup sin reiniciar. */
@@ -341,11 +341,12 @@ export function createSender(deps: SenderDeps): Sender {
    *
    *  - Una linea PEDIDA por una persona manda, y si no esta disponible no se
    *    sustituye: seria salir desde un numero que nadie eligio.
-   *  - Un cliente con linea sigue por ella. Si se cae, se le espera; un cupo
+   *  - Un cliente con linea sigue por ella. Un corte breve se espera; un cupo
    *    gastado o una pausa de salud tampoco lo mueven (pasar sus mensajes a otro
    *    numero solo quemaria ese tambien).
-   *  - La excepcion: su linea se quito o se deshabilito, o lleva sin conexion mas
-   *    de lo que se espera. Ahi pasa a otra linea activa y se queda en ella.
+   *  - La excepcion: su linea lleva mas de 2 minutos sin conexion, WhatsApp la
+   *    bloqueo, o se quito o se deshabilito. Ahi pasa a otra linea activa y se
+   *    queda en ella.
    *  - Un grupo vive en la linea de la que es miembro: nunca se reparte ni se cambia.
    *
    * `confirmar` guarda la decision justo antes de enviar, para que lo que frena
@@ -375,8 +376,9 @@ export function createSender(deps: SenderDeps): Sender {
     }
 
     const actual = await resolver(propia);
-    const espera = deps.esperaCambioLineaMs?.() ?? ESPERA_CAMBIO_LINEA_MS;
-    const caidaDeMas = Boolean(actual && !estaConectada(actual) && actual.noDisponibleDesde && at.getTime() - actual.noDisponibleDesde.getTime() >= espera);
+    const caidaDeMas = Boolean(
+      actual && !estaConectada(actual) && (actual.bloqueada || (actual.noDisponibleDesde && at.getTime() - actual.noDisponibleDesde.getTime() >= ESPERA_CAMBIO_LINEA_MS)),
+    );
     if (actual && !caidaDeMas) return { linea: actual };
 
     const otra = await otraLineaViva(propia);

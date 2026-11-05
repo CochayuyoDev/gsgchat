@@ -61,8 +61,6 @@ export const ajustesGeneralesSchema = z.object({
     .nullable(),
   /** Conversaciones guardadas: a cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). null = lo del servidor. */
   guardados: z.object({ inactividadDias: z.coerce.number().int().min(0).max(3650).nullable() }).nullable(),
-  /** Lineas de WhatsApp: cuantos minutos se espera a una linea sin conexion antes de pasar sus clientes a otra. null = 30. */
-  lineas: z.object({ esperaCambioMinutos: z.coerce.number().int().min(1).max(1440).nullable() }).nullable(),
   /**
    * El resumen del dia por WhatsApp al supervisor: uno por la mañana (como
    * arranca el dia) y otro por la tarde (como cerro). Ver src/resumenes.
@@ -175,7 +173,6 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   tono: null,
   zonaHoraria: null,
   guardados: null,
-  lineas: null,
   resumenes: null,
   modoPrueba: { activo: false, numeros: [] },
   horario: { inicio: null, fin: null, dias: null, diaExtra: null },
@@ -205,7 +202,6 @@ export const ajustesGeneralesPatchSchema = z.object({
   tono: ajustesGeneralesSchema.shape.tono.optional(),
   zonaHoraria: ajustesGeneralesSchema.shape.zonaHoraria.optional(),
   guardados: ajustesGeneralesSchema.shape.guardados.optional(),
-  lineas: z.object({ esperaCambioMinutos: z.coerce.number().int().min(1).max(1440).nullable() }).nullable().optional(),
   resumenes: ajustesGeneralesSchema.shape.resumenes.optional(),
   modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().refine(() => false, 'El modo de prueba fue retirado').optional(),
   horario: ajustesGeneralesSchema.shape.horario.partial().optional(),
@@ -229,7 +225,6 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     tono: patch.tono !== undefined ? patch.tono : base.tono,
     zonaHoraria: patch.zonaHoraria !== undefined ? patch.zonaHoraria : base.zonaHoraria,
     guardados: patch.guardados !== undefined ? patch.guardados : base.guardados,
-    lineas: patch.lineas !== undefined ? patch.lineas : base.lineas,
     resumenes: patch.resumenes !== undefined ? patch.resumenes : base.resumenes,
     modoPrueba: { ...base.modoPrueba, ...(patch.modoPrueba ?? {}) },
     horario: { ...base.horario, ...(patch.horario ?? {}) },
@@ -316,7 +311,6 @@ export interface ServicioAjustes {
   /** A cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). */
   guardadosDias(): number;
   /** Cuantos minutos se espera a una linea sin conexion antes de pasar sus clientes a otra. */
-  esperaCambioLineaMin(): number;
   /** El resumen del dia por WhatsApp: si esta encendido y a que horas (HH:MM). */
   resumenes(): { activo: boolean; horaManana: string; horaTarde: string };
   supervisor(): string;
@@ -439,9 +433,6 @@ export async function crearServicioAjustes(deps: {
     },
     guardadosDias() {
       return fresco().guardados?.inactividadDias ?? config.ARCHIVE_INACTIVE_DAYS;
-    },
-    esperaCambioLineaMin() {
-      return fresco().lineas?.esperaCambioMinutos ?? 30;
     },
     resumenes() {
       return fresco().resumenes ?? RESUMENES_POR_DEFECTO;

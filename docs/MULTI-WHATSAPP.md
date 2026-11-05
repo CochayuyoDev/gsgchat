@@ -8,11 +8,12 @@ Una tienda puede tener hasta 8 líneas en una sola bandeja. Este documento dice 
 
 | Situación | Qué pasa |
 |---|---|
-| Cliente nuevo que nosotros contactamos | Entra por la línea más desahogada y se queda con ella |
+| Cliente nuevo que nosotros contactamos | Entra por una línea conectada elegida al azar y se queda con ella |
 | Cliente nuevo que nos escribe | Se queda con la línea a la que escribió |
 | Cliente con línea | Sigue por ella, aunque otra esté más libre |
-| Su línea se cae menos de lo configurado (30 min por defecto) | Se espera y se reintenta cada 2 minutos, sin cambiar de número |
-| Su línea sigue caída pasado el plazo | Pasa a otra activa y se queda en ella, aunque la vieja regrese |
+| Su línea se corta menos de 2 minutos | Se espera y se reintenta, sin cambiar de número |
+| Su línea lleva más de 2 minutos sin conexión | Pasa a otra activa y se queda en ella, aunque la vieja regrese |
+| WhatsApp bloquea su número (cierre 403) | Pasa en el acto a otra activa y se queda en ella |
 | Su línea se quita o se deshabilita | Pasa a otra activa en el acto |
 | No hay ninguna otra activa | Conserva su línea y espera |
 | Su línea gastó el cupo o tiene pausa de salud | No cambia: mover esos mensajes solo quemaría otro número |
@@ -22,16 +23,17 @@ Una tienda puede tener hasta 8 líneas en una sola bandeja. Este documento dice 
 
 ## Cómo se reparte
 
-`src/whatsapp/reparto-lineas.ts` elige, entre las líneas conectadas y sin pausa manual, la de menor `(mensajes de hoy + clientes nuevos de hoy) / cupo del día`. A igual carga decide quién lleva menos clientes y después el orden de las líneas. No hay azar.
+`src/whatsapp/reparto-lineas.ts` sortea entre las líneas conectadas y sin pausa manual. No busca partes iguales: de 100 clientes pueden caer 30, 25, 36 y 9 en cuatro números.
 
-Una línea recién conectada tiene poco cupo por el calentamiento y por eso recibe menos clientes que una veterana. Las que gastaron el cupo se saltan, salvo que lo hayan gastado todas.
+Las que gastaron el cupo se saltan, salvo que lo hayan gastado todas. Una línea recién conectada entra al sorteo como las demás: su cupo de calentamiento sigue frenando lo que envía, pero recibe clientes igual.
 
 ## Dónde está cada cosa
 
 - **Decisión de la línea:** `lineaDelTrabajo` en `src/outbound/sender.ts`.
 - **Asignación y registro:** `src/db/lineas-contacto.ts`. Cada movimiento exige que el cliente siga en la línea de partida, así dos envíos a la vez no lo dejan en dos líneas.
 - **Tiempo sin conexión:** `sinConexionDesde` en `src/whatsapp/registro.ts`. Vive en memoria a propósito: tras un reinicio toda línea tarda en reconectar y hay que darle el plazo completo.
-- **Pantalla:** Conexión → Líneas de WhatsApp (reparto, espera y últimos cambios). Datos en `GET` y `PATCH /admin/lineas/reparto`.
+- **Bloqueo:** `bloqueado` en el estado de la sesión (`src/whatsapp/local/session.ts`), solo en las líneas por QR. La API de Meta no informa desconexiones al sistema: si bloquean esa línea, hay que quitarla o deshabilitarla para que sus clientes pasen a otra.
+- **Pantalla:** Conexión → Líneas de WhatsApp (reparto y últimos cambios). Datos en `GET /admin/lineas/reparto`.
 
 ## Al desplegar
 

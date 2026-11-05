@@ -191,13 +191,14 @@ Se quitó: GSG lee la nota en el historial. Las columnas `sync_*` de la migraci�
 2. **IA.** En segundo plano, cada número va a la IA con sus mensajes del día y el catálogo del negocio. La IA
    solo clasifica (no contesta al cliente) y devuelve el código de una etiqueta; si ninguna corresponde, `otro`.
 3. **Validación.** El código tiene que estar en el catálogo. Se guarda con el número, el día, el lote y los
-   mensajes procesados. Al volver a pulsar el botón **solo se leen los chats que aún no tienen etiqueta** (nuevos,
-   o que la IA no pudo clasificar): un chat ya etiquetado se queda con su etiqueta aunque le lleguen mensajes.
-   Solo se relee si su etiqueta ya no está en el catálogo del negocio. Si mientras la IA leía un chat una persona
+   mensajes procesados. Al volver a pulsar el botón **se leen los chats sin etiqueta y los que cambiaron** (nuevos,
+   que la IA no pudo clasificar, o con mensajes nuevos o editados desde la última lectura): si la conversación
+   siguió, la etiqueta se actualiza. Lo que no cambió no vuelve a la IA, salvo que su etiqueta ya no esté en el
+   catálogo del negocio. Las notas puestas a mano o por el bot no se pisan. Si mientras la IA leía un chat una persona
    le puso la etiqueta a mano, se queda la de la persona.
 4. **Error de IA.** Si la IA contesta un código que no está en el catálogo, algo que no es JSON o dos respuestas
    pegadas («No, espera…»), se le da **una** segunda oportunidad recordándole la lista exacta de códigos. Si
-   tampoco, o si la IA falla, ese chat queda «Sin clasificar», sin nota. No se adivina por palabras clave: `otro`
+   tampoco, o si la IA falla, ese chat queda «Sin clasificar» (si ya tenía una etiqueta válida, la conserva). No se adivina por palabras clave: `otro`
    es solo lo que la IA asigna cuando ninguna etiqueta corresponde. El siguiente lote lo vuelve a intentar. Se le
    pide con temperatura 0: la misma conversación da la misma etiqueta.
 
@@ -211,7 +212,7 @@ códigos, los nombres y la descripción que lee la IA de cada una. `otro` está 
 guarde uno, vale el de fábrica (17 etiquetas, en `src/archive/clasificar.ts`; `sin_novedad` es el flujo feliz: el
 cliente manda una ubicación, agradece, avisa que ya pagó o que ya recibió, y no pide nada más (decir que estará
 para recibir es `confirmar_recepcion`); `otro` queda para lo que no tiene que ver con la entrega). Tras cambiar
-el catálogo, ⋮ → «Volver a etiquetar todo» relee también los chats ya etiquetados. Las conversaciones guardadas
+el catálogo, ⋮ → «Volver a etiquetar todo» relee también los chats que no cambiaron. Las conversaciones guardadas
 (Guardados) usan el mismo catálogo.
 
 Cada pulsación es un lote con su estado (`en_curso`, `completado`, `completado_con_errores` si alguno quedó sin

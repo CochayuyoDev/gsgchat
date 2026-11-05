@@ -1,10 +1,9 @@
 /**
  * Por que linea entra un cliente nuevo.
  *
- * No al azar: a la linea mas desahogada segun su cupo del dia. Una linea recien
- * conectada todavia se esta calentando y tiene poco cupo, asi que recibe menos
- * clientes que una veterana; es lo que la protege de un bloqueo. Solo decide
- * para quien no tiene linea: el que ya la tiene se queda con ella.
+ * Al azar entre las lineas conectadas: de cien clientes pueden caer 30, 25, 36 y
+ * 9 en cuatro numeros, sin un patron de reparto. Solo decide para quien no tiene
+ * linea: el que ya la tiene se queda con ella.
  */
 
 import type { LineasContactoRepo } from '../db/lineas-contacto.js';
@@ -33,18 +32,15 @@ export interface CargaDeLinea {
 }
 
 /**
- * La linea que toca. Primero se descartan las pausadas y las que ya gastaron su
- * cupo (si todas lo gastaron, se reparte igual: el cupo solo frena, no pierde
- * el mensaje). `nuevosHoy` cuenta desde el momento de asignar, asi una tanda de
- * cien pedidos se reparte bien aunque todavia no haya salido ningun mensaje.
+ * La linea que toca, sorteada. Antes del sorteo se descartan las pausadas y las
+ * que ya gastaron su cupo, porque de ellas no saldria el mensaje (si todas lo
+ * gastaron, se sortea igual: el cupo solo frena, no pierde el mensaje).
  */
-export function elegirLineaEquilibrada(cargas: CargaDeLinea[]): string | null {
+export function elegirLineaAlAzar(cargas: CargaDeLinea[], azar: () => number = Math.random): string | null {
   const activas = cargas.filter((c) => !c.pausada);
   const conCupo = activas.filter((c) => c.enviadosHoy < c.cupoDiario);
   const candidatas = conCupo.length ? conCupo : activas;
-  const ocupacion = (c: CargaDeLinea) => (c.enviadosHoy + c.nuevosHoy) / Math.max(1, c.cupoDiario);
-  const [mejor] = [...candidatas].sort((a, b) => ocupacion(a) - ocupacion(b) || a.clientes - b.clientes || a.posicion - b.posicion);
-  return mejor?.id ?? null;
+  return candidatas[Math.floor(azar() * candidatas.length)]?.id ?? null;
 }
 
 export interface RepartoDeLineas {
@@ -92,7 +88,7 @@ export function crearRepartoDeLineas(deps: {
   return {
     cargas,
     async elegir(excluir) {
-      return elegirLineaEquilibrada((await cargas()).filter((c) => c.conectada && c.id !== excluir));
+      return elegirLineaAlAzar((await cargas()).filter((c) => c.conectada && c.id !== excluir));
     },
     cambios: (opciones) => repos.lineasContacto.cambios(opciones),
   };
