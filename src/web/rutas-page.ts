@@ -329,6 +329,14 @@ export function rutasPage(opts: RutasOpts): string {
         <p class="aj-frase">Entre un cliente y el siguiente, esperar entre <input id="aj-pausa-min" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa mínima"> <select id="aj-pausa-min-unidad" data-unidad-for="aj-pausa-min" aria-label="Unidad de pausa mínima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select> y <input id="aj-pausa-max" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa máxima"> <select id="aj-pausa-max-unidad" data-unidad-for="aj-pausa-max" aria-label="Unidad de pausa máxima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select>. Esta pausa es independiente de los tiempos por pedido.</p>
       </section>
 
+      <section class="aj-seccion" id="aj-cambio-ubi">
+        <h3 class="aj-titulo">Cambio de ubicación</h3>
+        <p class="aj-frase">El cliente puede cambiar su ubicación diciendo «Cambio de Ubicación» hasta las <input id="aj-cu-hora" type="time" aria-label="Hora límite para cambiar la ubicación"> (por defecto 15:00, hora de Lima).</p>
+        <label style="display:block;margin-top:8px"><strong>Después de esa hora, el mensaje de cambio de ubicación pasa a:</strong> <span class="muted">Variables: {horaLimite} {soporte}</span>
+          <textarea id="aj-cu-texto" rows="4" style="width:100%"></textarea></label>
+        <div class="fila" style="margin-top:8px"><button type="button" class="btn primario" id="aj-cu-guardar">Guardar cambio de ubicación</button> <button type="button" class="btn" id="aj-cu-fabrica">Texto de fábrica</button> <span class="muted" id="aj-cu-estado" role="status"></span></div>
+      </section>
+
       <section class="aj-seccion">
         <h3 class="aj-titulo">Textos de los seguimientos</h3>
         <p class="muted" style="margin-top:4px">Escribe el texto de cada seguimiento. Puedes dejar líneas en blanco entre párrafos.</p>
@@ -1658,7 +1666,7 @@ document.getElementById('aj-guardar-texto-inicial').onclick = function () { guar
 document.getElementById('aj-fabrica-texto-inicial').onclick = function () { guardarTextoInicial(TEXTO_INICIAL_FABRICA); };
 cargarTextoInicial();
 
-var OTROS_DEL_BOT=['ubicacionRegistrada','ubicacionCambiada','invitarCambioUbicacion','invitarOtroCambioUbicacion','cambioUbicacionAntes','cambioUbicacionTarde'];
+var OTROS_DEL_BOT=['ubicacionRegistrada','ubicacionCambiada','invitarCambioUbicacion','invitarOtroCambioUbicacion','cambioUbicacionAntes'];
 var otrosDef = {};
 async function cargarOtrosTextos() {
   var estado = document.getElementById('aj-estado-otros');
@@ -1700,6 +1708,38 @@ async function guardarOtrosTextos() {
   finally { boton.disabled = false; }
 }
 document.getElementById('aj-guardar-otros').onclick = guardarOtrosTextos;
+var cuFabrica = '';
+async function cargarCambioUbicacion() {
+  var estado = document.getElementById('aj-cu-estado');
+  try {
+    var d = await api('/admin/entregas');
+    var aj = d.ajustes || {}, guardados = aj.textos || {};
+    cuFabrica = ((d.textos || {}).porDefecto || {}).cambioUbicacionTarde || '';
+    document.getElementById('aj-cu-hora').value = aj.cambioUbicacionHasta || '15:00';
+    document.getElementById('aj-cu-texto').value = (guardados.cambioUbicacionTarde || '').trim() ? guardados.cambioUbicacionTarde : cuFabrica;
+    estado.textContent = '';
+  } catch (e) { estado.textContent = e.message; }
+}
+async function guardarCambioUbicacion(fabrica) {
+  var boton = document.getElementById('aj-cu-guardar');
+  var estado = document.getElementById('aj-cu-estado');
+  var hora = document.getElementById('aj-cu-hora').value;
+  var texto = fabrica ? '' : document.getElementById('aj-cu-texto').value;
+  if (!/^\d{2}:\d{2}$/.test(hora)) { estado.textContent = 'Pon una hora válida.'; return; }
+  if (texto.trim() === cuFabrica.trim()) texto = '';
+  boton.disabled = true;
+  estado.textContent = 'Guardando…';
+  try {
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { cambioUbicacionHasta: hora, textos: { cambioUbicacionTarde: texto } } });
+    toast('Cambio de ubicación guardado.');
+    await cargarCambioUbicacion();
+  } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
+}
+document.getElementById('aj-cu-guardar').onclick = function () { guardarCambioUbicacion(false); };
+document.getElementById('aj-cu-fabrica').onclick = function () { guardarCambioUbicacion(true); };
+cargarCambioUbicacion();
+
 cargarOtrosTextos();
 
 /* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */

@@ -34,7 +34,7 @@ const pideLaNueva = (_nombre: string): string => 'Por favor, comparta su nueva u
 const PIDE_LA_NUEVA = pideLaNueva('Ana');
 // Desde el 28/10: cómo cambiarla, con la hora límite.
 // La hora límite sigue mandando, pero el texto ya no la dice (pedido del dueño, 29/10).
-const AVISO_1PM = /Si desea cambiar su ubicación, solo diga: \*cambiar ubicación\*\.$/m;
+const AVISO_1PM = /Si desea cambiar su ubicación, diga "Cambio de Ubicación"\.$/m;
 const MOTO = '999888777';
 
 // ------------------------------------------------------------------ reglas

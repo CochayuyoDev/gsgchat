@@ -205,7 +205,13 @@ describe('«Todo el sistema»: pedir una persona con una entrega en curso', () =
     await e.entregas.crearAMano({ referencia: 'BAT-P-2', telefono: tel, nombre: 'Contexto', faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
     const ctx = (await e.entregas.contextoDeCliente(`51${tel}`)) ?? '';
     expect(ctx).toMatch(/Horario de entrega de hoy: de .+ a .+/);
-    expect(ctx).toMatch(/Si quiere cambiar su ubicación: antes de la 1:00 PM/);
+    expect(ctx).toMatch(/Si quiere cambiar su ubicación: antes de la 3:00 PM/);
     expect(ctx).toMatch(/no le ofrezcas cotizar/);
   }, 60_000);
+});
+
+describe('«Cambio de Ubicación» en cualquier escritura', () => {
+  it.each(['Cambio de Ubicación', 'cambio de ubicación', 'cambio de ubicacion', 'CAMBIO DE UBICACION', 'Cambio de ubicacion'])('%s', (t) => {
+    expect(pideCambioUbicacion(t), t).toBe(true);
+  });
 });

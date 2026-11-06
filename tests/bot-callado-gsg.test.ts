@@ -12,9 +12,9 @@ const telefono = '987601316';
 const phone = '51' + telefono;
 const fijo = { lat: -12.0464, lng: -77.0428 };
 const pedido = { ...OBLIGATORIOS_GSG, tracking: 'GSG-CALLADO-1', cliente: 'Rosa', telefono, distrito: 'Lima' };
-// 10:00 y 2:00 PM en Lima: antes y después de la hora límite para cambiar la ubicación (1:00 PM).
+// 10:00 y 4:00 PM en Lima: antes y después de la hora límite para cambiar la ubicación (3:00 PM).
 const MANANA = new Date('2026-10-28T15:00:00Z');
-const TARDE = new Date('2026-10-28T19:00:00Z');
+const TARDE = new Date('2026-10-28T21:00:00Z');
 afterEach(() => setFakeClock(null));
 
 describe('bot callado en «Solo lo de GSG» sin IA', () => {
