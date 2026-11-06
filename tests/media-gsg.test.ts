@@ -132,10 +132,10 @@ describe('GSG manda una foto, un video y un audio', () => {
     expect(salidos.map((s) => [s.tipo, s.mimeType, s.bytes])).toEqual([
       ['image', 'image/jpeg', JPEG.length],
       ['video', 'video/mp4', MP4.length],
-      ['audio', 'audio/mpeg', expect.any(Number)],
+      ['audio', 'audio/ogg', expect.any(Number)],
     ]);
     expect(salidos[0]).toMatchObject({ caption: 'su pedido' });
-    expect(salidos[2]).toMatchObject({ voz: false });
+    expect(salidos[2]).toMatchObject({ voz: true });
   });
 
   it('queda en el historial con su archivo, y el enlace abre el fichero tal cual', async () => {

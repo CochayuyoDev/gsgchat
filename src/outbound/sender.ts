@@ -808,11 +808,11 @@ async function dispatch(
     case 'media': {
       if (!job.media) throw new Error('falta el campo media');
       if (!wa.sendMedia) throw new Error('este proveedor no manda fotos ni archivos');
-      // Todo audio sale en mp3, sea cual sea el proveedor (Meta, QR o WAHA): el webm del navegador no lo reproduce nadie.
-      // Un mp3 no es nota de voz (eso exige ogg/opus), asi que sale como audio normal.
+      // Todo audio sale en ogg/opus y como nota de voz (onda y micro), sea cual sea el proveedor (Meta, QR o WAHA):
+      // el webm del navegador no lo reproduce nadie, y un ogg o webm siempre es una nota de voz, no un fichero de musica.
       const audio = job.media.kind === 'audio' ? await audioParaMeta(job.media).catch((e: unknown) => { throw new Error(e instanceof Error ? e.message : 'no se pudo preparar el audio'); }) : null;
       return wa.sendMedia(job.phone, audio
-        ? { kind: 'audio', datos: audio.datos, mimeType: audio.mimeType, filename: audio.filename, caption: job.media.caption, voz: false, cita: job.cita }
+        ? { kind: 'audio', datos: audio.datos, mimeType: audio.mimeType, filename: audio.filename, caption: job.media.caption, voz: true, cita: job.cita }
         : { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, voz: job.media.voz, cita: job.cita });
     }
     case 'freeform':

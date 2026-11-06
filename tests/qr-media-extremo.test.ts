@@ -149,7 +149,7 @@ describe('QR: el cliente manda foto, video, audio y sticker', () => {
 describe('QR: GSG manda foto, video y audio al cliente', () => {
   const mandar = (media: Record<string, unknown>) => sender.send({ phone: CLIENTE, kind: 'media', category: 'UTILITY', manual: true, origen: 'persona', autorNombre: 'Ana', atiendePersona: true, media: media as never });
 
-  it('la foto y el video salen por el socket con su pie; el audio sale convertido a mp3', async () => {
+  it('la foto y el video salen por el socket con su pie; el audio sale como nota de voz ogg/opus', async () => {
     const antes = enviados.length;
     expect((await mandar({ id: 'a'.repeat(24) + '.jpg', kind: 'image', datos: JPEG, mimeType: 'image/jpeg', caption: 'La puerta' })).ok).toBe(true);
     expect((await mandar({ id: 'b'.repeat(24) + '.mp4', kind: 'video', datos: MP4, mimeType: 'video/mp4', caption: 'Mira' })).ok).toBe(true);
@@ -158,8 +158,8 @@ describe('QR: GSG manda foto, video y audio al cliente', () => {
     expect(nuevos).toHaveLength(3);
     expect(nuevos[0]).toMatchObject({ jid: `${CLIENTE}@s.whatsapp.net`, content: { image: JPEG, mimetype: 'image/jpeg', caption: 'La puerta' } });
     expect(nuevos[1]).toMatchObject({ content: { video: MP4, mimetype: 'video/mp4', caption: 'Mira' } });
-    expect(nuevos[2]).toMatchObject({ content: { mimetype: 'audio/mpeg', ptt: false } });
-    expect(Buffer.from((nuevos[2] as any).content.audio).subarray(0, 3).toString('latin1')).toBe('ID3');
+    expect(nuevos[2]).toMatchObject({ content: { mimetype: 'audio/ogg', ptt: true } });
+    expect(Buffer.from((nuevos[2] as any).content.audio).subarray(0, 4).toString('latin1')).toBe('OggS');
   });
 
   it('lo enviado queda en el chat firmado por la persona y GSG recibe el aviso con el enlace al mismo fichero', async () => {

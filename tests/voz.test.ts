@@ -432,7 +432,7 @@ describe('el asistente con voz', () => {
     const c = await cliente();
     const r = await app.inject({ method: 'POST', url: '/admin/chat/send', headers: h, payload: { contactId: c.id, text: 'Ya salió tu pedido, llega mañana.', voz: true } });
     expect(r.json()).toMatchObject({ ok: true, voz: { enviada: true, motivo: null } });
-    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: false, mimeType: 'audio/mpeg', caption: 'Ya salió tu pedido, llega mañana.' });
+    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, mimeType: 'audio/ogg', caption: 'Ya salió tu pedido, llega mañana.' });
     const hilo = await repos.messages.listMessages(c.id, 5);
     // Firmado por quien esta en sesion, con su nombre de pila.
     expect(hilo.find((m) => m.direction === 'out')!.payload).toMatchObject({ origen: 'persona', autorNombre: 'Ali', media: { voz: true } });
@@ -459,7 +459,7 @@ describe('la API para otros sistemas', () => {
     const r = await app.inject({ method: 'POST', url: '/api/v1/mensajes', headers: con(TODO), payload: { telefono: '51987654321', texto: 'Tu pedido ya está en camino.', voz: true, autor: 'persona', autorNombre: 'Rosa' } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ ok: true, estado: 'enviado', voz: { pedida: true, enviada: true, motivo: null } });
-    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: false, mimeType: 'audio/mpeg', caption: 'Tu pedido ya está en camino.' });
+    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, mimeType: 'audio/ogg', caption: 'Tu pedido ya está en camino.' });
     const enviado = eventos.find((e) => e.nombre === 'mensaje.enviado')!;
     expect(enviado.datos.mensaje).toMatchObject({ autor: 'persona', autorNombre: 'Rosa', voz: true });
     const conv = (await app.inject({ method: 'GET', url: '/api/v1/conversaciones/51987654321', headers: con(TODO) })).json();
@@ -489,7 +489,7 @@ describe('la API para otros sistemas', () => {
 
     const nota = await app.inject({ method: 'POST', url: '/api/v1/mensajes', headers: con(TODO), payload: { telefono: '51987654321', media: { url: 'https://stoky.test/nota.ogg', tipo: 'audio', voz: true } } });
     expect(nota.statusCode).toBe(200);
-    expect(enviados()[1]).toMatchObject({ kind: 'media', tipo: 'audio', voz: false, mimeType: 'audio/mpeg' });
+    expect(enviados()[1]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, mimeType: 'audio/ogg' });
 
     const rota = await app.inject({ method: 'POST', url: '/api/v1/mensajes', headers: con(TODO), payload: { telefono: '51987654321', media: { url: 'https://stoky.test/no-existe.png' } } });
     expect(rota.statusCode).toBe(400);

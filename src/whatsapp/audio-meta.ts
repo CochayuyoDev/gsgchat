@@ -3,8 +3,9 @@
  *
  * Meta solo admite como audio: aac, mp4 (m4a), mpeg (mp3), amr y ogg con opus.
  * El micro del navegador graba webm, y otras apps mandan wav, flac o webm: Meta
- * los rechaza al subirlos y el audio nunca llega. Todo audio que no sea ya mp3
- * se pasa a mp3 con ffmpeg antes de subirlo.
+ * los rechaza al subirlos y el audio nunca llega. Todo audio que no sea ya
+ * ogg/opus se pasa a ogg/opus con ffmpeg: es lo unico que WhatsApp muestra como
+ * nota de voz (con su onda y su micro) y lo que Meta admite como tal.
  */
 
 import { spawn } from 'node:child_process';
@@ -15,15 +16,19 @@ export interface AudioListo {
   filename?: string;
 }
 
-export function audioNecesitaConversion(mimeType: string): boolean {
-  const mime = mimeType.split(';')[0]!.trim().toLowerCase();
-  return mime !== 'audio/mpeg' && mime !== 'audio/mp3';
+/** Ya es ogg con opus dentro (un ogg con vorbis no vale): se mira la cabecera "OpusHead". */
+export function esOggOpus(datos: Buffer): boolean {
+  return datos.subarray(0, 4).toString('latin1') === 'OggS' && datos.subarray(0, 128).includes('OpusHead');
 }
 
-/** Pasa el audio a mp3. Falla con un mensaje claro si ffmpeg no esta o no puede leerlo. */
-export function convertirAMp3(datos: Buffer, timeoutMs = 60_000): Promise<Buffer> {
+export function audioNecesitaConversion(datos: Buffer): boolean {
+  return !esOggOpus(datos);
+}
+
+/** Pasa el audio a ogg/opus. Falla con un mensaje claro si ffmpeg no esta o no puede leerlo. */
+export function convertirAOggOpus(datos: Buffer, timeoutMs = 60_000): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const ff = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-c:a', 'libmp3lame', '-b:a', '64k', '-ar', '44100', '-ac', '1', '-f', 'mp3', 'pipe:1'], {
+    const ff = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-c:a', 'libopus', '-b:a', '32k', '-ar', '48000', '-ac', '1', '-application', 'voip', '-f', 'ogg', 'pipe:1'], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const salida: Buffer[] = [];
@@ -42,19 +47,19 @@ export function convertirAMp3(datos: Buffer, timeoutMs = 60_000): Promise<Buffer
       clearTimeout(reloj);
       const fuera = Buffer.concat(salida);
       if (codigo === 0 && fuera.length) resolve(fuera);
-      else reject(new Error(`no se pudo convertir el audio a mp3: ${errores.trim().slice(0, 200) || `ffmpeg salio con ${codigo}`}`));
+      else reject(new Error(`no se pudo convertir el audio a ogg/opus: ${errores.trim().slice(0, 200) || `ffmpeg salio con ${codigo}`}`));
     });
     ff.stdin.on('error', () => undefined);
     ff.stdin.end(datos);
   });
 }
 
-/** Deja el audio siempre en mp3. */
+/** Deja el audio siempre en ogg/opus. */
 export async function audioParaMeta(media: { datos: Buffer; mimeType: string; filename?: string; voz?: boolean }): Promise<AudioListo> {
-  if (!audioNecesitaConversion(media.mimeType)) {
-    return { datos: media.datos, mimeType: 'audio/mpeg', filename: media.filename };
+  if (!audioNecesitaConversion(media.datos)) {
+    return { datos: media.datos, mimeType: 'audio/ogg', filename: media.filename };
   }
-  const datos = await convertirAMp3(media.datos);
+  const datos = await convertirAOggOpus(media.datos);
   const base = (media.filename ?? 'audio').replace(/\.[^.]+$/, '') || 'audio';
-  return { datos, mimeType: 'audio/mpeg', filename: `${base}.mp3` };
+  return { datos, mimeType: 'audio/ogg', filename: `${base}.ogg` };
 }
