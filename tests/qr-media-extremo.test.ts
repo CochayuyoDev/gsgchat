@@ -1,3 +1,4 @@
+import { OGG_REAL } from './fixtures/audio-real.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,7 +11,7 @@ import type { FastifyInstance } from 'fastify';
 // y el sender saliente con el cliente local).
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(300, 1)]);
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(300, 2)]);
-const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(300, 3)]);
+const OGG = OGG_REAL;
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([7, 7, 7, 7]), Buffer.from('WEBP'), Buffer.alloc(300, 4)]);
 const BYTES: Record<string, Buffer> = { imageMessage: JPEG, videoMessage: MP4, audioMessage: OGG, stickerMessage: WEBP };
 
@@ -148,7 +149,7 @@ describe('QR: el cliente manda foto, video, audio y sticker', () => {
 describe('QR: GSG manda foto, video y audio al cliente', () => {
   const mandar = (media: Record<string, unknown>) => sender.send({ phone: CLIENTE, kind: 'media', category: 'UTILITY', manual: true, origen: 'persona', autorNombre: 'Ana', atiendePersona: true, media: media as never });
 
-  it('la foto y el video salen por el socket con su pie; el audio sale como nota de voz', async () => {
+  it('la foto y el video salen por el socket con su pie; el audio sale como nota de voz ogg/opus', async () => {
     const antes = enviados.length;
     expect((await mandar({ id: 'a'.repeat(24) + '.jpg', kind: 'image', datos: JPEG, mimeType: 'image/jpeg', caption: 'La puerta' })).ok).toBe(true);
     expect((await mandar({ id: 'b'.repeat(24) + '.mp4', kind: 'video', datos: MP4, mimeType: 'video/mp4', caption: 'Mira' })).ok).toBe(true);
@@ -157,7 +158,8 @@ describe('QR: GSG manda foto, video y audio al cliente', () => {
     expect(nuevos).toHaveLength(3);
     expect(nuevos[0]).toMatchObject({ jid: `${CLIENTE}@s.whatsapp.net`, content: { image: JPEG, mimetype: 'image/jpeg', caption: 'La puerta' } });
     expect(nuevos[1]).toMatchObject({ content: { video: MP4, mimetype: 'video/mp4', caption: 'Mira' } });
-    expect(nuevos[2]).toMatchObject({ content: { audio: OGG, ptt: true } });
+    expect(nuevos[2]).toMatchObject({ content: { mimetype: 'audio/ogg; codecs=opus', ptt: true } });
+    expect(Buffer.from((nuevos[2] as any).content.audio).subarray(0, 4).toString('latin1')).toBe('OggS');
   });
 
   it('lo enviado queda en el chat firmado por la persona y GSG recibe el aviso con el enlace al mismo fichero', async () => {

@@ -223,13 +223,19 @@ async function empezarAGrabar() {
   if (!current) return;
   if (!puedeGrabar()) { toast('Este navegador no puede grabar audio. Usa el clip para mandar un fichero de audio.'); return; }
   try {
+    /* Una grabacion anterior (enviada o descartada) deja la caja con el reproductor: se rehace antes de empezar. */
+    pintarGrabandoVacio();
     var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     var tipo = formatoDeVoz();
-    grabadora = new MediaRecorder(stream, tipo ? { mimeType: tipo } : undefined);
-    grabacion = { trozos: [], desde: Date.now(), reloj: null, blob: null, url: null, medidor: null, stream: stream };
-    grabadora.ondataavailable = function (ev) { if (ev.data && ev.data.size) grabacion.trozos.push(ev.data); };
-    grabadora.onstop = function () {
-      grabacion.blob = new Blob(grabacion.trozos, { type: grabadora.mimeType || tipo || 'audio/webm' });
+    var esta = new MediaRecorder(stream, tipo ? { mimeType: tipo } : undefined);
+    grabadora = esta;
+    grabacion = { trozos: [], desde: Date.now(), reloj: null, blob: null, url: null, medidor: null, stream: stream, cancelada: false };
+    var estaGrabacion = grabacion;
+    esta.ondataavailable = function (ev) { if (ev.data && ev.data.size) estaGrabacion.trozos.push(ev.data); };
+    esta.onstop = function () {
+      /* El stop de una grabacion cancelada llega tarde: no debe pisar la caja de la siguiente. */
+      if (estaGrabacion.cancelada || estaGrabacion !== grabacion) return;
+      grabacion.blob = new Blob(grabacion.trozos, { type: esta.mimeType || tipo || 'audio/webm' });
       grabacion.url = URL.createObjectURL(grabacion.blob);
       pintarGrabacionLista();
     };
@@ -269,6 +275,7 @@ function medirVoz(stream) {
 }
 
 function pintarTiempo() {
+  if (!document.getElementById('grabando-tiempo')) return;
   var s = Math.floor((Date.now() - grabacion.desde) / 1000);
   document.getElementById('grabando-tiempo').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   /* WhatsApp no acepta mas de 16 MB: a los 5 minutos se corta solo y se avisa. */
@@ -298,6 +305,7 @@ function pintarGrabacionLista() {
 }
 
 function cancelarGrabacion() {
+  grabacion.cancelada = true;
   pararDeGrabar();
   if (grabacion.url) URL.revokeObjectURL(grabacion.url);
   grabacion = { trozos: [], desde: 0, reloj: null, blob: null, url: null, medidor: null };

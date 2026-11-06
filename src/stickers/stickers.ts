@@ -209,7 +209,7 @@ export function crearServicioStickers(deps: StickersDeps): ServicioStickers {
   return {
     listar: () => repo.listar(),
     async subir(input) {
-      const crudo = Buffer.from(input.datosBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      const crudo = Buffer.from(input.datosBase64.replace(/^data:[^,]*;base64,/i, ''), 'base64');
       if (!crudo.length) throw new Error('El fichero llegó vacío.');
       if (crudo.length > MAX_BYTES_SUBIDA) throw new Error('La imagen pesa más de 4 MB: usa una más ligera.');
       let webp: Buffer;

@@ -1,3 +1,4 @@
+import { OGG_REAL } from './fixtures/audio-real.js';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -233,7 +234,7 @@ describe('POST /api/v1/chat con foto, video o audio (media por URL)', () => {
   const ficheros: Record<string, { tipo: string; datos: Buffer }> = {
     '/foto.jpg': { tipo: 'image/jpeg', datos: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), relleno]) },
     '/video.mp4': { tipo: 'video/mp4', datos: Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), relleno]) },
-    '/nota.ogg': { tipo: 'audio/ogg', datos: Buffer.concat([Buffer.from('OggS'), relleno]) },
+    '/nota.ogg': { tipo: 'audio/ogg', datos: OGG_REAL },
     '/falso.jpg': { tipo: 'image/jpeg', datos: Buffer.from('esto no es una foto, es texto plano largo') },
   };
   let servidor: Server;
@@ -285,7 +286,7 @@ describe('POST /api/v1/chat con foto, video o audio (media por URL)', () => {
 describe('POST /api/v1/chat con el archivo en base64 (sin URL publica)', () => {
   const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 1)]);
   const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(64, 2)]);
-  const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(64, 3)]);
+  const OGG = OGG_REAL;
   const conMedia = (media: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ tracking: 'CHAT-2', idExterno: `b64-${Math.random()}`, usuario: { id: 77, nombre: 'Juan', rol: 'motorizado' }, media, ...extra });
   const ultimoDe = async (tipo: string) => (await consultar({ tracking: 'CHAT-2' }, escritor)).json().mensajes.filter((m: any) => m.tipo === tipo && m.direccion === 'saliente').at(-1);
 
