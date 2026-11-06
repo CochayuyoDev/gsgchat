@@ -12,6 +12,7 @@ export function setFakeClock(clock: (() => Date) | null): void {
 }
 export const fakeNow = (): Date => (fakeClock ? fakeClock() : new Date());
 
+import { createFakeUsoLineas } from './fakes-uso-lineas.js';
 import type {
   Campaign,
   CampaignRecipient,
@@ -360,6 +361,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     automation: createFakeAutomation(contactById),
     messages,
     lineasContacto: messages._lineasContacto,
+    usoLineas: createFakeUsoLineas((id) => { const d = deliveries.find((x) => x.id === id); return d && d.wamid && d.status === 'sent' ? String(d.wamid) : null; }),
     entrenamiento: createFakeEntrenamiento(() => [...contactsByPhone.values()], () => repos.messages._all),
     codigosConexion: createFakeCodigos(),
     tiendas: createFakeTiendas(),

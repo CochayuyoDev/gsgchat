@@ -265,6 +265,18 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         const id = await repartoLineas.elegir(excluir);
         return id ? resolverLinea(id) : null;
       };
+      /**
+       * Las demas lineas habilitadas y conectadas, en orden estable (posicion de
+       * vinculacion e id): a donde pasa un envio cuando la linea del cliente esta
+       * caida o llego a su maximo del dia.
+       */
+      const alternativas = async (excluir: string | null) => {
+        const vivas = (await registro.estados())
+          .filter((e) => e.conectada && e.linea.habilitada && e.linea.id !== excluir)
+          .sort((a, b) => a.linea.posicion - b.linea.posicion || (a.linea.id < b.linea.id ? -1 : 1));
+        const lineas = await Promise.all(vivas.map((e) => resolverLinea(e.linea.id)));
+        return lineas.filter((l): l is NonNullable<typeof l> => l !== null);
+      };
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
       let queue: OutboundQueue;
@@ -284,6 +296,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           wa,
           resolverLinea,
           elegirLinea,
+          alternativas,
           phoneNumberId,
           warmup: politica().warmup,
           maxMarketingPerContact7d: config.MAX_MARKETING_PER_CONTACT_7D,

@@ -80,6 +80,9 @@ export type GateDecision =
 export type GateCode =
   | 'allowlist'
   | 'sin_conexion'
+  // ninguna linea habilitada, conectada y con cupo diario / la linea elegida llego a su maximo diario
+  | 'sin_lineas_disponibles'
+  | 'limite_diario'
   | 'opt_out'
   | 'no_opt_in'
   | 'number_paused'

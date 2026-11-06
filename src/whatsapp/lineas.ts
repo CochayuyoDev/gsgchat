@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool } from '../db/pool.js';
 import { decrypt, encrypt } from '../settings/crypto.js';
 import type { Provider } from '../settings/service.js';
+import { validarLimiteDiario } from './limite-diario.js';
 
 export const MAX_LINEAS = 8;
 export const ID_LINEA_PRINCIPAL = '00000000-0000-0000-0000-000000000001';
@@ -30,6 +31,8 @@ export interface Linea {
   principal: boolean;
   habilitada: boolean;
   posicion: number;
+  /** Maximo de mensajes por dia (de Lima). 0 = sin limite. */
+  limiteDiario: number;
 }
 
 /** Lo que se puede guardar de las credenciales de una linea que no es la principal. */
@@ -62,9 +65,10 @@ interface Fila {
   is_primary: boolean;
   enabled: boolean;
   position: number;
+  daily_limit?: number | null;
 }
 
-const COLUMNAS = 'id, label, phone, provider, external_id, status, is_primary, enabled, position';
+const COLUMNAS = 'id, label, phone, provider, external_id, status, is_primary, enabled, position, daily_limit';
 
 function aLinea(f: Fila): Linea {
   return {
@@ -77,6 +81,7 @@ function aLinea(f: Fila): Linea {
     principal: Boolean(f.is_primary),
     habilitada: Boolean(f.enabled),
     posicion: f.position,
+    limiteDiario: Number(f.daily_limit ?? 0),
   };
 }
 
@@ -101,6 +106,8 @@ export interface ServicioLineas {
   /** Lo que se sabe de la linea por su sesion: estado, numero real y (la principal) proveedor. */
   sincronizar(id: string, datos: { estado?: EstadoLinea; telefono?: string; proveedor?: Provider }): Promise<void>;
   habilitar(id: string, habilitada: boolean): Promise<void>;
+  /** Maximo de mensajes por dia. Vacio, null o 0 = sin limite; un negativo o un decimal se rechaza con `LimiteInvalido`. Devuelve el valor guardado. */
+  fijarLimite(id: string, limite: unknown): Promise<number>;
   /** Quita una linea que no sea la principal. Sus mensajes viejos conservan su etiqueta. */
   eliminar(id: string): Promise<void>;
   credenciales(id: string): Promise<CredencialesLinea>;
@@ -228,6 +235,13 @@ export function crearServicioLineas(pool: Pool, claveCifrado: Buffer, base: stri
     async habilitar(id, habilitada) {
       await exigir(id);
       await pool.query('update whatsapp_numbers set enabled = $2, updated_at = now(3) where id = $1', [id, habilitada]);
+    },
+
+    async fijarLimite(id, limite) {
+      const valor = validarLimiteDiario(limite);
+      await exigir(id);
+      await pool.query('update whatsapp_numbers set daily_limit = $2, updated_at = now(3) where id = $1', [id, valor]);
+      return valor;
     },
 
     async eliminar(id) {

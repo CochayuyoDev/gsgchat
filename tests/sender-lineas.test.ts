@@ -145,7 +145,7 @@ describe('sender con varias lineas', () => {
     expect(await repos.counters.totalForDay('PNID', hoy)).toBe(0);
   });
 
-  it('la cola reintenta por la linea del primer intento aunque despues llegue un mensaje por otra', async () => {
+  it('si la linea del cliente esta caida, la cola lo manda al instante por otra y su conversacion sigue en la suya', async () => {
     vi.useFakeTimers();
     try {
       const { sender, waVentas, waPrincipal, estado, repos } = montar();
@@ -153,15 +153,11 @@ describe('sender con varias lineas', () => {
       await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'IN3', kind: 'text', body: 'hola', lineaId: 'ventas' });
       estado.ventasConectada = false;
       const cola = createMemoryOutboundQueue({ sender });
-      await cola.enqueue(texto('51900000008')); // sin linea: sale la del ultimo entrante (ventas)
+      await cola.enqueue(texto('51900000008'));
       await vi.advanceTimersByTimeAsync(500);
       expect(waVentas.sent).toHaveLength(0);
-      // Mientras espera, el cliente escribe por la principal y ventas se recupera.
-      await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'IN4', kind: 'text', body: 'otra vez', lineaId: PRINCIPAL, createdAt: new Date(Date.now() + 1000) });
-      estado.ventasConectada = true;
-      await vi.advanceTimersByTimeAsync(3 * 60_000);
-      expect(waVentas.sent).toHaveLength(1);
-      expect(waPrincipal.sent).toHaveLength(0);
+      expect(waPrincipal.sent).toHaveLength(1);
+      expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe('ventas');
       await cola.close();
     } finally {
       vi.useRealTimers();

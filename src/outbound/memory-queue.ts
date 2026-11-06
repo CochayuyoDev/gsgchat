@@ -20,6 +20,7 @@
  * turno, cosa de segundos.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { OutboundQueue } from './queue.js';
 import type { SendJob, Sender } from './sender.js';
 
@@ -111,7 +112,7 @@ export function createMemoryOutboundQueue(opts: MemoryQueueOptions): MemoryOutbo
   return {
     async enqueue(job, options) {
       meter({
-        job,
+        job: job.claveEnvio ? job : { ...job, claveEnvio: randomUUID() },
         readyAt: Date.now() + (options?.delayMs ?? 0),
         jobId: options?.jobId,
         intentos: 0,
@@ -120,7 +121,7 @@ export function createMemoryOutboundQueue(opts: MemoryQueueOptions): MemoryOutbo
 
     async enqueueMany(jobs) {
       const now = Date.now();
-      for (const job of jobs) meter({ job, readyAt: now, intentos: 0 });
+      for (const job of jobs) meter({ job: job.claveEnvio ? job : { ...job, claveEnvio: randomUUID() }, readyAt: now, intentos: 0 });
       return jobs.length;
     },
 

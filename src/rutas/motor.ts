@@ -678,7 +678,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       // Sin socket no se toca la solicitud: no es una incidencia del cliente
       // ni del numero, es que WhatsApp esta cerrado. Se vuelve a intentar en
       // dos minutos y el motor no vuelve a mirar hasta entonces.
-      if (salida.code === 'sin_conexion') {
+      if (salida.code === 'sin_conexion' || salida.code === 'sin_lineas_disponibles' || salida.code === 'limite_diario') {
         esperar(solicitud, salida.code, salida.reason, salida.retryAfterMs ?? 2 * 60_000);
         await repos.rutas.actualizarSolicitud(solicitud.id, {
           proximoIntentoAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)),
