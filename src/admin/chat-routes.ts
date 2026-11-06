@@ -1208,7 +1208,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       return reply.code(400).send({ error: 'esa linea de WhatsApp no existe o esta deshabilitada' });
     }
 
-    const datos = Buffer.from(body.datos.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const datos = Buffer.from(body.datos.replace(/^data:[^,]*;base64,/i, ''), 'base64');
     if (!datos.length) return reply.code(400).send({ error: 'El fichero llegó vacío.' });
     if (datos.length > MAX_BYTES_ADJUNTO) return reply.code(400).send({ error: 'WhatsApp no acepta ficheros de más de 16 MB. Usa uno más ligero.' });
 

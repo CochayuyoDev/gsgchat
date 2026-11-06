@@ -21,6 +21,7 @@ import { codigoDeError } from '../salud/supresion.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { dailyCapFor, type WarmupPolicy } from './throttle.js';
 import { crearLimitadorEnvios } from './limitador-envios.js';
+import { audioParaMeta } from '../whatsapp/audio-meta.js';
 import { esContactoWeb, nuevoIdMensajeWeb } from '../web-visitantes/canal.js';
 import {
   evaluateGates,
@@ -807,7 +808,12 @@ async function dispatch(
     case 'media': {
       if (!job.media) throw new Error('falta el campo media');
       if (!wa.sendMedia) throw new Error('este proveedor no manda fotos ni archivos');
-      return wa.sendMedia(job.phone, { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, voz: job.media.voz, cita: job.cita });
+      // Todo audio sale en mp3, sea cual sea el proveedor (Meta, QR o WAHA): el webm del navegador no lo reproduce nadie.
+      // Un mp3 no es nota de voz (eso exige ogg/opus), asi que sale como audio normal.
+      const audio = job.media.kind === 'audio' ? await audioParaMeta(job.media).catch((e: unknown) => { throw new Error(e instanceof Error ? e.message : 'no se pudo preparar el audio'); }) : null;
+      return wa.sendMedia(job.phone, audio
+        ? { kind: 'audio', datos: audio.datos, mimeType: audio.mimeType, filename: audio.filename, voz: false, cita: job.cita }
+        : { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, voz: job.media.voz, cita: job.cita });
     }
     case 'freeform':
     default: {

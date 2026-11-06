@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 /**
  * El chat: conversaciones, hilo y envio.
  *
@@ -508,6 +509,26 @@ describe('escribir desde el chat', () => {
     // Y el fichero esta en disco, servible por /admin/local/media/:id.
     expect(existsSync(join(mediaDir, ultimo.payload.media.id))).toBe(true);
     expect(readFileSync(join(mediaDir, ultimo.payload.media.id)).equals(png)).toBe(true);
+  });
+
+  it('una nota de voz grabada en el navegador (data URI con codecs) sale como mp3 y con todos sus bytes', async () => {
+    const hay = spawnSync('ffmpeg', ['-version']).status === 0;
+    if (!hay) return;
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const webm = spawnSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=d=1', '-c:a', 'libopus', '-f', 'webm', 'pipe:1'], { maxBuffer: 10_000_000 }).stdout;
+    expect(webm.length).toBeGreaterThan(100);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/adjunto',
+      headers: auth,
+      payload: { contactId: contact.id, datos: 'data:audio/webm;codecs=opus;base64,' + webm.toString('base64'), mimeType: 'audio/webm;codecs=opus', filename: 'nota-de-voz.webm', voz: true },
+    });
+    expect(r.json().ok).toBe(true);
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'audio', mimeType: 'audio/mpeg' });
+    const messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    // Lo guardado es el webm entero, no unos bytes sueltos.
+    expect(readFileSync(join(mediaDir, messages.at(-1).payload.media.id)).equals(webm)).toBe(true);
   });
 
   it('un documento lleva su nombre; un GIF va como documento para que se mueva', async () => {
