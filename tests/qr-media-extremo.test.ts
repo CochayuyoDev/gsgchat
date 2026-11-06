@@ -158,7 +158,7 @@ describe('QR: GSG manda foto, video y audio al cliente', () => {
     expect(nuevos).toHaveLength(3);
     expect(nuevos[0]).toMatchObject({ jid: `${CLIENTE}@s.whatsapp.net`, content: { image: JPEG, mimetype: 'image/jpeg', caption: 'La puerta' } });
     expect(nuevos[1]).toMatchObject({ content: { video: MP4, mimetype: 'video/mp4', caption: 'Mira' } });
-    expect(nuevos[2]).toMatchObject({ content: { mimetype: 'audio/ogg', ptt: true } });
+    expect(nuevos[2]).toMatchObject({ content: { mimetype: 'audio/ogg; codecs=opus', ptt: true } });
     expect(Buffer.from((nuevos[2] as any).content.audio).subarray(0, 4).toString('latin1')).toBe('OggS');
   });
 
