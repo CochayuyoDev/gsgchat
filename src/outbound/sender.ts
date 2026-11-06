@@ -812,7 +812,7 @@ async function dispatch(
       // Un mp3 no es nota de voz (eso exige ogg/opus), asi que sale como audio normal.
       const audio = job.media.kind === 'audio' ? await audioParaMeta(job.media).catch((e: unknown) => { throw new Error(e instanceof Error ? e.message : 'no se pudo preparar el audio'); }) : null;
       return wa.sendMedia(job.phone, audio
-        ? { kind: 'audio', datos: audio.datos, mimeType: audio.mimeType, filename: audio.filename, voz: false, cita: job.cita }
+        ? { kind: 'audio', datos: audio.datos, mimeType: audio.mimeType, filename: audio.filename, caption: job.media.caption, voz: false, cita: job.cita }
         : { kind: job.media.kind, datos: job.media.datos, mimeType: job.media.mimeType, filename: job.media.filename, caption: job.media.caption, voz: job.media.voz, cita: job.cita });
     }
     case 'freeform':

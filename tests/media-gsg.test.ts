@@ -6,6 +6,7 @@
  * recargaria la foto, el video o el audio en cada sondeo).
  */
 
+import { OGG_REAL } from './fixtures/audio-real.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { readdir, rm } from 'node:fs/promises';
@@ -43,7 +44,7 @@ const TELEFONO = '51987654321';
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]), Buffer.from('JFIF-foto-de-prueba')]);
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png-de-prueba')]);
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.from([0, 0, 0, 0]), Buffer.from('video-de-prueba')]);
-const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.from([0, 2, 0, 0, 0, 0, 0, 0]), Buffer.from('audio-de-prueba')]);
+const OGG = OGG_REAL;
 const MOV = Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from('ftypqt  '), Buffer.from([0, 0, 0, 0]), Buffer.from('mov')]);
 const TEXTO = Buffer.from('esto no es una foto, es un texto que dice ser png');
 
@@ -131,10 +132,10 @@ describe('GSG manda una foto, un video y un audio', () => {
     expect(salidos.map((s) => [s.tipo, s.mimeType, s.bytes])).toEqual([
       ['image', 'image/jpeg', JPEG.length],
       ['video', 'video/mp4', MP4.length],
-      ['audio', 'audio/ogg', OGG.length],
+      ['audio', 'audio/mpeg', expect.any(Number)],
     ]);
     expect(salidos[0]).toMatchObject({ caption: 'su pedido' });
-    expect(salidos[2]).toMatchObject({ voz: true });
+    expect(salidos[2]).toMatchObject({ voz: false });
   });
 
   it('queda en el historial con su archivo, y el enlace abre el fichero tal cual', async () => {

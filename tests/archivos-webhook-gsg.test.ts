@@ -1,3 +1,4 @@
+import { OGG_REAL } from './fixtures/audio-real.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -21,7 +22,7 @@ const dir = mediaDirectory();
 const FOTO = idDeMedia('wamid.foto-webhook-gsg', '.jpg');
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 7)]);
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(200, 9)]);
-const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(200, 5)]);
+const OGG = OGG_REAL;
 const ARCHIVOS = { publicBase: 'http://localhost:3000', secreto: 'x'.repeat(40) };
 const ruta = (url: string) => new URL(url).pathname;
 let servidor: Server;
