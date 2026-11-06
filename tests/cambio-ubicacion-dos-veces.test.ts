@@ -17,10 +17,10 @@ const A = { lat: -12.0464, lng: -77.0428 };
 const B = { lat: -12.1211, lng: -77.0301 };
 const C = { lat: -12.0911, lng: -77.0501 };
 const D = { lat: -12.0711, lng: -77.0601 };
-// 10:00 en Lima (antes de la hora límite de la 1:00 PM).
+// 10:00 en Lima (antes de la hora límite de las 3:00 PM).
 const MANANA = new Date('2026-10-28T15:00:00Z');
-// 2:00 PM en Lima (pasada la hora límite).
-const TARDE = new Date('2026-10-28T19:00:00Z');
+// 4:00 PM en Lima (pasada la hora límite).
+const TARDE = new Date('2026-10-28T21:00:00Z');
 afterEach(() => setFakeClock(null));
 
 /** El cuerpo de cada mensaje que salió (texto o el de la petición de ubicación). */
@@ -38,7 +38,7 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       await e.contesta(telefono, { pin: A });
       let ultimo = cuerpos(e.mensajesA(telefono)).at(-1)!;
       expect(ultimo).toMatch(/Ubicación registrada correctamente/);
-      expect(ultimo).toMatch(/Si desea cambiar su ubicación, solo diga: \*cambiar ubicación\*/);
+      expect(ultimo).toMatch(/Si desea cambiar su ubicación, diga "Cambio de Ubicación"/);
       expect(ultimo).not.toMatch(/avísanos antes de la/);
 
       // 2. «cambiar ubicación»: el bot pide la nueva, con el botón; mientras, se queda la que tenía.
@@ -55,7 +55,7 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       await e.contesta(telefono, { pin: B });
       ultimo = cuerpos(e.mensajesA(telefono)).at(-1)!;
       expect(ultimo).toMatch(/Su nueva ubicación se registró correctamente/);
-      expect(ultimo).toMatch(/Si quiere volver a cambiar su ubicación, solo diga: \*cambiar ubicación\*\. Le queda 1 cambio más/);
+      expect(ultimo).toMatch(/Si quiere volver a cambiar su ubicación, diga "Cambio de Ubicación"\. Le queda 1 cambio más/);
       ent = (await e.entrega('GSG-CAMBIO-2'))!;
       expect(ent).toMatchObject({ ubicacionEstado: 'recibida', lat: B.lat, lng: B.lng, ubicacionCambios: 1 });
 
@@ -131,7 +131,7 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       await e.contesta(telefono, { pin: A });
       expect(cuerpos(e.mensajesA(telefono)).at(-1)).not.toMatch(/cambiar ubicación/);
       await e.contesta(telefono, { texto: 'cambiar ubicación' });
-      expect(cuerpos(e.mensajesA(telefono)).at(-1)).toMatch(/después de la 1:00/);
+      expect(cuerpos(e.mensajesA(telefono)).at(-1)).toMatch(/después de la 3:00/);
     } finally {
       await e.cerrar();
     }

@@ -1935,7 +1935,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return { ...r, responder: r.responder ? `${r.responder}\n\n${aviso}` : aviso };
   }
 
-  /** Ya pasó la hora límite para cambiar la ubicación (1:00 PM por defecto, en el reloj de la tienda). */
+  /** Ya pasó la hora límite para cambiar la ubicación (3:00 PM por defecto, en el reloj de la tienda). */
   function pasoLaHoraDeCambio(): boolean {
     return horaEnReloj(ahora(), tz()) >= ajustes.cambioUbicacionHasta;
   }
@@ -1957,7 +1957,10 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return textoDe(trasCambio ? 'invitarOtroCambioUbicacion' : 'invitarCambioUbicacion', ajustes, { ...contexto(e), cambiosQuedan: quedan, cambiosMax: max });
   }
   const conInvitacion = (texto: string, lista: Entrega[], trasCambio: boolean): string => {
-    const extra = invitacionACambiar(lista, trasCambio);
+    // Si el texto (el de fábrica o el que editó la tienda) ya trae la invitación, no se repite.
+    if (/cambio de ubicaci[oó]n/i.test(texto)) return texto;
+    // «Ubicación registrada» siempre lleva la invitación (regla del dueño), aunque la tienda haya editado el texto.
+    const extra = invitacionACambiar(lista, trasCambio) || (!trasCambio && lista.length ? textoDe('invitarCambioUbicacion', ajustes, contexto(lista[0]!)) : '');
     return extra ? `${texto}\n\n${extra}` : texto;
   };
 
