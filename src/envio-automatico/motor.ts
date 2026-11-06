@@ -201,8 +201,8 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
     }
 
     if (salida.blocked) {
-      if (salida.code === 'sin_conexion') {
-        await lista.anotarEnvio(e, { ok: false, motivo: 'WhatsApp no está conectado: se reintenta en dos minutos', proximoEnvioAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)) });
+      if (salida.code === 'sin_conexion' || salida.code === 'sin_lineas_disponibles' || salida.code === 'limite_diario') {
+        await lista.anotarEnvio(e, { ok: false, motivo: salida.code === 'sin_conexion' ? 'WhatsApp no está conectado: se reintenta en dos minutos' : `${salida.reason}: se reintenta en dos minutos`, proximoEnvioAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)) });
         return { accion: 'nada', entradaId: e.id, motivo: salida.reason };
       }
       if (salida.code === 'opt_out') {

@@ -7,6 +7,7 @@
  * mensajes que ya estaban encolados.
  */
 
+import { randomUUID } from 'node:crypto';
 import { Queue, Worker, type JobsOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import type { SendJob, Sender } from './sender.js';
@@ -21,6 +22,9 @@ export interface OutboundQueue {
   counts(): Promise<Record<string, number>>;
   close(): Promise<void>;
 }
+
+/** Cada trabajo lleva su clave de idempotencia desde que entra: un reintento no gasta otro cupo diario ni sale dos veces. */
+const conClave = (job: SendJob): SendJob => (job.claveEnvio ? job : { ...job, claveEnvio: randomUUID() });
 
 function connection(redisUrl: string): Redis {
   // BullMQ exige maxRetriesPerRequest: null en la conexion de los workers.
@@ -44,7 +48,7 @@ export function createOutboundQueue(redisUrl: string, nombre: string = OUTBOUND_
 
   return {
     async enqueue(job, opts) {
-      await queue.add('send', job, {
+      await queue.add('send', conClave(job), {
         ...defaults,
         delay: opts?.delayMs,
         jobId: opts?.jobId,
@@ -52,7 +56,7 @@ export function createOutboundQueue(redisUrl: string, nombre: string = OUTBOUND_
     },
     async enqueueMany(jobs) {
       if (!jobs.length) return 0;
-      await queue.addBulk(jobs.map((data) => ({ name: 'send', data, opts: defaults })));
+      await queue.addBulk(jobs.map((data) => ({ name: 'send', data: conClave(data), opts: defaults })));
       return jobs.length;
     },
     pause: () => queue.pause(),

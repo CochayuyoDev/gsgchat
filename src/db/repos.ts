@@ -13,6 +13,7 @@ import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
 import { createMessagesRepo, type MessagesRepo } from './messages.js';
 import { createLineasContactoRepo, type LineasContactoRepo } from './lineas-contacto.js';
+import { createUsoLineasRepo, type UsoLineasRepo } from './uso-lineas.js';
 import { createLeadsRepo, type LeadsRepo } from './leads.js';
 import { createArchivesRepo, type ArchivesRepo } from './archives.js';
 import { createRutasRepo, type RutasRepo } from './rutas.js';
@@ -428,6 +429,8 @@ export interface DeliveriesRepo {
     businessInitiated?: boolean;
     /** La linea de WhatsApp por la que sale. Null = la principal (envios anteriores a las lineas). */
     whatsappNumberId?: string | null;
+    /** Por que se eligio esa linea: asignacion_original, limite_alcanzado u original_no_disponible. */
+    lineaMotivo?: string | null;
   }): Promise<number>;
   markSent(id: number, wamid: string): Promise<void>;
   markBlocked(id: number, reason: string): Promise<void>;
@@ -599,6 +602,8 @@ export interface Repos {
   automation: AutomationRepo;
   messages: MessagesRepo;
   lineasContacto: LineasContactoRepo;
+  /** Maximo de mensajes por dia de cada linea y reserva de cupo por envio. Ver src/db/uso-lineas.ts. */
+  usoLineas: UsoLineasRepo;
   leads: LeadsRepo;
   /** Indice de conversaciones respaldadas. Ver src/archive. */
   archives: ArchivesRepo;
@@ -1245,8 +1250,8 @@ export function createRepos(pool: Pool): Repos {
     async create(input) {
       const { insertId } = await pool.query(
         `insert into deliveries
-           (contact_id, campaign_id, kind, template_name, category, variables, business_initiated, whatsapp_number_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+           (contact_id, campaign_id, kind, template_name, category, variables, business_initiated, whatsapp_number_id, linea_motivo)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           input.contactId,
           input.campaignId ?? null,
@@ -1256,6 +1261,7 @@ export function createRepos(pool: Pool): Repos {
           input.variables ? JSON.stringify(input.variables) : null,
           input.businessInitiated ?? false,
           input.whatsappNumberId ?? null,
+          input.lineaMotivo ?? null,
         ],
       );
       return insertId;
@@ -2053,6 +2059,7 @@ export function createRepos(pool: Pool): Repos {
     automation: createAutomationRepo(pool),
     messages: createMessagesRepo(pool),
     lineasContacto: createLineasContactoRepo(pool),
+    usoLineas: createUsoLineasRepo(pool),
     leads: createLeadsRepo(pool),
     archives: createArchivesRepo(pool),
     rutas: createRutasRepo(pool),

@@ -31,6 +31,8 @@ import type { PuertoGsg } from '../rutas/gsg.js';
 import { defaultAuthDir, hayVinculacion, sesionLocalPorDefecto, toJid, type SesionLocal } from '../whatsapp/local/session.js';
 import { perteneceAlChatActual } from '../whatsapp/alcance-chat.js';
 import { registerLineasRoutes } from './lineas-routes.js';
+import { registerLineasLimitesRoutes } from './lineas-limites-routes.js';
+import { crearSaludDeLineas } from '../whatsapp/salud-lineas.js';
 
 /** El progreso del trabajo de traer todo el historial (uno a la vez). */
 interface ProgresoHistorial {
@@ -350,6 +352,7 @@ export async function registerLocalRoutes(
     }
 
     await registerLineasRoutes(app, { lineas, registro, arrancarLinea, reparto: deps.repartoLineas });
+    await registerLineasLimitesRoutes(app, { lineas, uso: repos.usoLineas, salud: crearSaludDeLineas({ lineas, registro }) });
   }
 
   /**

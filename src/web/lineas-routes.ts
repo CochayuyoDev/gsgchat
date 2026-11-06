@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { LineasError, MAX_LINEAS, type Linea, type ServicioLineas } from '../whatsapp/lineas.js';
 import type { RegistroClientes } from '../whatsapp/registro.js';
+import { LimiteInvalido } from '../whatsapp/limite-diario.js';
 import { hayVinculacion } from '../whatsapp/local/session.js';
 import type { RepartoDeLineas } from '../whatsapp/reparto-lineas.js';
 
@@ -43,6 +44,8 @@ const crearSchema = z.object({
 const cambiarSchema = z.object({
   etiqueta: z.string().trim().min(1).max(80).optional(),
   habilitada: z.boolean().optional(),
+  /** Maximo de mensajes por dia: vacio, null o 0 = sin limite; se valida en `fijarLimite`. */
+  limiteDiario: z.unknown().optional(),
 });
 
 export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRoutesDeps): Promise<void> {
@@ -60,12 +63,14 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
       estado: linea.estado,
       principal: linea.principal,
       habilitada: linea.habilitada,
+      limiteDiario: linea.limiteDiario,
       conectada: await registro.conectada(linea.id),
       ...(vivo ? { sesion: { status: vivo.status, qr: vivo.qr, pairingCode: vivo.pairingCode, detalle: vivo.detail, nombre: vivo.name } } : {}),
     };
   }
 
   function responderError(error: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
+    if (error instanceof LimiteInvalido) return reply.code(400).send({ error: error.message, codigo: 'limite_invalido' });
     if (error instanceof LineasError) {
       const status = error.codigo === 'no_existe' ? 404 : error.codigo === 'tope' ? 409 : 400;
       return reply.code(status).send({ error: error.message, codigo: error.codigo });
@@ -99,6 +104,10 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
         await lineas.habilitar(linea.id, body.habilitada);
         // Deshabilitar corta su socket; las demas siguen como estaban.
         if (!body.habilitada) registro.olvidar(linea.id);
+        linea = (await lineas.obtener(linea.id))!;
+      }
+      if ('limiteDiario' in ((request.body ?? {}) as object)) {
+        await lineas.fijarLimite(linea.id, body.limiteDiario);
         linea = (await lineas.obtener(linea.id))!;
       }
       return { ok: true, linea: await vista(linea) };

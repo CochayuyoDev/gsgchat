@@ -21,6 +21,7 @@ import { codigoDeError } from '../salud/supresion.js';
 import { inicioDelDia } from '../salud/monitor.js';
 import { dailyCapFor, type WarmupPolicy } from './throttle.js';
 import { crearLimitadorEnvios } from './limitador-envios.js';
+import { diaLima, MOTIVO_SIN_LINEAS, type MotivoSeleccion } from '../whatsapp/limite-diario.js';
 import { esContactoWeb, nuevoIdMensajeWeb } from '../web-visitantes/canal.js';
 import {
   evaluateGates,
@@ -46,6 +47,12 @@ export interface SendJob {
    * no lo eligio nadie: si esa linea deja de estar disponible, se puede cambiar.
    */
   lineaDelSistema?: boolean;
+  /**
+   * Clave de idempotencia del envio: un reintento del MISMO mensaje lleva la misma
+   * y no gasta otro cupo diario de la linea ni sale dos veces. La pone la cola al
+   * encolar; sin ella, cada `send` es un envio nuevo.
+   */
+  claveEnvio?: string;
   /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
   manual?: boolean;
   /** Envío con cadencia propia: el transporte no añade escritura artificial. */
@@ -249,9 +256,6 @@ export interface LineaDeEnvio {
   bloqueada?: boolean;
 }
 
-/** Lo que dura sin conexion una linea antes de pasar sus clientes a otra: un corte breve no los mueve. */
-const ESPERA_CAMBIO_LINEA_MS = 2 * 60_000;
-
 export interface SenderDeps {
   /**
    * Resuelve una linea (null = la principal). Devuelve null si no existe, esta
@@ -264,6 +268,12 @@ export interface SenderDeps {
    * disponible. Null = ninguna disponible.
    */
   elegirLinea?: (excluir: string | null) => Promise<LineaDeEnvio | null>;
+  /**
+   * Las demas lineas habilitadas y conectadas, sin contar `excluir`, en un orden
+   * estable (posicion de vinculacion e id). Son las alternativas cuando la linea
+   * del cliente no esta o llego a su maximo diario.
+   */
+  alternativas?: (excluir: string | null) => Promise<LineaDeEnvio[]>;
   repos: Repos;
   wa: WhatsAppClient;
   /** Funcion si el numero puede cambiar desde /setup sin reiniciar. */
@@ -335,57 +345,99 @@ export function createSender(deps: SenderDeps): Sender {
     return principal && principal.id !== excluir && estaConectada(principal) ? principal : null;
   }
 
-  /**
-   * Por que linea sale un trabajo. La regla: un cliente no cambia de numero sin
-   * necesidad.
-   *
-   *  - Una linea PEDIDA por una persona manda, y si no esta disponible no se
-   *    sustituye: seria salir desde un numero que nadie eligio.
-   *  - Un cliente con linea sigue por ella. Un corte breve se espera; un cupo
-   *    gastado o una pausa de salud tampoco lo mueven (pasar sus mensajes a otro
-   *    numero solo quemaria ese tambien).
-   *  - La excepcion: su linea lleva mas de 2 minutos sin conexion, WhatsApp la
-   *    bloqueo, o se quito o se deshabilito. Ahi pasa a otra linea activa y se
-   *    queda en ella.
-   *  - Un grupo vive en la linea de la que es miembro: nunca se reparte ni se cambia.
-   *
-   * `confirmar` guarda la decision justo antes de enviar, para que lo que frena
-   * el modo prueba no cuente como cliente repartido. `pedida` y `sinAsignar` le
-   * dicen al envio que no debe fijar esa linea ni al cliente ni al reintento.
-   */
-  async function lineaDelTrabajo(job: SendJob, contact: { id: string; tipo?: string }, at: Date): Promise<{
+  /** Las lineas a las que se puede pasar un envio, en orden estable. */
+  async function alternativas(excluir: string | null): Promise<LineaDeEnvio[]> {
+    if (deps.alternativas) return (await deps.alternativas(excluir)).filter((l) => l.id !== excluir);
+    const salida: LineaDeEnvio[] = [];
+    const elegida = deps.elegirLinea ? await deps.elegirLinea(excluir) : null;
+    if (elegida) salida.push(elegida);
+    const principal = await deps.resolverLinea!(null);
+    if (principal && principal.id !== excluir && estaConectada(principal) && !salida.some((l) => l.id === principal.id)) salida.push(principal);
+    return salida;
+  }
+
+  interface Eleccion {
     linea: LineaDeEnvio | null;
     pedida?: boolean;
     sinAsignar?: boolean;
     confirmar?: () => Promise<LineaDeEnvio | null>;
-  }> {
+    /** El cupo diario reservado para este envio. */
+    reserva?: { motivo: MotivoSeleccion };
+    /** No hay ninguna linea habilitada, conectada y con cupo. */
+    sinLineas?: boolean;
+    /** La linea elegida a mano llego a su maximo diario. */
+    sinCupoPedida?: { limite: number; usados: number };
+  }
+
+  /**
+   * Por que linea sale un trabajo y reserva su cupo diario. La regla: la linea que
+   * el cliente tiene asignada va primero; si no esta disponible (deshabilitada,
+   * sin conexion) o ya llego a su maximo del dia, el envio sale por otra y la
+   * asignacion del cliente NO cambia: usar un alternativo es temporal.
+   *
+   *  - Una linea PEDIDA por una persona manda, y si no esta disponible no se
+   *    sustituye: seria salir desde un numero que nadie eligio. Si llego a su
+   *    maximo diario, el envio se frena y se dice.
+   *  - Un grupo vive en la linea de la que es miembro: nunca se reparte.
+   *  - Un cliente nuevo recibe la linea que toque en el reparto (y, con ella, su asignacion).
+   *  - Los alternativos van en orden estable: posicion de vinculacion e id.
+   *
+   * `confirmar` guarda la asignacion de un cliente nuevo justo antes de enviar,
+   * para que lo que frena el modo prueba no cuente como cliente repartido.
+   */
+  async function lineaDelTrabajo(job: SendJob, contact: { id: string; tipo?: string }, at: Date, clave: string): Promise<Eleccion> {
     if (!deps.resolverLinea) return { linea: { id: '', etiqueta: '', numero: '', cliente: wa, identidad: phoneId(), ventanaAplica: ventanaAplica() } };
     const resolver = deps.resolverLinea;
-    if (job.whatsappNumberId && !job.lineaDelSistema) return { linea: await resolver(job.whatsappNumberId), pedida: true };
+    const dia = diaLima(at);
 
-    const propia = job.whatsappNumberId ?? (await repos.messages.lineaDeLaConversacion(contact.id));
-    if (contact.tipo === 'grupo') return { linea: (propia ? await resolver(propia) : null) ?? (await resolver(null)) };
+    /** Reserva el cupo; null = sin cupo (con lo que lleva). */
+    const reservar = async (l: LineaDeEnvio, motivo: MotivoSeleccion) => {
+      if (!l.id) return { ok: true as const };
+      const r = await repos.usoLineas.reservar({ clave, lineaId: l.id, dia, motivo, contactId: contact.id });
+      return r.ok ? { ok: true as const } : r;
+    };
 
-    /** Lo que quedo guardado manda: otro envio a la vez pudo decidir antes. */
-    const conLaVigente = (elegida: LineaDeEnvio, vigente: string | null) => (vigente && vigente !== elegida.id ? resolver(vigente) : Promise.resolve(elegida));
-
-    if (!propia) {
-      const nueva = await otraLineaViva(null);
-      if (!nueva) return { linea: await resolver(null), sinAsignar: true };
-      return { linea: nueva, confirmar: async () => conLaVigente(nueva, await repos.lineasContacto.fijarSiNoTiene(contact.id, nueva.id, at)) };
+    if (job.whatsappNumberId && !job.lineaDelSistema) {
+      const pedida = await resolver(job.whatsappNumberId);
+      if (!pedida || !estaConectada(pedida)) return { linea: pedida, pedida: true };
+      const r = await reservar(pedida, 'asignacion_original');
+      return r.ok ? { linea: pedida, pedida: true, reserva: { motivo: 'asignacion_original' } } : { linea: pedida, pedida: true, sinCupoPedida: { limite: r.limite, usados: r.usados } };
     }
 
-    const actual = await resolver(propia);
-    const caidaDeMas = Boolean(
-      actual && !estaConectada(actual) && (actual.bloqueada || (actual.noDisponibleDesde && at.getTime() - actual.noDisponibleDesde.getTime() >= ESPERA_CAMBIO_LINEA_MS)),
-    );
-    if (actual && !caidaDeMas) return { linea: actual };
+    const propia = await repos.messages.lineaDeLaConversacion(contact.id);
+    if (contact.tipo === 'grupo') {
+      const suya = (propia ? await resolver(propia) : null) ?? (await resolver(null));
+      if (!suya || !estaConectada(suya)) return { linea: suya };
+      const r = await reservar(suya, 'asignacion_original');
+      return r.ok ? { linea: suya, reserva: { motivo: 'asignacion_original' } } : { linea: suya, sinCupoPedida: { limite: r.limite, usados: r.usados } };
+    }
 
-    const otra = await otraLineaViva(propia);
-    // No hay ninguna otra: no se le toca la asignacion y se espera a que vuelva alguna.
-    if (!otra) return actual ? { linea: actual } : { linea: await resolver(null), sinAsignar: true };
-    const motivo = actual ? 'linea_caida' : 'linea_no_disponible';
-    return { linea: otra, confirmar: async () => conLaVigente(otra, await repos.lineasContacto.cambiar(contact.id, propia, otra.id, motivo, at)) };
+    // La asignada primero (o, a un cliente nuevo, la que toque) y despues las alternativas.
+    const original = propia ? await resolver(propia) : await otraLineaViva(null);
+    const candidatas: Array<{ linea: LineaDeEnvio; esOriginal: boolean }> = [];
+    if (original) candidatas.push({ linea: original, esOriginal: true });
+    for (const l of await alternativas(original?.id ?? propia)) if (!candidatas.some((c) => c.linea.id === l.id)) candidatas.push({ linea: l, esOriginal: false });
+
+    // Por que no se uso la original: no esta (deshabilitada, sin conexion) o llego a su maximo.
+    let motivoSinOriginal: MotivoSeleccion = 'original_no_disponible';
+    for (const { linea, esOriginal } of candidatas) {
+      if (!estaConectada(linea)) continue;
+      const r = await reservar(linea, esOriginal ? 'asignacion_original' : motivoSinOriginal);
+      if (!r.ok) {
+        if (esOriginal) motivoSinOriginal = 'limite_alcanzado';
+        continue;
+      }
+      const motivo: MotivoSeleccion = esOriginal ? 'asignacion_original' : motivoSinOriginal;
+      // Solo un cliente sin linea la fija aqui; uno con linea la conserva aunque hoy salga por otra.
+      const confirmar = propia
+        ? undefined
+        : async () => {
+            const vigente = await repos.lineasContacto.fijarSiNoTiene(contact.id, linea.id, at);
+            return vigente && vigente !== linea.id ? resolver(vigente) : linea;
+          };
+      return { linea, reserva: { motivo }, ...(confirmar ? { confirmar } : {}) };
+    }
+    return { linea: null, sinLineas: true };
   }
 
   const permitidos = () => (typeof deps.soloNumeros === 'function' ? deps.soloNumeros() : deps.soloNumeros) ?? [];
@@ -500,10 +552,69 @@ export function createSender(deps: SenderDeps): Sender {
         return { ok: false, blocked: true, code: 'bot_pausado', reason, deliveryId };
       }
 
+      // Un reintento del mismo envio (misma clave) no gasta otro cupo ni sale dos veces:
+      // si ya salio se devuelve lo que salio; si quedo a medias, se reconcilia con su entrega.
+      const clave = job.claveEnvio ?? randomUUID();
+      const previa = job.claveEnvio && deps.resolverLinea ? await repos.usoLineas.reconciliar(clave) : null;
+      if (previa?.estado === 'aceptado' && previa.wamid) {
+        return { ok: true, wamid: previa.wamid, deliveryId: previa.deliveryId ?? -1, whatsappNumberId: previa.lineaId };
+      }
+      if (previa && (previa.estado === 'reservado' || previa.estado === 'incierto')) {
+        return {
+          ok: false,
+          blocked: false,
+          error: 'No se sabe si este mensaje salió: el envío anterior se cortó sin respuesta de WhatsApp. Revisa el chat antes de volver a mandarlo.',
+          retryable: false,
+          deliveryId: previa.deliveryId,
+          whatsappNumberId: previa.lineaId,
+          code: 'resultado_incierto',
+          incierto: true,
+        };
+      }
+
       // Sin socket no hay nada que intentar: se devuelve "espera" sin dejar
       // una entrega fallida que el monitor contaria como rechazo de WhatsApp
       // y que el motor de rutas contaria como intento gastado.
-      const decidida = await lineaDelTrabajo(job, contact, at);
+      const decidida = await lineaDelTrabajo(job, contact, at, clave);
+
+      // Ninguna linea habilitada, conectada y con cupo: queda a la vista del equipo
+      // (una entrega bloqueada, una sola por envio aunque se reintente) y NO sale.
+      if (decidida.sinLineas) {
+        let deliveryId = previa?.estado === 'sin_linea' ? previa.deliveryId : null;
+        if (deliveryId === null) {
+          deliveryId = await repos.deliveries.create({
+            contactId: contact.id,
+            campaignId: job.campaignId ?? null,
+            kind: job.kind,
+            templateName: job.templateName ?? null,
+            category: job.category,
+            variables: job.variables,
+            businessInitiated: false,
+          });
+        }
+        await repos.deliveries.markBlocked(deliveryId, `sin_lineas_disponibles: ${MOTIVO_SIN_LINEAS}`);
+        await repos.usoLineas.anotarSinLinea(clave, deliveryId, contact.id);
+        return { ok: false, blocked: true, code: 'sin_lineas_disponibles', reason: MOTIVO_SIN_LINEAS, retryAfterMs: 2 * 60_000, deliveryId, whatsappNumberId: null };
+      }
+      if (decidida.sinCupoPedida) {
+        const { limite, usados } = decidida.sinCupoPedida;
+        const reason = `La línea «${decidida.linea?.etiqueta || 'elegida'}» llegó a su máximo de mensajes por día (${usados} / ${limite}). Elige otra línea o espera a las 00:00 de Lima.`;
+        const deliveryId = await repos.deliveries.create({
+          contactId: contact.id,
+          campaignId: job.campaignId ?? null,
+          kind: job.kind,
+          templateName: job.templateName ?? null,
+          category: job.category,
+          variables: job.variables,
+          businessInitiated: false,
+          whatsappNumberId: decidida.linea?.id || null,
+        });
+        await repos.deliveries.markBlocked(deliveryId, `limite_diario: ${reason}`);
+        return { ok: false, blocked: true, code: 'limite_diario', reason, deliveryId, whatsappNumberId: decidida.linea?.id || null };
+      }
+
+      let noSalio = false;
+      const resto = async (): Promise<SendOutcome> => {
       const candidata = decidida.linea;
       if (!candidata) {
         return {
@@ -555,8 +666,28 @@ export function createSender(deps: SenderDeps): Sender {
 
       // Desde aqui el trabajo queda atado a esta linea: si espera o se reintenta,
       // sale por el mismo numero y no por otro (la cola copia este id al trabajo).
-      const linea = (await decidida.confirmar?.()) ?? candidata;
-      if (linea !== candidata && linea.cliente.conectado?.() === false) return sinConexion(linea);
+      // Si otro envio a la vez le dejo a este cliente otra linea, esa es su asignacion y se sigue por
+      // ella (una tanda a un cliente nuevo no se reparte). Solo si esa no tiene cupo o conexion este
+      // envio sale por la que ya tiene reservada: un alternativo temporal.
+      const vigente = await decidida.confirmar?.();
+      let linea = candidata;
+      if (vigente && vigente !== candidata) {
+        if (!decidida.reserva || !candidata.id) {
+          linea = vigente;
+          if (linea.cliente.conectado?.() === false) return sinConexion(linea);
+        } else if (estaConectada(vigente)) {
+          await repos.usoLineas.liberar(clave);
+          const enVigente = await repos.usoLineas.reservar({ clave, lineaId: vigente.id, dia: diaLima(at), motivo: 'asignacion_original', contactId: contact.id });
+          if (enVigente.ok) {
+            linea = vigente;
+            decidida.reserva.motivo = 'asignacion_original';
+          } else {
+            const deNuevo = await repos.usoLineas.reservar({ clave, lineaId: candidata.id, dia: diaLima(at), motivo: 'limite_alcanzado', contactId: contact.id });
+            if (!deNuevo.ok) return { ok: false, blocked: true, code: 'sin_lineas_disponibles', reason: MOTIVO_SIN_LINEAS, retryAfterMs: 2 * 60_000, deliveryId: -1, whatsappNumberId: null };
+            decidida.reserva.motivo = 'limite_alcanzado';
+          }
+        }
+      }
       const lineaId = linea.id || null;
       const wa = linea.cliente;
       const phoneId = () => linea.identidad;
@@ -601,7 +732,9 @@ export function createSender(deps: SenderDeps): Sender {
         variables: job.variables,
         businessInitiated,
         whatsappNumberId: lineaId,
+        lineaMotivo: decidida.reserva?.motivo ?? null,
       });
+      if (decidida.reserva && lineaId) await repos.usoLineas.anotarEntrega(clave, deliveryId);
 
       const decision = evaluateGates(
         { contact, kind: job.kind, category: job.category, template, now: at, manual: job.manual, programado: job.programado },
@@ -713,8 +846,28 @@ export function createSender(deps: SenderDeps): Sender {
         // Sin respuesta del proveedor (no es un WhatsAppApiError: red, tiempo
         // agotado) o un 200 sin wamid: puede que el mensaje si saliera.
         const incierto = !(error instanceof WhatsAppApiError) || error.httpStatus === 200;
+        // Una plantilla que no se pudo armar ni llego a salir: no es un resultado incierto para el cupo.
+        if (error instanceof TemplateRenderError) noSalio = true;
         return { ok: false, blocked: false, error: message, retryable: insistir, deliveryId, whatsappNumberId: lineaId, code, ...(incierto ? { incierto: true } : {}) };
       }
+      };
+
+      // El cupo reservado se cierra segun como acabo el envio: aceptado por el proveedor
+      // (queda gastado), rechazado o frenado (se devuelve) o sin saber si salio (queda
+      // gastado hasta reconciliar, para no contar ni enviar dos veces).
+      let salida: SendOutcome;
+      try {
+        salida = await resto();
+      } catch (error) {
+        if (decidida.reserva) await repos.usoLineas.liberar(clave).catch(() => undefined);
+        throw error;
+      }
+      if (decidida.reserva) {
+        if (salida.ok) await repos.usoLineas.aceptar(clave, salida.wamid);
+        else if (!salida.blocked && salida.incierto && !noSalio) await repos.usoLineas.marcarIncierto(clave);
+        else await repos.usoLineas.liberar(clave);
+      }
+      return salida;
     },
   };
   // La evaluación y el envío comparten turno: dos motores no pueden aprobar

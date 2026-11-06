@@ -27,7 +27,8 @@ function montar(opciones: { soloNumeros?: string[] } = {}) {
   const lineas: Linea[] = IDS.map((id, i) => {
     estado[id] = { conectada: true, existe: true, bloqueada: false, desde: null, cupo: 200 };
     clientes[id] = Object.assign(createFakeWhatsApp(), { conectado: () => estado[id]!.conectada });
-    return { id, etiqueta: `wsp-${id}`, telefono: `5190000000${i}`, proveedor: 'local', idExterno: null, estado: 'conectado', principal: i === 0, habilitada: true, posicion: i };
+    return { id, etiqueta: `wsp-${id}`, telefono: `5190000000${i}`, proveedor: 'local', idExterno: null, estado: 'conectado', principal: i === 0, habilitada: true,
+    limiteDiario: 0, posicion: i };
   });
   const aLinea = (l: Linea): LineaDeEnvio => ({
     id: l.id, etiqueta: l.etiqueta, numero: l.telefono, cliente: clientes[l.id]!, identidad: `linea:${l.id}`, ventanaAplica: false, noDisponibleDesde: estado[l.id]!.desde, bloqueada: estado[l.id]!.bloqueada,
@@ -72,6 +73,7 @@ function montar(opciones: { soloNumeros?: string[] } = {}) {
     pasar: (ms: number) => { ahora = new Date(ahora.getTime() + ms); },
     ahora: () => ahora,
     enviadosPor: (id: string) => clientes[id]!.sent.length,
+    motivoDeLaUltimaEntrega: () => (repos._deliveries.at(-1) as { lineaMotivo?: string } | undefined)?.lineaMotivo,
   };
 }
 
@@ -162,27 +164,17 @@ describe('el cliente se queda con su numero', () => {
     expect(await repos.lineasContacto.cambios()).toHaveLength(0);
   });
 
-  it('un reintento pendiente no le devuelve al cliente una linea que ya dejo', async () => {
-    vi.useFakeTimers();
-    try {
-      const { sender, repos, caer, volver, enviadosPor, ahora } = montar();
-      const c = await repos.contacts.upsertFromInbound('51910000013');
-      await repos.lineasContacto.fijarSiNoTiene(c.id, 'b', ahora());
-      caer('b');
-      const cola = createMemoryOutboundQueue({ sender });
-      await cola.enqueue(texto('51910000013'));
-      await vi.advanceTimersByTimeAsync(500);
-      expect(enviadosPor('b')).toBe(0);
-      await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'E2', kind: 'text', body: 'te escribo aqui', lineaId: 'c', createdAt: new Date(ahora().getTime() + 1000) });
-      volver('b');
-      await vi.advanceTimersByTimeAsync(3 * MIN);
-      // El reintento sale por donde se empezo, pero el cliente sigue en la que escribio.
-      expect(enviadosPor('b')).toBe(1);
-      expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe('c');
-      await cola.close();
-    } finally {
-      vi.useRealTimers();
-    }
+  it('si su linea cae sale por otra al instante, y si luego escribe por otra la conversacion sigue en esa', async () => {
+    const { sender, repos, caer, enviadosPor, ahora } = montar();
+    const c = await repos.contacts.upsertFromInbound('51910000013');
+    await repos.lineasContacto.fijarSiNoTiene(c.id, 'b', ahora());
+    caer('b');
+    expect((await sender.send(texto('51910000013'))).ok).toBe(true);
+    expect(enviadosPor('b')).toBe(0);
+    // Sigue asignado a b: salir por otra fue temporal.
+    expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe('b');
+    await repos.messages.add({ contactId: c.id, direction: 'in', wamid: 'E2', kind: 'text', body: 'te escribo aqui', lineaId: 'c', createdAt: new Date(ahora().getTime() + 1000) });
+    expect(await repos.messages.lineaDeLaConversacion(c.id)).toBe('c');
   });
 });
 
@@ -193,15 +185,16 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     return c;
   }
 
-  it('un corte de menos de 2 minutos espera: no cambia de numero y sale al volver', async () => {
+  it('un corte de su numero no espera: sale en el acto por otro y, al volver, vuelve el original', async () => {
     const m = montar();
     const c = await conLinea(m, '51910000020', 'b');
     m.caer('b');
-    m.pasar(1.5 * MIN);
-    expect(await m.sender.send(texto('51910000020'))).toMatchObject({ ok: false, blocked: true, code: 'sin_conexion', whatsappNumberId: 'b' });
+    const r = await m.sender.send(texto('51910000020'));
+    expect(r).toMatchObject({ ok: true });
+    expect((r as { whatsappNumberId: string }).whatsappNumberId).not.toBe('b');
+    expect(await m.repos.messages.lineaDeLaConversacion(c.id)).toBe('b');
     m.volver('b');
-    expect((await m.sender.send(texto('51910000020'))).ok).toBe(true);
-    expect(m.enviadosPor('b')).toBe(1);
+    expect(await m.sender.send(texto('51910000020'))).toMatchObject({ ok: true, whatsappNumberId: 'b' });
     expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(0);
   });
 
@@ -212,10 +205,12 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     const r = await m.sender.send(texto('51910000028'));
     expect(r).toMatchObject({ ok: true });
     expect((r as { whatsappNumberId: string }).whatsappNumberId).not.toBe('b');
-    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(1);
+    // Es temporal: la asignacion del cliente no se toca.
+    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(0);
+    expect(await m.repos.messages.lineaDeLaConversacion(c.id)).toBe('b');
   });
 
-  it('pasados 2 minutos sin conexion sale por otra activa, queda anotado el motivo y ya no vuelve aunque la vieja regrese', async () => {
+  it('con su numero caido sale por otra activa y, cuando vuelve, el original es otra vez la primera opcion', async () => {
     const m = montar();
     const c = await conLinea(m, '51910000021', 'b');
     m.caer('b');
@@ -224,13 +219,13 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     expect(r).toMatchObject({ ok: true });
     const nueva = (r as { whatsappNumberId: string }).whatsappNumberId;
     expect(nueva).not.toBe('b');
-    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toMatchObject([{ desdeLineaId: 'b', aLineaId: nueva, motivo: 'linea_caida' }]);
+    expect(m.motivoDeLaUltimaEntrega()).toBe('original_no_disponible');
 
     m.volver('b');
     await m.sender.send(texto('51910000021'));
-    expect(m.enviadosPor('b')).toBe(0);
-    expect(m.enviadosPor(nueva)).toBe(2);
-    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(1);
+    expect(m.enviadosPor('b')).toBe(1);
+    expect(m.enviadosPor(nueva)).toBe(1);
+    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(0);
   });
 
   it('una linea quitada o deshabilitada no se espera: cambia en el acto', async () => {
@@ -238,15 +233,16 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     const c = await conLinea(m, '51910000022', 'b');
     m.estado.b!.existe = false;
     expect((await m.sender.send(texto('51910000022'))).ok).toBe(true);
-    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toMatchObject([{ desdeLineaId: 'b', motivo: 'linea_no_disponible' }]);
+    expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(0);
+    expect(await m.repos.messages.lineaDeLaConversacion(c.id)).toBe('b');
   });
 
-  it('sin ninguna otra activa se queda donde esta, esperando, sin perder su asignacion', async () => {
+  it('sin ningun numero disponible no sale: queda bloqueado con su motivo y sin perder su asignacion', async () => {
     const m = montar();
     const c = await conLinea(m, '51910000023', 'b');
     for (const id of IDS) m.caer(id);
     m.pasar(60 * MIN);
-    expect(await m.sender.send(texto('51910000023'))).toMatchObject({ ok: false, code: 'sin_conexion', whatsappNumberId: 'b' });
+    expect(await m.sender.send(texto('51910000023'))).toMatchObject({ ok: false, blocked: true, code: 'sin_lineas_disponibles', reason: 'No hay números vinculados habilitados con cupo disponible' });
     expect(await m.repos.messages.lineaDeLaConversacion(c.id)).toBe('b');
     expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toHaveLength(0);
   });
@@ -254,7 +250,7 @@ describe('la excepcion: su numero ya no esta disponible', () => {
   it('un cliente nuevo sin ninguna linea conectada espera sin quedar atado a ninguna', async () => {
     const m = montar();
     for (const id of IDS) m.caer(id);
-    expect(await m.sender.send(texto('51910000024'))).toMatchObject({ ok: false, code: 'sin_conexion', whatsappNumberId: null });
+    expect(await m.sender.send(texto('51910000024'))).toMatchObject({ ok: false, code: 'sin_lineas_disponibles', whatsappNumberId: null });
     m.volver('c');
     expect(await m.sender.send(texto('51910000024'))).toMatchObject({ ok: true, whatsappNumberId: 'c' });
   });
@@ -275,7 +271,7 @@ describe('la excepcion: su numero ya no esta disponible', () => {
     expect(await m.repos.lineasContacto.cambios({ contactId: c.id })).toMatchObject([{ desdeLineaId: 'b', aLineaId: 'c', motivo: 'persona' }]);
   });
 
-  it('un reintento en cola tambien cambia si su linea sigue sin conexion', async () => {
+  it('un envio en cola con su linea sin conexion sale por otra sin esperar', async () => {
     vi.useFakeTimers();
     try {
       const m = montar();
@@ -284,9 +280,6 @@ describe('la excepcion: su numero ya no esta disponible', () => {
       const cola = createMemoryOutboundQueue({ sender: m.sender });
       await cola.enqueue(texto('51910000027'));
       await vi.advanceTimersByTimeAsync(500);
-      expect(cola.size()).toBe(1);
-      m.pasar(3 * MIN);
-      await vi.advanceTimersByTimeAsync(3 * MIN);
       expect(cola.size()).toBe(0);
       expect(m.enviadosPor('a') + m.enviadosPor('c')).toBe(1);
       await cola.close();
