@@ -34,6 +34,10 @@ export function formatoReal(b: Buffer): FormatoMedia | null {
     if (marca === 'qt  ') return null;
     return { familia: 'video', mimeType: 'video/mp4' };
   }
+  // Audios que Meta no admite tal cual (webm del navegador, wav, flac): se aceptan y se pasan a ogg/opus al enviar.
+  if (ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WAVE') return { familia: 'audio', mimeType: 'audio/wav' };
+  if (ascii(b, 0, 4) === 'fLaC') return { familia: 'audio', mimeType: 'audio/flac' };
+  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return { familia: 'audio', mimeType: 'audio/webm' };
   if (ascii(b, 0, 4) === 'OggS') return { familia: 'audio', mimeType: 'audio/ogg' };
   if (ascii(b, 0, 5) === '#!AMR') return { familia: 'audio', mimeType: 'audio/amr' };
   if (ascii(b, 0, 3) === 'ID3' || (b[0] === 0xff && (b[1]! & 0xf6) === 0xf2)) return { familia: 'audio', mimeType: 'audio/mpeg' };

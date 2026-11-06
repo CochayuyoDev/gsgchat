@@ -9,6 +9,7 @@
 import { Readable } from 'node:stream';
 import type { TemplateComponent } from './types.js';
 import { guardarFlujo } from './local/media.js';
+import { audioParaMeta } from './audio-meta.js';
 
 export interface SendResult {
   wamid: string;
@@ -448,6 +449,13 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     },
 
     async sendMedia(to, media) {
+      if (media.kind === 'audio') {
+        try {
+          media = { ...media, ...(await audioParaMeta(media)) };
+        } catch (error) {
+          throw new WhatsAppApiError(error instanceof Error ? error.message : 'no se pudo preparar el audio', 400, undefined, undefined, false);
+        }
+      }
       const id = await upload(media);
       const cuerpo: Record<string, unknown> = { id };
       if (media.caption && media.kind !== 'audio') cuerpo.caption = media.caption;
