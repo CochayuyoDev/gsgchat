@@ -265,6 +265,18 @@ export function openApi(baseUrl: string): Json {
                     actualizadaEn: { type: 'string', format: 'date-time' },
                   },
                 },
+                linea: {
+                  type: 'object',
+                  nullable: true,
+                  description: 'La linea de WhatsApp de este chat (por la que salio el pedido): lo que se escriba con POST /api/v1/chat sale por ella; si esta caida, por otra conectada',
+                  properties: {
+                    id: { type: 'string' },
+                    etiqueta: { type: 'string' },
+                    numero: { type: 'string', nullable: true },
+                    conectada: { type: 'boolean', nullable: true },
+                    asignada: { type: 'boolean', description: 'false = el cliente aun no tiene linea: se usa la principal' },
+                  },
+                },
                 mensajes: {
                   type: 'array',
                   items: {
@@ -884,7 +896,9 @@ export function openApi(baseUrl: string): Json {
           properties: {
             proveedor: { type: 'string', enum: ['cloud', 'local', 'waha'] },
             configurado: { type: 'boolean' },
-            conectado: { type: 'boolean' },
+            conectado: { type: 'boolean', description: 'true si queda AL MENOS una línea de WhatsApp conectada: con la principal caída, cada chat sale por la línea de su cliente (o por otra viva)' },
+            principalConectada: { type: 'boolean', description: 'si la línea principal está conectada' },
+            lineas: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, etiqueta: { type: 'string' }, numero: { type: 'string' }, principal: { type: 'boolean' }, conectada: { type: 'boolean' } } } },
             numero: { type: 'object', properties: { calidad: { type: 'string' }, nivel: { type: 'string', enum: ['verde', 'amarillo', 'naranja', 'rojo'] }, pausado: { type: 'boolean' }, motivoPausa: { type: 'string', nullable: true }, tier: { type: 'string', nullable: true } } },
             cupoDiario: { type: 'integer' },
             enviadosHoy: { type: 'integer' },

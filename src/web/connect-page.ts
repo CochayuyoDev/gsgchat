@@ -1762,9 +1762,12 @@ function lineasMsg(t, tono) {
   el.textContent = t || '';
   el.style.color = tono === 'rojo' ? '#b42318' : '';
 }
+var puedeElegirPrincipal = false;
 function filaLinea(l) {
   var tono = TONO_LINEA[l.estado] || 'gris';
-  var local = l.proveedor === 'local' && !l.principal;
+  /* deSetup = la conexion de siempre (se maneja con la tarjeta de arriba); principal = la que eligio la tienda. */
+  var setup = l.deSetup !== undefined ? l.deSetup : l.principal;
+  var local = l.proveedor === 'local' && !setup;
   var qr = l.sesion && l.sesion.qr ? '<div class="qr-marco"><img alt="QR de ' + esc(l.etiqueta) + '" src="data:image/png;base64,' + esc(l.sesion.qr) + '"></div><p class="ayuda">En el teléfono de esta línea: WhatsApp &rarr; Dispositivos vinculados &rarr; Vincular un dispositivo.</p>' : '';
   var codigo = l.sesion && l.sesion.pairingCode ? '<div class="codigo" role="status">' + esc(l.sesion.pairingCode) + '</div>' : '';
   var botones = '';
@@ -1773,7 +1776,10 @@ function filaLinea(l) {
       ? '<button class="btn" type="button" data-acc="desconectar" data-id="' + esc(l.id) + '">Desvincular</button>'
       : '<button class="btn primario" type="button" data-acc="conectar" data-id="' + esc(l.id) + '">' + (l.estado === 'esperando_qr' ? 'Mostrar otro QR' : 'Conectar y mostrar el QR') + '</button>';
   }
-  if (!l.principal) {
+  if (puedeElegirPrincipal && !l.principal && l.habilitada) {
+    botones += '<button class="btn" type="button" data-acc="principal" data-id="' + esc(l.id) + '">Hacer principal</button>';
+  }
+  if (!setup) {
     botones += '<button class="btn" type="button" data-acc="habilitar" data-id="' + esc(l.id) + '" data-valor="' + (l.habilitada ? '0' : '1') + '">' + (l.habilitada ? 'Deshabilitar' : 'Habilitar') + '</button>';
     botones += '<button class="btn peligro" type="button" data-acc="quitar" data-id="' + esc(l.id) + '">Quitar</button>';
   }
@@ -1782,9 +1788,9 @@ function filaLinea(l) {
       '<input class="corto" data-nombre="' + esc(l.id) + '" maxlength="80" value="' + esc(l.etiqueta) + '" aria-label="Nombre de la línea">' +
       '<button class="btn" type="button" data-acc="renombrar" data-id="' + esc(l.id) + '">Guardar nombre</button>' +
       '<span class="chip tono-' + tono + '">' + esc(l.habilitada ? (TEXTO_LINEA[l.estado] || l.estado) : 'Deshabilitada') + '</span>' +
-      (l.principal ? '<span class="chip tono-gris">Principal · activa</span>' : '') +
+      (l.principal ? '<span class="chip tono-verde">★ Principal</span>' : '') +
     '</div>' +
-    '<p class="ayuda">' + (l.numero ? 'Número: +' + esc(l.numero) : 'Número: se completa al conectar') + ' · ' + (l.proveedor === 'local' ? 'QR / sesión vinculada' : l.proveedor === 'cloud' ? 'API oficial de Meta' : 'WAHA') + (l.principal ? ' · se conecta con la tarjeta de WhatsApp de arriba' : '') + '</p>' +
+    '<p class="ayuda">' + (l.numero ? 'Número: +' + esc(l.numero) : 'Número: se completa al conectar') + ' · ' + (l.proveedor === 'local' ? 'QR / sesión vinculada' : l.proveedor === 'cloud' ? 'API oficial de Meta' : 'WAHA') + (setup ? ' · se conecta con la tarjeta de WhatsApp de arriba' : '') + (l.principal && !setup ? ' · elegida como principal: si la línea de un cliente se cae, sus mensajes pasan primero por esta' : '') + '</p>' +
     qr + codigo +
     (botones ? '<div class="acciones">' + botones + '</div>' : '') +
   '</div>';
@@ -1795,6 +1801,7 @@ async function cargarLineas() {
   try {
     var r = await api('/admin/lineas');
     lineasMax = r.max || 8;
+    puedeElegirPrincipal = Boolean(r.puedeElegirPrincipal);
     var firma = JSON.stringify(r.lineas);
     var chip = $('lineas-chip');
     var conectadas = r.lineas.filter(function (l) { return l.estado === 'conectado'; }).length;
@@ -1821,6 +1828,9 @@ async function accionLinea(acc, id, valor) {
     } else if (acc === 'habilitar') {
       await api('/admin/lineas/' + id, { method: 'PATCH', body: { habilitada: valor === '1' } });
       lineasMsg(valor === '1' ? 'Línea habilitada.' : 'Línea deshabilitada: no se enviará nada por ella.');
+    } else if (acc === 'principal') {
+      await api('/admin/lineas/' + id + '/principal', { method: 'POST' });
+      lineasMsg('Listo: esta es ahora la línea principal. Cada cliente sigue con su número; si el suyo se cae, sus mensajes pasan primero por esta.');
     } else if (acc === 'quitar') {
       await api('/admin/lineas/' + id, { method: 'DELETE' });
       lineasMsg('Línea quitada. Sus mensajes quedan en los chats con su etiqueta.');

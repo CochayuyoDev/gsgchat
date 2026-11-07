@@ -24,6 +24,7 @@ import type { Sender, SendOutcome } from '../../outbound/sender.js';
 import type { OutboundQueue } from '../../outbound/queue.js';
 import { providerOf, type SettingsService } from '../../settings/service.js';
 import type { WhatsAppClient } from '../../whatsapp/client.js';
+import { estadoConexion } from '../../whatsapp/estado-conexion.js';
 import type { Politica } from '../../salud/politica.js';
 import { politicaDesdeConfig } from '../../salud/politica.js';
 import { dailyCapFor } from '../../outbound/throttle.js';
@@ -49,6 +50,9 @@ import { archivoDeMensaje } from './archivos-gsg.js';
 import { crearIdempotencia } from './idempotencia.js';
 
 export interface ApiV1Deps {
+  /** Las lineas de WhatsApp: `/estado` dice cada una y «conectado» = queda alguna viva. */
+  lineas?: import('../../whatsapp/lineas.js').ServicioLineas;
+  registroClientes?: import('../../whatsapp/registro.js').RegistroClientes;
   /**
    * La clave de `number_state` del numero vigente (src/salud/numero.ts). Tiene
    * que ser la misma que usa el monitor de salud: si no, la pantalla ensena las
@@ -252,11 +256,16 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   app.get('/api/v1/estado', { config: { permiso: 'estado:leer' } }, async () => {
     const ahora = new Date();
     const estado = await repos.numberState.get(phoneNumberId());
-    const configurado = settings.isConfigured();
+    // Con la principal caida y otra linea viva SI se puede escribir: cada
+    // cliente sale por su linea (o, si la suya cayo, por otra viva). Antes
+    // `conectado` miraba solo la principal y el otro sistema dejaba de escribir.
+    const conexion = await estadoConexion({ settings, wa, registro: deps.registroClientes ?? null, preferida: deps.lineas?.preferida ? () => deps.lineas!.preferida!() : null });
     return {
       proveedor: providerOf(settings.current()),
-      configurado,
-      conectado: configurado && (wa.conectado?.() ?? true),
+      configurado: conexion.configurado,
+      conectado: conexion.conectado,
+      principalConectada: conexion.principalConectada,
+      lineas: conexion.lineas,
       numero: {
         calidad: estado.quality,
         nivel: estado.nivel ?? 'verde',
