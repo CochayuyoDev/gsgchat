@@ -107,7 +107,7 @@ import { desenlaceDeEnvio, esperaDelReintento, MENSAJE_EN_CURSO, MENSAJE_REINTEN
 import type { PrimerMensajeReparto } from '../rutas/motor.js';
 import { apartarPorMotorizado, resolverPorUbicacion, soltarSolicitudes, solicitudesAbiertasDe } from './ubicacion-unica.js';
 import { pareceNoSoyYo, TEXTO_NO_SOY_YO } from '../rutas/inbound.js';
-import { CATALOGO_POR_DEFECTO } from '../archive/clasificar.js';
+import { CATALOGO_POR_DEFECTO, QUIERE_CAMBIAR_UBICACION, UBICACION_CAMBIADA, enCatalogo } from '../archive/clasificar.js';
 import { numeroNormalizado } from '../chat/etiquetar.js';
 import { distanciaAlDistrito, distritoDePedido, distritoEnDireccion } from './distritos-centro.js';
 import { ventanaDeEntrega, variablesDeVentana, fuenteEnPalabras } from './horario-distrito.js';
@@ -1965,22 +1965,31 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
   };
 
   /**
-   * La nota del chat (la etiqueta que lee GSG en el historial): el cliente
-   * cambió su ubicación. La pone el bot, sin IA; no pisa una puesta a mano, y
-   * solo si el catálogo del negocio tiene «cambiar_ubicacion».
+   * La nota del chat (la etiqueta que lee GSG en el historial) cuando el
+   * cliente cambia su ubicación. La pone el bot, sin IA, y no pisa una puesta
+   * a mano.
+   *  - `hecha`: se registró la nueva → «ubicacion_cambiada»; con un catálogo
+   *    de antes que solo tiene la general, «cambiar_ubicacion» (como siempre).
+   *  - `pendiente`: volvió a pedir el cambio (se le pidió la nueva) o no se le
+   *    aceptó (hora límite, cambios agotados) → «quiere_cambiar_ubicacion».
+   *    Solo corrige una nota que puso el bot antes (la de «cambió» ya no es
+   *    cierta y la IA no la pisa); si no la hay, la etiqueta la pone la IA.
    */
-  async function notaCambioUbicacion(phone: string, cambios: number): Promise<void> {
+  async function notaCambioUbicacion(phone: string, estado: 'hecha' | 'pendiente', detalle: string): Promise<void> {
     const etiquetas = repos.chatEtiquetas;
     if (!etiquetas) return;
     try {
       const catalogo = (await etiquetas.catalogo()) ?? CATALOGO_POR_DEFECTO;
-      if (!catalogo.some((c) => c.codigo === 'cambiar_ubicacion')) return;
+      const codigo = estado === 'hecha' ? enCatalogo(UBICACION_CAMBIADA, catalogo) : catalogo.some((c) => c.codigo === QUIERE_CAMBIAR_UBICACION) ? QUIERE_CAMBIAR_UBICACION : null;
+      if (!codigo) return;
       const numero = numeroNormalizado(phone);
       const dia = hoy();
       const ya = (await etiquetas.delDia(dia, [numero]))[0];
       if (ya?.origen === 'manual') return;
-      await etiquetas.guardar({ phone: numero, dia, etiqueta: 'cambiar_ubicacion', origen: 'reglas', huella: `bot-cambio-ubicacion-${cambios}-${ahora().getTime()}`, mensajes: ya?.mensajes ?? 0, motivo: null, loteId: null });
-      await etiquetas.registrar({ loteId: null, phone: numero, fase: 'analisis', nivel: 'info', codigo: 'etiqueta_bot', detalle: `El bot puso «cambiar_ubicacion»: el cliente cambió su ubicación (${cambios} de ${ajustes.cambiosUbicacionMax}).` });
+      const delBot = Boolean(ya && ya.origen === 'reglas' && ya.etiqueta && ya.huella.startsWith('bot-'));
+      if (estado === 'pendiente' && (!delBot || ya!.etiqueta === codigo)) return;
+      await etiquetas.guardar({ phone: numero, dia, etiqueta: codigo, origen: 'reglas', huella: `bot-cambio-ubicacion-${estado}-${ahora().getTime()}`, mensajes: ya?.mensajes ?? 0, motivo: null, loteId: null });
+      await etiquetas.registrar({ loteId: null, phone: numero, fase: 'analisis', nivel: 'info', codigo: 'etiqueta_bot', detalle: `El bot puso «${codigo}»: ${detalle}.` });
     } catch (error) {
       log('no se pudo poner la nota de cambio de ubicación', { detalle: error instanceof Error ? error.message : String(error) });
     }
@@ -2058,6 +2067,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (max <= 0 || hechos >= max) {
         for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación otra vez, pero ya la cambió ${hechos} ${hechos === 1 ? 'vez' : 'veces'} (máximo ${max}): se queda la última y no se le contesta (lo ve soporte por la nota)${dijo}`).catch(() => undefined);
         await reportarCambioUbicacion(vivas, false, limite, `pidió un cambio más de los ${max} permitidos${dijo}`);
+        await notaCambioUbicacion(phone, 'pendiente', `pidió otro cambio de ubicación, pero ya usó los ${max} del día`);
         // Con el último cambio registrado el bot ya se calla (regla del dueño, 29/10): no se le contesta.
         return { texto: '', entrega: e, tarde: false, pedirPin: false, agotado: true };
       }
@@ -2065,6 +2075,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
         await repo.actualizar(x.id, { ubicacionCambioPedidoAt: en }).catch(() => null);
         await evento(x, 'nota', `pidió cambiar su ubicación (cambio ${hechos + 1} de ${max}): se le pidió la nueva; mientras, se queda la que tenía${dijo}`).catch(() => undefined);
       }
+      await notaCambioUbicacion(phone, 'pendiente', 'pidió cambiar su ubicación otra vez y aún no manda la nueva');
       return { texto: textoDe('cambioUbicacionAntes', ajustes, contexto(e)), entrega: e, tarde: false, pedirPin: true };
     }
     if (!vivas.length) return null;
@@ -2075,6 +2086,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     for (const x of vivas) await evento(x, 'nota', `pidió cambiar su ubicación después de la ${limite}: ${numero ? `se le dio el número del motorizado (${numero}) para que coordine con él` : 'no hay número de motorizado que darle'}`).catch(() => undefined);
     await reportarCambioUbicacion(vivas, true, limite, texto ? `escribió: «${texto.slice(0, 200)}»` : undefined);
     await quitarUbicacionPorCambio(vivas, `pidió cambiar su ubicación después de la ${limite}${texto ? `: «${texto.slice(0, 160)}»` : ''}`);
+    await notaCambioUbicacion(phone, 'pendiente', `pidió cambiar su ubicación después de la ${limite}: no se cambió`);
     return { texto: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(g, m), telefonoMotorizado: numero }), entrega: g, tarde: true, pedirPin: false };
   }
 
@@ -2123,6 +2135,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       const e = yaTenian[0]!;
       for (const x of yaTenian) await evento(x, 'nota', `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}), pero ya la cambió ${hechos} veces (máximo ${ajustes.cambiosUbicacionMax}): no se registra, se queda la última`).catch(() => undefined);
+      await notaCambioUbicacion(contact.phone, 'pendiente', `mandó otra ubicación, pero ya usó los ${ajustes.cambiosUbicacionMax} cambios del día: no se registró`);
       // Sin cambios que le queden, el bot se calla: lo ve soporte por la nota (regla del dueño, 29/10).
       return { atendida: true, entrega: e, resultado: 'cambio_ubicacion_agotado' };
     }
@@ -2140,6 +2153,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     // A GSG solo el enlace de la ubicación que mandó (regla del dueño, 29/10).
     await reportarCambioUbicacion(yaTenian, pasoLaHoraDeCambio(), limite, canonicalMapsUrl(ubicacion.lat, ubicacion.lng));
     await quitarUbicacionPorCambio(yaTenian, detalle);
+    await notaCambioUbicacion(contact.phone, 'pendiente', 'mandó otra ubicación que no se registró: lo resuelve GSG o una persona');
     if (pendientes) return null;
     return { atendida: true, entrega: yaTenian[0], resultado: 'cambio_reportado' };
   }
@@ -2157,6 +2171,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       if (!numero) await repo.actualizar(x.id, { requiereHumano: true });
       await evento(x, 'nota', numero ? `${detalle}; se le dio el número del motorizado (${numero}) para que coordine con él` : `${detalle} y no hay número de motorizado que darle: necesita a alguien`);
     }
+    await notaCambioUbicacion(contact.phone, 'pendiente', `mandó otra ubicación después de la ${horaEnPalabras(ajustes.cambioUbicacionHasta)}: no se cambió`);
     return { atendida: true, entrega: e, resultado: 'ubicacion_tardia', responder: textoDe('cambioUbicacionTarde', ajustes, { ...contexto(e, m), telefonoMotorizado: numero }) };
   }
 
@@ -2274,7 +2289,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
       }
       const act = tocadas[0]!;
       const m = await motorizadoDe(act).catch(() => null);
-      if (corrigeAlguna && !ubicacion.aMano) await notaCambioUbicacion(contact.phone, cambiosHechos(tocadas));
+      if (corrigeAlguna && !ubicacion.aMano) await notaCambioUbicacion(contact.phone, 'hecha', `el cliente cambió su ubicación (${cambiosHechos(tocadas)} de ${ajustes.cambiosUbicacionMax})`);
       return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: conInvitacion(textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }), tocadas, corrigeAlguna) };
     }
 
@@ -2311,7 +2326,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     }
     const act = tocadas[0]!;
     const m = await motorizadoDe(act).catch(() => null);
-    if (corrigeAlguna && !ubicacion.aMano) await notaCambioUbicacion(contact.phone, cambiosHechos(tocadas));
+    if (corrigeAlguna && !ubicacion.aMano) await notaCambioUbicacion(contact.phone, 'hecha', `el cliente cambió su ubicación (${cambiosHechos(tocadas)} de ${ajustes.cambiosUbicacionMax})`);
     return { atendida: true, entrega: act, resultado: corrigeAlguna ? 'ubicacion_corregida' : 'ubicacion', responder: conInvitacion(textoDe(corrigeAlguna ? 'ubicacionCambiada' : 'ubicacionRegistrada', ajustes, { ...contexto(act, m), pedido: nombreDelGrupo(tocadas) }), tocadas, corrigeAlguna) };
   }
 

@@ -9,15 +9,15 @@
 
 import { describe, expect, it } from 'vitest';
 import type { MensajeIA } from '../src/ia/proveedores.js';
-import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, clasificarConIA, instruccionesDeEtiqueta, transcripcionPara, type Catalogo } from '../src/archive/clasificar.js';
-import { CASOS, casosParaCatalogo, evaluarClasificador, informeDe, leerConversacionEscrita, mensajesDeCaso, type ResultadoCaso } from '../src/archive/evaluacion.js';
+import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, clasificarConIA, enCatalogo, instruccionesDeEtiqueta, transcripcionPara, type Catalogo } from '../src/archive/clasificar.js';
+import { CASOS, casosParaCatalogo, esperadaEnCatalogo, evaluarClasificador, informeDe, leerConversacionEscrita, mensajesDeCaso, type ResultadoCaso } from '../src/archive/evaluacion.js';
 import { crearChatEtiquetasEnMemoria, type MensajeDelDia } from '../src/db/chat-etiquetas.js';
 import { etiquetarAMano, etiquetarDelDia, type EtiquetadoDeps } from '../src/chat/etiquetar.js';
 
 const CODIGOS = new Set(CATALOGO_POR_DEFECTO.map((e) => e.codigo));
 
 /** Una IA que contesta con la etiqueta correcta de cada caso (la reconoce por su transcripcion). */
-function iaQueSabe(error?: (id: string) => string | null) {
+function iaQueSabe(error?: (id: string) => string | null, catalogo: Catalogo = CATALOGO_POR_DEFECTO) {
   const porTexto = new Map(CASOS.map((c) => [transcripcionPara(mensajesDeCaso(c), null, 'Tienda'), c]));
   const llamadas: Array<{ mensajes: MensajeIA[]; opts?: { maxTokens?: number; temperatura?: number } }> = [];
   return {
@@ -27,7 +27,7 @@ function iaQueSabe(error?: (id: string) => string | null) {
         llamadas.push({ mensajes, opts });
         const c = porTexto.get(String(mensajes[1]?.content))!;
         const distinta = error?.(c.id);
-        return JSON.stringify({ etiqueta: distinta ?? c.esperada });
+        return JSON.stringify({ etiqueta: distinta ?? enCatalogo(c.esperada, catalogo) ?? c.esperada });
       },
     },
   };
@@ -45,6 +45,40 @@ describe('el banco de conversaciones', () => {
     // «Otro» y «sin novedad» tienen varios, que es donde mas se equivoca una IA.
     expect(CASOS.filter((c) => c.esperada === CODIGO_OTRO).length).toBeGreaterThanOrEqual(4);
     expect(CASOS.filter((c) => c.esperada === 'sin_novedad').length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('el cambio de ubicacion tiene casos de cada estado, y la misma frase cae en etiquetas distintas', () => {
+    const de = (codigo: string) => CASOS.filter((c) => c.esperada === codigo);
+    expect(de('ubicacion_cambiada').length).toBeGreaterThanOrEqual(6);
+    expect(de('quiere_cambiar_ubicacion').length).toBeGreaterThanOrEqual(5);
+    expect(de('ubicaciones_multiples').length).toBeGreaterThanOrEqual(3);
+    expect(de('cambiar_ubicacion').length).toBeGreaterThanOrEqual(1);
+    // Que no se pueda acertar por palabras: lo que dice el cliente aparece en casos de las dos.
+    const dice = (c: (typeof CASOS)[number]) => c.conversacion.filter((l) => l[0] === 'cliente').map((l) => String(l[1]).toLowerCase()).join(' | ');
+    for (const frase of ['cambio de ubicación', 'me equivoqué']) {
+      expect(de('ubicacion_cambiada').some((c) => dice(c).includes(frase)), `${frase} en un cambio hecho`).toBe(true);
+      expect(de('quiere_cambiar_ubicacion').some((c) => dice(c).includes(frase)), `${frase} en uno pendiente`).toBe(true);
+    }
+    // Un cambio hecho sin que el cliente escriba nada (lo confirma el negocio) y uno negado que trae pin.
+    expect(de('ubicacion_cambiada').some((c) => !c.conversacion.some((l) => l[0] === 'cliente'))).toBe(true);
+    expect(de('quiere_cambiar_ubicacion').some((c) => c.conversacion.at(-2)?.[0] === 'ubicacion')).toBe(true);
+    // La invitacion a cambiarla, sola, es sin_novedad.
+    expect(CASOS.find((c) => c.id === 'bien-8')).toMatchObject({ esperada: 'sin_novedad' });
+  });
+
+  it('con un catalogo de antes (solo cambiar_ubicacion) los casos de las nuevas se piden con la general', () => {
+    const deAntes = CATALOGO_POR_DEFECTO.filter((e) => e.codigo !== 'ubicacion_cambiada' && e.codigo !== 'quiere_cambiar_ubicacion');
+    const { usar, saltados } = casosParaCatalogo(deAntes);
+    expect(saltados).toBe(0);
+    expect(usar).toHaveLength(CASOS.length);
+    const cambio1 = esperadaEnCatalogo(CASOS.find((c) => c.id === 'cambio-1')!, deAntes);
+    expect(cambio1).toEqual({ esperada: 'cambiar_ubicacion', aceptables: [] });
+    // Las aceptables de la general se juntan con ella.
+    expect(esperadaEnCatalogo(CASOS.find((c) => c.id === 'cambio-gral-1')!, deAntes)).toEqual({ esperada: 'cambiar_ubicacion', aceptables: [] });
+    expect(esperadaEnCatalogo(CASOS.find((c) => c.id === 'cambio-gral-1')!, CATALOGO_POR_DEFECTO)).toEqual({ esperada: 'cambiar_ubicacion', aceptables: ['ubicacion_cambiada', 'quiere_cambiar_ubicacion'] });
+    // Sin ninguna de ubicacion, esos casos se saltan.
+    const sinUbicacion = CATALOGO_POR_DEFECTO.filter((e) => !/ubicacion/.test(e.codigo));
+    expect(casosParaCatalogo(sinUbicacion).usar.some((c) => /ubicacion/.test(c.esperada))).toBe(false);
   });
 
   it('con un catalogo propio se saltan los casos cuya etiqueta no existe', () => {
@@ -82,6 +116,21 @@ describe('la evaluacion', () => {
     expect(malos).toEqual(['otro-1', 'reag-1']);
     const reag = CASOS.filter((c) => c.esperada === 'reagendar_entrega').length;
     expect(inf.porEtiqueta.find((e) => e.codigo === 'reagendar_entrega')).toMatchObject({ aciertos: reag - 1, casos: reag });
+  });
+
+  it('con un catalogo de antes, la IA que contesta la general acierta los de ubicacion', async () => {
+    const deAntes = CATALOGO_POR_DEFECTO.filter((e) => e.codigo !== 'ubicacion_cambiada' && e.codigo !== 'quiere_cambiar_ubicacion');
+    const { ia } = iaQueSabe(undefined, deAntes);
+    const inf = await evaluarClasificador(ia, deAntes, 'Tienda');
+    expect(inf).toMatchObject({ total: CASOS.length, aciertos: CASOS.length, saltados: 0 });
+    expect(inf.porEtiqueta.find((e) => e.codigo === 'cambiar_ubicacion')!.casos).toBe(CASOS.filter((c) => /ubicacion_cambiada|quiere_cambiar_ubicacion|^cambiar_ubicacion$/.test(c.esperada)).length);
+    expect(inf.porEtiqueta.some((e) => e.codigo === 'ubicacion_cambiada')).toBe(false);
+  });
+
+  it('confundir un cambio hecho con uno pendiente es un fallo, no un acierto', async () => {
+    const { ia } = iaQueSabe((id) => (id === 'cambio-4' ? 'quiere_cambiar_ubicacion' : id === 'quiere-1' ? 'ubicacion_cambiada' : id === 'multi-3' ? 'ubicacion_cambiada' : null));
+    const inf = await evaluarClasificador(ia, CATALOGO_POR_DEFECTO, 'Tienda');
+    expect(inf.resultados.filter((r) => !r.acierto).map((r) => r.id).sort()).toEqual(['cambio-4', 'multi-3', 'quiere-1']);
   });
 
   it('el informe redondea y no divide por cero', () => {
@@ -157,6 +206,38 @@ describe('el clasificador afinado', () => {
     const fabrica = instruccionesDeEtiqueta(false).join('\n');
     expect(fabrica).toMatch(/Ejemplos/);
     expect(fabrica).toContain('→ ubicaciones_multiples');
+  });
+
+  it('el de fabrica explica las dos de ubicacion, con ejemplos que se contrastan', () => {
+    const fabrica = instruccionesDeEtiqueta(false).join('\n');
+    expect(fabrica).toContain('- ubicacion_cambiada: ');
+    expect(fabrica).toContain('- quiere_cambiar_ubicacion: ');
+    expect(fabrica).toMatch(/como quedó al FINAL de la conversación|cómo quedó al FINAL de la conversación/);
+    expect(fabrica).toMatch(/La invitación del negocio .* no es una petición del cliente/);
+    expect(fabrica).toMatch(/cambiar_ubicacion es la general de antes/);
+    // La excepcion a «mira solo al cliente»: lo que contesta el negocio dice si quedo hecho.
+    expect(fabrica).toMatch(/La excepción es el cambio de ubicación/);
+    const ejemplos = fabrica.split('\n').filter((l) => / → /.test(l));
+    expect(ejemplos.filter((l) => l.endsWith('→ ubicacion_cambiada')).length).toBeGreaterThanOrEqual(3);
+    expect(ejemplos.filter((l) => l.endsWith('→ quiere_cambiar_ubicacion')).length).toBeGreaterThanOrEqual(3);
+    // Ningun ejemplo de fabrica da la general cuando estan las precisas.
+    expect(ejemplos.some((l) => l.endsWith('→ cambiar_ubicacion'))).toBe(false);
+  });
+
+  it('un catalogo de antes recibe las pistas de siempre y los ejemplos con la general', () => {
+    const deAntes = CATALOGO_POR_DEFECTO.filter((e) => e.codigo !== 'ubicacion_cambiada' && e.codigo !== 'quiere_cambiar_ubicacion');
+    const texto = instruccionesDeEtiqueta(false, deAntes).join('\n');
+    expect(texto).not.toContain('ubicacion_cambiada');
+    expect(texto).not.toContain('quiere_cambiar_ubicacion');
+    expect(texto).toMatch(/es cambiar_ubicacion\./);
+    const ejemplos = texto.split('\n').filter((l) => / → /.test(l));
+    expect(ejemplos.filter((l) => l.endsWith('→ cambiar_ubicacion')).length).toBe(2);
+    // Un catalogo con solo las nuevas no nombra la general.
+    const soloNuevas = CATALOGO_POR_DEFECTO.filter((e) => e.codigo !== 'cambiar_ubicacion');
+    const nuevas = instruccionesDeEtiqueta(false, soloNuevas).join('\n');
+    expect(nuevas).not.toMatch(/^- cambiar_ubicacion:/m);
+    expect(nuevas).not.toMatch(/→ cambiar_ubicacion/);
+    expect(nuevas).toContain('- quiere_cambiar_ubicacion: ');
   });
 });
 

@@ -305,8 +305,8 @@ function resaltar(texto, busca) {
 /* Cada etiqueta con el tono del armazon: nunca un color a pelo. */
 var TONO_ETIQUETA = {
   reclamo: 'rojo', cancelar_entrega: 'rojo', pedido_no_reconocido: 'rojo',
-  reagendar_entrega: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
-  horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
+  reagendar_entrega: 'ambar', quiere_cambiar_ubicacion: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
+  ubicacion_cambiada: 'azul', horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
   confirmar_recepcion: 'verde', otro: 'gris',
   /* Las del catalogo de antes, para las conversaciones que ya las tienen. */
   cancelacion: 'rojo', entrega: 'verde', venta: 'verde', cambio: 'ambar', sin_respuesta: 'ambar', motorizado: 'azul', pago: 'azul', consulta: 'gris'

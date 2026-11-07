@@ -24,6 +24,8 @@ export const ETIQUETAS = [
   'franja_horaria',
   'hora_limite',
   'fuera_de_horario',
+  'ubicacion_cambiada',
+  'quiere_cambiar_ubicacion',
   'cambiar_ubicacion',
   'ubicaciones_multiples',
   'confirmar_recepcion',
@@ -45,6 +47,8 @@ export const NOMBRE_ETIQUETA: Record<Etiqueta, string> = {
   franja_horaria: 'Franja horaria',
   hora_limite: 'Hora límite',
   fuera_de_horario: 'Fuera de horario',
+  ubicacion_cambiada: 'Cambió su ubicación',
+  quiere_cambiar_ubicacion: 'Quiere cambiar su ubicación',
   cambiar_ubicacion: 'Cambiar ubicación',
   ubicaciones_multiples: 'Ubicaciones múltiples',
   confirmar_recepcion: 'Confirma recepción',
@@ -66,7 +70,9 @@ export const DEFINICION_ETIQUETA: Record<Etiqueta, string> = {
   franja_horaria: 'pide un intervalo de horas («entre las 2 y las 5», «en la tarde»).',
   hora_limite: 'necesita recibir antes de cierta hora («antes de las 12», «hasta las 3»).',
   fuera_de_horario: 'solicita atención fuera del horario de reparto establecido.',
-  cambiar_ubicacion: 'solicita reemplazar la dirección o el punto de entrega anterior.',
+  ubicacion_cambiada: 'ya dio la ubicación nueva (otro pin o una dirección escrita) y la conversación deja claro que reemplaza a la anterior.',
+  quiere_cambiar_ubicacion: 'pide cambiar su ubicación, pero el cambio sigue pendiente (aún no manda la nueva) o no se pudo hacer (pasó la hora o el límite de cambios).',
+  cambiar_ubicacion: 'habla de cambiar la dirección o el punto de entrega, pero no se puede saber si el cambio se hizo o sigue pendiente.',
   ubicaciones_multiples: 'envía distintas ubicaciones y no queda claro cuál usar.',
   confirmar_recepcion: 'confirma que estará disponible para recibir.',
   consultar_entrega: 'pregunta por el estado del pedido o la llegada del repartidor.',
@@ -103,6 +109,29 @@ export const esEtiqueta = (valor: unknown): valor is Etiqueta => typeof valor ==
 
 /** Lo que una persona puede dejar puesto a mano: las de ahora y, en las viejas, las que ya tenian. */
 export const esEtiquetaConocida = (valor: string): boolean => ES_ETIQUETA.has(valor) || valor in NOMBRE_ETIQUETA_ANTERIOR;
+
+/**
+ * Las dos etiquetas de ubicacion que distinguen si el cambio se hizo o no
+ * (7/11) y la general de antes, `cambiar_ubicacion`, que las cubre a las dos.
+ * Un catalogo del negocio guardado antes solo tiene la general: alli lo que
+ * las reglas, el bot o la evaluacion digan con una de las nuevas se pone con
+ * la general. Nunca al reves: lo ya etiquetado con `cambiar_ubicacion` no se
+ * reasigna.
+ */
+export const UBICACION_CAMBIADA = 'ubicacion_cambiada';
+export const QUIERE_CAMBIAR_UBICACION = 'quiere_cambiar_ubicacion';
+export const CAMBIAR_UBICACION = 'cambiar_ubicacion';
+export const ETIQUETA_GENERAL: Readonly<Record<string, string>> = {
+  [UBICACION_CAMBIADA]: CAMBIAR_UBICACION,
+  [QUIERE_CAMBIAR_UBICACION]: CAMBIAR_UBICACION,
+};
+
+/** La etiqueta tal cual si el catalogo la tiene; si no, su general si esa esta; si no, null. */
+export function enCatalogo(codigo: string, catalogo: Catalogo): string | null {
+  if (catalogo.some((e) => e.codigo === codigo)) return codigo;
+  const general = ETIQUETA_GENERAL[codigo];
+  return general && catalogo.some((e) => e.codigo === general) ? general : null;
+}
 
 // ------------------------------------------------------------ el catalogo
 
@@ -166,14 +195,27 @@ const llano = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g
 
 /**
  * Ejemplos cortos para el modelo: conversacion y etiqueta. Solo se le dan los
- * de etiquetas que el negocio tiene en su catalogo.
+ * de etiquetas que el negocio tiene en su catalogo. El tercer elemento marca
+ * los de ubicacion que, en un catalogo de antes (solo con `cambiar_ubicacion`),
+ * se dan con la general; los demas de las etiquetas nuevas no se dan alli.
+ *
+ * Los de ubicacion van en parejas que se parecen y cambian de etiqueta: el
+ * mismo «cambio de ubicación» es un cambio hecho si luego llega la nueva y
+ * queda pendiente si no; dos pines son un cambio si el negocio registra el
+ * nuevo y son ubicaciones_multiples si nadie aclara cual vale.
  */
-const EJEMPLOS: Array<[string, string]> = [
+const EJEMPLOS: Array<[string, string, 'general'?]> = [
   ['[cliente]: [ubicación 1] / [cliente]: [ubicación 2]', 'ubicaciones_multiples'],
   ['[cliente]: [ubicación 1] / [cliente]: [ubicación 2] / [cliente]: [ubicación 3]', 'ubicaciones_multiples'],
   ['[cliente]: [ubicación 1] / [cliente]: es la casa de rejas verdes, al costado de la bodega', 'sin_novedad'],
+  ['[cliente]: [ubicación 1] / [negocio]: Ubicación registrada. Si desea cambiar su ubicación, diga «Cambio de Ubicación» / [cliente]: gracias', 'sin_novedad'],
   ['[cliente]: necesito que llegue antes de las 12', 'hora_limite'],
-  ['[cliente]: [ubicación 1] / [cliente]: me equivoqué, esta es la buena / [cliente]: [ubicación 2]', 'cambiar_ubicacion'],
+  ['[cliente]: [ubicación 1] / [cliente]: me equivoqué, esta es la buena / [cliente]: [ubicación 2]', UBICACION_CAMBIADA, 'general'],
+  ['[cliente]: [ubicación 1] / [cliente]: hoy no estoy en casa, llévenlo a mi trabajo: Av. Arequipa 1234, Lince', UBICACION_CAMBIADA],
+  ['[cliente]: [ubicación 1] / [negocio]: Ubicación registrada / [cliente]: [ubicación 2] / [negocio]: Su nueva ubicación se registró correctamente', UBICACION_CAMBIADA],
+  ['[cliente]: [ubicación 1] / [cliente]: cambio de ubicación / [negocio]: Por favor, comparta su nueva ubicación / [cliente]: ahorita estoy en la calle, en la noche se la mando', QUIERE_CAMBIAR_UBICACION, 'general'],
+  ['[cliente]: [ubicación 1] / [cliente]: quiero cambiar mi dirección / [negocio]: al ser después de la 1:00 PM, comuníquese con el motorizado', QUIERE_CAMBIAR_UBICACION],
+  ['[cliente]: [ubicación 1] / [cliente]: otra vez cambio de ubicación / [negocio]: Ya cambió su ubicación 2 veces, que es el máximo; se queda la última / [cliente]: [ubicación 2]', QUIERE_CAMBIAR_UBICACION],
   ['[cliente]: [ubicación 1] / [cliente]: déjenlo con el portero', 'coordinar_con_tercero'],
   ['[cliente]: no voy a estar pero mi mamá lo recibe', 'coordinar_con_tercero'],
   ['[cliente]: ya pagué por Yape / [cliente]: [foto]', 'sin_novedad'],
@@ -208,19 +250,40 @@ export function conversacionEnUnaLinea(mensajes: Pick<Message, 'direction' | 'ki
 /** Las instrucciones del clasificador, para el mensaje de sistema. */
 export function instruccionesDeEtiqueta(conResumen = true, catalogo: Catalogo = CATALOGO_POR_DEFECTO, delNegocio: EjemploNegocio[] = []): string[] {
   const hay = (c: string) => catalogo.some((e) => e.codigo === c);
-  const ejemplos = EJEMPLOS.filter(([, e]) => hay(e));
+  const ejemplos = EJEMPLOS.flatMap(([c, e, general]): Array<[string, string]> => {
+    if (hay(e)) return [[c, e]];
+    const otra = general ? enCatalogo(e, catalogo) : null;
+    return otra ? [[c, otra]] : [];
+  });
   const propios = delNegocio.filter((e) => hay(e.etiqueta) && e.mensajes.length).slice(0, TOPE_EJEMPLOS_NEGOCIO);
+  const hecha = hay(UBICACION_CAMBIADA);
+  const pendiente = hay(QUIERE_CAMBIAR_UBICACION);
+  const conEstado = hecha || pendiente;
   return [
     `${conResumen ? 'Además del resumen, clasifica' : 'Clasifica'} la conversación con UNA sola etiqueta de este catálogo. Escribe el código EXACTO de la lista, sin inventar ni cambiar ninguno:`,
     ...catalogo.map((e) => `- ${e.codigo}: ${e.descripcion}`),
     'Cómo elegirla:',
-    '- Mira solo lo que dice y manda el cliente, no lo que contesta el negocio. Que el negocio diga que por ahí no atiende consultas no cambia la etiqueta: una pregunta del cliente por su pedido sigue siendo suya.',
+    `- Mira solo lo que dice y manda el cliente, no lo que contesta el negocio. Que el negocio diga que por ahí no atiende consultas no cambia la etiqueta: una pregunta del cliente por su pedido sigue siendo suya.${conEstado ? ' La excepción es el cambio de ubicación: lo que contesta el negocio sí dice si el cambio quedó hecho o no (ver abajo).' : ''}`,
     '- «[ubicación 1]», «[ubicación 2]»… son los pines de ubicación que mandó el cliente, numerados en orden; «[foto]» y «[audio]» son adjuntos que no puedes ver ni escuchar.',
     '- Elige la necesidad PENDIENTE más reciente: si pidió algo y luego otra cosa, manda lo último que sigue sin resolver. Si el negocio ya resolvió una petición (por ejemplo confirmó el nuevo día), no la elijas cuando haya otra pendiente después.',
     '- Si todas sus peticiones quedaron resueltas, elige la más reciente que hizo.',
-    ...(hay('cambiar_ubicacion') || hay('ubicaciones_multiples')
+    ...(hay(CAMBIAR_UBICACION) || hay('ubicaciones_multiples') || conEstado
       ? [
-          `- Mira el número del último pin: si solo hay «[ubicación 1]», hay UNA ubicación (una referencia escrita, como el color de la casa, no es otra). ${hay('ubicaciones_multiples') ? 'Dos o más pines sin decir cuál vale (o con «o si no aquí») son ubicaciones_multiples. ' : ''}${hay('cambiar_ubicacion') ? 'Si dice que la anterior está mal o ya no vale y da otra (pin o dirección escrita), es cambiar_ubicacion.' : ''}`,
+          `- Mira el número del último pin: si solo hay «[ubicación 1]», hay UNA ubicación (una referencia escrita, como el color de la casa o el piso, no es otra: la complementa). ${hay('ubicaciones_multiples') ? `Dos o más pines sin decir cuál vale (o con «o si no aquí») son ubicaciones_multiples${conEstado || hay(CAMBIAR_UBICACION) ? ', salvo que el cliente diga que el último reemplaza al anterior o que el negocio conteste que registró la nueva' : ''}. ` : ''}${!conEstado && hay(CAMBIAR_UBICACION) ? 'Si dice que la anterior está mal o ya no vale y da otra (pin o dirección escrita), o el negocio contesta que registró su nueva ubicación, es cambiar_ubicacion.' : ''}`.trimEnd(),
+        ]
+      : []),
+    ...(conEstado
+      ? [
+          '- En el cambio de ubicación decide por cómo quedó al FINAL de la conversación, no por una frase suelta: decir «cambio de ubicación» o «otra dirección» no basta para saber cuál es.',
+          '- La invitación del negocio («si desea cambiar su ubicación, diga Cambio de Ubicación») no es una petición del cliente. Reenviar la misma ubicación porque se la pidieron tampoco es un cambio.',
+          ...(hecha
+            ? [`- ${UBICACION_CAMBIADA}: el cliente YA dio la ubicación que reemplaza a la anterior (otro pin, o una dirección escrita completa) y queda claro que esa es la que vale: lo dice él («me equivoqué, esta es la buena», «mejor llévenlo a mi trabajo en Av. …») o el negocio contesta que registró la nueva.`]
+            : []),
+          ...(pendiente
+            ? [`- ${QUIERE_CAMBIAR_UBICACION}: pidió cambiarla pero no quedó hecho: todavía no manda la nueva (dice que luego la manda, que no puede mandar el pin ahora, o solo pidió el cambio), o el negocio le dice que ya no se puede (pasó la hora límite, ya usó los cambios permitidos, que coordine con el motorizado). Si después de eso manda otro pin igual, sigue siendo ${QUIERE_CAMBIAR_UBICACION}: el negocio no lo aceptó.`]
+            : []),
+          ...(hecha && pendiente ? [`- Si cambió la ubicación y luego pide cambiarla otra vez sin mandar la nueva, manda lo último: ${QUIERE_CAMBIAR_UBICACION}. Si pidió el cambio y luego mandó la nueva, es ${UBICACION_CAMBIADA}.`] : []),
+          ...(hay(CAMBIAR_UBICACION) ? [`- ${CAMBIAR_UBICACION} es la general de antes: úsala solo si habla de cambiar la ubicación y no hay forma de saber si el cambio se hizo o sigue pendiente (por ejemplo, la nueva va en una foto o un audio que no puedes ver).`] : []),
         ]
       : []),
     ...(hay('horario_fijo') || hay('franja_horaria') || hay('hora_limite')
@@ -240,7 +303,7 @@ export function instruccionesDeEtiqueta(conResumen = true, catalogo: Catalogo = 
     ...(propios.length
       ? ['Ejemplos de este negocio, corregidos por su equipo (si la conversación se parece a uno, sigue ese criterio):', ...propios.map((e) => `- ${conversacionEnUnaLinea(e.mensajes)} → ${e.etiqueta}`)]
       : []),
-    'Clasificar no acepta nada: no decides si se cambia el día, la hora o la dirección, solo describes lo que el cliente pidió.',
+    `Clasificar no acepta nada: no decides si se cambia el día, la hora o la dirección, solo describes lo que el cliente pidió${conEstado ? ' (y, en la ubicación, si la conversación muestra que el cambio quedó hecho o no)' : ''}.`,
   ];
 }
 
@@ -280,6 +343,48 @@ const REGLAS: Regla[] = [
 
 const PIDE_CAMBIO = REGLAS.find(([e]) => e === 'cambiar_ubicacion')![1];
 
+/** Una direccion escrita en el mensaje (via y numero): el cliente ya dio la nueva, no solo la pidio. */
+const DIRECCION_ESCRITA = /\b(av|avda|avenida|jr|jiron|calle|psje|pasaje|mz|manzana|urb|urbanizacion|prolongacion|carretera)\b\.?\s+\S.*\d/;
+/** El negocio (o el bot) dice que registro la ubicacion nueva. */
+const NEGOCIO_REGISTRO_NUEVA = /nueva (ubicacion|direccion) (se registro|quedo registrada|fue registrada|registrada)|registramos (su|tu) nueva (ubicacion|direccion)/;
+/** El negocio dice que ya no se puede cambiar: paso la hora limite o ya uso los cambios. */
+const NEGOCIO_NIEGA_CAMBIO = /(despues|pasada) (de )?la .{0,25}(comuniq|comunic|coordin)|ya (cambio|uso) .{0,40}(maximo|limite)|(ya )?no (es posible|se puede|podemos) cambiar|ya no se (le )?puede cambiar/;
+
+/**
+ * Como quedo el cambio de ubicacion al final de la conversacion, sin IA.
+ * null = no se hablo de cambiarla. La negativa del negocio manda sobre los
+ * pines que el cliente mande despues (no se registran); la confirmacion del
+ * negocio, sobre la peticion de antes. Sin ninguna de las dos, el cambio esta
+ * hecho si tras pedirlo mando otro pin o si escribio la direccion nueva.
+ */
+function estadoDelCambio(mensajes: Pick<Message, 'direction' | 'kind' | 'body'>[]): typeof UBICACION_CAMBIADA | typeof QUIERE_CAMBIAR_UBICACION | null {
+  let peticion = -1;
+  let conDireccion = false;
+  let confirmada = -1;
+  let negada = -1;
+  const pines: number[] = [];
+  mensajes.forEach((m, i) => {
+    const texto = m.kind === 'location' ? '' : llano(m.body ?? '');
+    if (m.direction === 'in') {
+      if (m.kind === 'location') pines.push(i);
+      else if (PIDE_CAMBIO.test(texto)) {
+        peticion = i;
+        conDireccion = DIRECCION_ESCRITA.test(texto);
+      }
+      return;
+    }
+    if (NEGOCIO_REGISTRO_NUEVA.test(texto)) confirmada = i;
+    if (NEGOCIO_NIEGA_CAMBIO.test(texto)) negada = i;
+  });
+  if (negada >= 0 && negada > confirmada) return QUIERE_CAMBIAR_UBICACION;
+  if (confirmada >= 0 && confirmada > peticion) return UBICACION_CAMBIADA;
+  if (peticion < 0) return null;
+  // Los pines de un cambio ya confirmado no cuentan para una peticion posterior.
+  const sinConfirmar = pines.filter((i) => i > confirmada);
+  if (conDireccion || pines.some((i) => i > peticion) || sinConfirmar.length >= 2) return UBICACION_CAMBIADA;
+  return QUIERE_CAMBIAR_UBICACION;
+}
+
 /** Mensajes que no piden nada y no deben tapar lo que se pidio antes. */
 const NO_PIDE_NADA = /^(gracias|muchas gracias|ok,? gracias|ya llego|ya recibi\w*|ya lo recibi\w*|bendiciones|buen dia|buenas|hola|chao)[.!, ]*$/;
 
@@ -289,24 +394,28 @@ const NO_PIDE_NADA = /^(gracias|muchas gracias|ok,? gracias|ya llego|ya recibi\w
  * es "otro" (no hay IA) o "no se sabe" (la IA fallo).
  *
  * Las reglas no saben si una peticion ya se resolvio: eso solo lo ve la IA.
+ * La excepcion es el cambio de ubicacion, que se mira entero (estadoDelCambio):
+ * devuelven `ubicacion_cambiada` o `quiere_cambiar_ubicacion`, y con un
+ * catalogo de antes `decidirClasificacion` lo pone como `cambiar_ubicacion`.
  */
 export function clasificarConReglas(mensajes: Pick<Message, 'direction' | 'kind' | 'body'>[]): Etiqueta | null {
   const delCliente = mensajes.filter((m) => m.direction === 'in');
   const ubicaciones = delCliente.filter((m) => m.kind === 'location').length;
-  const cambioDicho = delCliente.some((m) => m.kind !== 'location' && PIDE_CAMBIO.test(llano(m.body ?? '')));
+  const cambio = estadoDelCambio(mensajes);
   for (let i = delCliente.length - 1; i >= 0; i--) {
     const m = delCliente[i]!;
     if (m.kind === 'location') {
-      // Varias ubicaciones: si en algun momento dijo que la de antes ya no
-      // vale, es un cambio; si no lo dijo, no se sabe cual usar.
-      if (ubicaciones >= 2) return cambioDicho ? 'cambiar_ubicacion' : 'ubicaciones_multiples';
+      // Varias ubicaciones: si se hablo de cambiarla (el cliente o el negocio),
+      // manda como quedo el cambio; si nadie aclaro cual vale, no se sabe cual usar.
+      if (ubicaciones >= 2) return cambio ?? 'ubicaciones_multiples';
       continue;
     }
     const texto = llano(m.body ?? '').trim();
     if (!texto || NO_PIDE_NADA.test(texto)) continue;
-    for (const [etiqueta, patron] of REGLAS) if (patron.test(texto)) return etiqueta;
+    for (const [etiqueta, patron] of REGLAS) if (patron.test(texto)) return etiqueta === CAMBIAR_UBICACION ? (cambio ?? QUIERE_CAMBIAR_UBICACION) : etiqueta;
   }
-  return null;
+  // Nada del cliente, pero el negocio registro su ubicacion nueva o le dijo que ya no se puede.
+  return cambio;
 }
 
 // ------------------------------------------------- lo que se le pasa y lo que vuelve
@@ -400,9 +509,11 @@ export function decidirClasificacion(
   catalogo: Catalogo = CATALOGO_POR_DEFECTO,
 ): Clasificacion {
   if (ia && 'etiqueta' in ia) return { estado: 'clasificada', etiqueta: ia.etiqueta, origen: 'ia' };
-  // Las reglas conocen el catalogo de fabrica: lo que digan solo vale si el negocio tiene esa etiqueta.
-  const reglas = clasificarConReglas(mensajes);
-  if (reglas && catalogo.some((e) => e.codigo === reglas)) return { estado: 'clasificada', etiqueta: reglas, origen: 'reglas' };
+  // Las reglas conocen el catalogo de fabrica: lo que digan solo vale si el negocio
+  // tiene esa etiqueta (o, en un catalogo de antes, su general: cambiar_ubicacion).
+  const dicha = clasificarConReglas(mensajes);
+  const reglas = dicha ? enCatalogo(dicha, catalogo) : null;
+  if (reglas) return { estado: 'clasificada', etiqueta: reglas, origen: 'reglas' };
   if (!ia) return { estado: 'clasificada', etiqueta: CODIGO_OTRO, origen: 'reglas' };
   return { estado: 'sin_clasificar', motivo: ia.fallo };
 }

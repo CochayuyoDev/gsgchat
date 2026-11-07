@@ -153,8 +153,8 @@ function aviso(texto, bien) {
 
 var TONO = {
   reclamo: 'rojo', cancelar_entrega: 'rojo', pedido_no_reconocido: 'rojo',
-  reagendar_entrega: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
-  horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
+  reagendar_entrega: 'ambar', quiere_cambiar_ubicacion: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
+  ubicacion_cambiada: 'azul', horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
   confirmar_recepcion: 'verde', sin_novedad: 'verde', otro: 'gris'
 };
 var COLORES_AV = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#f06292', '#7986cb'];

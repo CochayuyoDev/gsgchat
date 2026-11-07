@@ -32,8 +32,8 @@ const PROPIO: Catalogo = [
 ];
 
 describe('el catalogo', () => {
-  it('el de fabrica son 17 etiquetas: las 16 pedidas, sin_novedad y otro', () => {
-    expect(CATALOGO_POR_DEFECTO).toHaveLength(17);
+  it('el de fabrica son 19 etiquetas: las 18 pedidas, sin_novedad y otro', () => {
+    expect(CATALOGO_POR_DEFECTO).toHaveLength(19);
     expect(CATALOGO_POR_DEFECTO.find((e) => e.codigo === 'sin_novedad')).toMatchObject({ nombre: 'Sin novedad' });
     expect(CATALOGO_POR_DEFECTO.map((e) => e.codigo)).toContain(CODIGO_OTRO);
     expect(validarCatalogo(CATALOGO_POR_DEFECTO).ok).toBe(true);
@@ -177,7 +177,7 @@ describe('Chats: el catalogo y el detalle del lote por API', () => {
       // El de fabrica, hasta guardar uno.
       const fabrica = (await pedir('GET', '/admin/chat/etiquetas/catalogo')).json();
       expect(fabrica).toMatchObject({ propio: false, codigoOtro: 'otro', tope: 40 });
-      expect(fabrica.items).toHaveLength(17);
+      expect(fabrica.items).toHaveLength(19);
       // Uno que no vale: 400 con el motivo, y no se guarda.
       const mal = await pedir('PUT', '/admin/chat/etiquetas/catalogo', { items: [{ codigo: 'reclamo', nombre: 'Queja', descripcion: 'reclama' }] });
       expect(mal.statusCode).toBe(400);
@@ -219,7 +219,7 @@ describe('Chats: el catalogo y el detalle del lote por API', () => {
 
       // Volver al de fabrica.
       expect((await pedir('DELETE', '/admin/chat/etiquetas/catalogo')).json()).toMatchObject({ ok: true, propio: false });
-      expect((await pedir('GET', '/admin/chat/etiquetas/catalogo')).json().items).toHaveLength(17);
+      expect((await pedir('GET', '/admin/chat/etiquetas/catalogo')).json().items).toHaveLength(19);
     } finally {
       await e.cerrar();
     }

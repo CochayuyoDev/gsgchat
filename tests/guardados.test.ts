@@ -162,7 +162,8 @@ describe('guardar una conversacion deja lo que hace falta para encontrarla', () 
   it('las reglas ponen una sola etiqueta del catalogo: sin respuesta es otro, y lo ultimo manda', () => {
     const m = (direction: 'in' | 'out', body: string): Message => ({ id: 1, contactId: 'c', direction, wamid: null, kind: 'text', body, payload: null, status: null, deliveryId: null, createdAt: new Date() }) as unknown as Message;
     expect(resumirConReglas([m('out', 'Hola')], 'Ana').etiquetas).toEqual(['otro']);
-    expect(resumirConReglas([m('in', 'mejor mañana a otra dirección')], 'Ana').etiquetas).toEqual(['cambiar_ubicacion']);
+    // Pide otra direccion pero no la da: el cambio queda pendiente.
+    expect(resumirConReglas([m('in', 'mejor mañana a otra dirección')], 'Ana').etiquetas).toEqual(['quiere_cambiar_ubicacion']);
     expect(resumirConReglas([m('in', 'tengo billete de 100, ¿tienen vuelto?')], 'Ana').etiquetas).toEqual(['problema_de_pago']);
     // Una venta no es una necesidad del reparto.
     expect(resumirConReglas([m('in', 'quiero comprar dos, cuánto cuesta')], 'Ana').etiquetas).toEqual(['otro']);

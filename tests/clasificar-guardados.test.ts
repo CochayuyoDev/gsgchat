@@ -19,6 +19,7 @@ import type { MensajeIA } from '../src/ia/proveedores.js';
 import {
   ETIQUETAS,
   ETIQUETAS_ANTERIORES,
+  CATALOGO_POR_DEFECTO,
   clasificarConReglas,
   decidirClasificacion,
   esEtiquetaConocida,
@@ -50,8 +51,8 @@ const msgs = (lineas: Linea[]): Message[] =>
 const reglas = (...lineas: Linea[]) => clasificarConReglas(msgs(lineas));
 
 describe('el catalogo', () => {
-  it('son las 16 etiquetas pedidas mas sin_novedad (el flujo feliz), sin entrega_recibida, y otro existe', () => {
-    expect(ETIQUETAS).toHaveLength(17);
+  it('son las 18 etiquetas pedidas mas sin_novedad (el flujo feliz), sin entrega_recibida, y otro existe', () => {
+    expect(ETIQUETAS).toHaveLength(19);
     expect(ETIQUETAS).toContain('sin_novedad');
     expect(ETIQUETAS).not.toContain('entrega_recibida' as never);
     expect(ETIQUETAS).toContain('otro');
@@ -87,15 +88,53 @@ describe('las reglas de respaldo', () => {
     expect(reglas(['in', 'mañana a las 3'])).toBe('reagendar_entrega');
   });
 
-  it('cambio de ubicacion explicito frente a varias ubicaciones sin aclarar', () => {
-    expect(reglas(['in', 'cambié de dirección, ahora es Av. Arequipa 1234'])).toBe('cambiar_ubicacion');
-    expect(reglas(['in', 'te mando mi nueva ubicación'], 'pin')).toBe('cambiar_ubicacion');
+  it('cambio de ubicacion hecho frente a varias ubicaciones sin aclarar', () => {
+    // Dio la nueva: escrita con su via y numero, o un pin despues de pedirlo.
+    expect(reglas(['in', 'cambié de dirección, ahora es Av. Arequipa 1234'])).toBe('ubicacion_cambiada');
+    expect(reglas(['in', 'te mando mi nueva ubicación'], 'pin')).toBe('ubicacion_cambiada');
     // Dos pines y nada mas: no se sabe cual vale.
     expect(reglas('pin', ['out', 'Gracias'], 'pin')).toBe('ubicaciones_multiples');
     // Dos pines y dijo que la de antes ya no vale (aunque lo dijera antes del segundo pin).
-    expect(reglas('pin', ['in', 'esa no, la ubicación correcta es esta'], 'pin')).toBe('cambiar_ubicacion');
-    // Un solo pin no pide nada.
+    expect(reglas('pin', ['in', 'esa no, la ubicación correcta es esta'], 'pin')).toBe('ubicacion_cambiada');
+    // Dos pines sin palabras, pero el negocio registro el nuevo: ya no hay duda.
+    expect(reglas('pin', ['out', 'Ubicación registrada correctamente.'], 'pin', ['out', '✅ Su nueva ubicación se registró correctamente.'])).toBe('ubicacion_cambiada');
+    // Un solo pin no pide nada, aunque el negocio le ofrezca cambiarla.
     expect(reglas('pin')).toBeNull();
+    expect(reglas('pin', ['out', 'Ubicación registrada correctamente. 📍 Si desea cambiar su ubicación, diga "Cambio de Ubicación".'], ['in', 'gracias'])).toBeNull();
+  });
+
+  it('cambio de ubicacion pendiente o que no se pudo hacer', () => {
+    // Lo pidio y no mando la nueva (la misma frase que arriba, sin el pin despues).
+    expect(reglas('pin', ['in', 'te mando mi nueva ubicación'])).toBe('quiere_cambiar_ubicacion');
+    expect(reglas('pin', ['in', 'cambio de ubicación'], ['out', 'Por favor, comparta su nueva ubicación 📍'])).toBe('quiere_cambiar_ubicacion');
+    expect(reglas(['in', 'mejor a otra dirección, luego le paso cuál'])).toBe('quiere_cambiar_ubicacion');
+    // Pasada la hora: el negocio dice que no, y un pin despues no lo cambia.
+    const tarde = 'Entiendo que deseas cambiar tu ubicación, pero al ser después de la 1:00 PM, por favor comunícate directamente con el motorizado para coordinar la entrega.';
+    expect(reglas('pin', ['in', 'quiero cambiar mi ubicación'], ['out', tarde])).toBe('quiere_cambiar_ubicacion');
+    expect(reglas('pin', ['in', 'quiero cambiar mi ubicación'], ['out', tarde], 'pin')).toBe('quiere_cambiar_ubicacion');
+    expect(reglas('pin', 'pin', ['out', tarde])).toBe('quiere_cambiar_ubicacion');
+    // Ya uso sus cambios del dia.
+    expect(reglas('pin', ['in', 'me equivoqué otra vez, la ubicación correcta es esta'], 'pin', ['out', 'Ya cambió su ubicación 2 veces, que es el máximo por día.'])).toBe('quiere_cambiar_ubicacion');
+    // Lo resolvio despues: manda el estado final.
+    expect(reglas('pin', ['in', 'cambio de ubicación'], ['out', 'Por favor, comparta su nueva ubicación 📍'], 'pin', ['out', '✅ Su nueva ubicación se registró correctamente.'])).toBe('ubicacion_cambiada');
+    // Lo cambio y despues pidio otro cambio que sigue pendiente.
+    expect(reglas('pin', 'pin', ['out', '✅ Su nueva ubicación se registró correctamente.'], ['in', 'cambio de ubicación'], ['out', 'Por favor, comparta su nueva ubicación 📍'])).toBe('quiere_cambiar_ubicacion');
+  });
+
+  it('con un catalogo de antes (solo cambiar_ubicacion) lo de las reglas se pone con la general', () => {
+    const deAntes = CATALOGO_POR_DEFECTO.filter((e) => e.codigo !== 'ubicacion_cambiada' && e.codigo !== 'quiere_cambiar_ubicacion');
+    const hecho = msgs(['pin', ['in', 'esa no, la ubicación correcta es esta'], 'pin']);
+    const pendiente = msgs(['pin', ['in', 'quiero cambiar mi ubicación']]);
+    expect(decidirClasificacion(hecho, null, deAntes)).toEqual({ estado: 'clasificada', etiqueta: 'cambiar_ubicacion', origen: 'reglas' });
+    expect(decidirClasificacion(pendiente, null, deAntes)).toEqual({ estado: 'clasificada', etiqueta: 'cambiar_ubicacion', origen: 'reglas' });
+    // Con el de fabrica, la precisa.
+    expect(decidirClasificacion(hecho, null)).toMatchObject({ etiqueta: 'ubicacion_cambiada' });
+    expect(decidirClasificacion(pendiente, null)).toMatchObject({ etiqueta: 'quiere_cambiar_ubicacion' });
+    // Varios pines sin aclarar siguen siendo ubicaciones_multiples en los dos.
+    expect(decidirClasificacion(msgs(['pin', 'pin']), null, deAntes)).toMatchObject({ etiqueta: 'ubicaciones_multiples' });
+    // Un catalogo propio sin ninguna de ubicacion: las reglas no ponen nada de ubicacion.
+    const sinUbicacion = [{ codigo: 'otro', nombre: 'Otro', descripcion: 'ninguna' }];
+    expect(decidirClasificacion(hecho, null, sinUbicacion)).toEqual({ estado: 'clasificada', etiqueta: 'otro', origen: 'reglas' });
   });
 
   it('el resto del catalogo', () => {

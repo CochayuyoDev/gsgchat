@@ -209,11 +209,57 @@ tiene acceso al envío de mensajes. En «Uso de la IA» el etiquetado se cuenta 
 
 El **catálogo** es del negocio: en Chats → ⋮ → «Catálogo de etiquetas…» (solo un administrador) se editan los
 códigos, los nombres y la descripción que lee la IA de cada una. `otro` está siempre. Mientras el negocio no
-guarde uno, vale el de fábrica (17 etiquetas, en `src/archive/clasificar.ts`; `sin_novedad` es el flujo feliz: el
+guarde uno, vale el de fábrica (19 etiquetas, en `src/archive/clasificar.ts`; `sin_novedad` es el flujo feliz: el
 cliente manda una ubicación, agradece, avisa que ya pagó o que ya recibió, y no pide nada más (decir que estará
 para recibir es `confirmar_recepcion`); `otro` queda para lo que no tiene que ver con la entrega). Tras cambiar
 el catálogo, ⋮ → «Volver a etiquetar todo» relee también los chats que no cambiaron. Las conversaciones guardadas
-(Guardados) usan el mismo catálogo.
+(Guardados) usan el mismo catálogo. Para el cambio de ubicación hay tres etiquetas: ver
+[Las etiquetas del cambio de ubicación](#las-etiquetas-del-cambio-de-ubicación-711).
+
+### Las etiquetas del cambio de ubicación (7/11)
+
+El catálogo de fábrica distingue **si el cambio quedó hecho o no**, mirando toda la conversación y cómo quedó al
+final (no una frase suelta):
+
+| Código | Nombre | Cuándo |
+|---|---|---|
+| `ubicacion_cambiada` | Cambió su ubicación | El cliente **ya dio** la ubicación que reemplaza a la anterior (otro pin, o una dirección escrita con su vía y número) y queda claro que esa es la que vale: lo dice él («me equivoqué, esta es la buena», «mejor llévenlo a mi trabajo en Av. …») o el negocio contesta que registró la nueva («✅ Su nueva ubicación se registró…», «ya actualizamos su dirección»). |
+| `quiere_cambiar_ubicacion` | Quiere cambiar su ubicación | Pidió cambiarla pero **no quedó hecho**: aún no manda la nueva («en la noche se la mando», «no sé mandar el pin»), o el negocio le dice que ya no se puede (pasada la hora límite, cambios del día agotados, que coordine con el motorizado). Si después manda otro pin igual, sigue siendo esta: no se registró. |
+| `cambiar_ubicacion` | Cambiar ubicación | La general de antes. Se conserva para lo ya etiquetado y para catálogos propios guardados antes. En chats nuevos con el catálogo de fábrica solo se usa si no hay forma de saber cómo quedó (la nueva va en una foto o un audio que la IA no puede ver). |
+| `ubicaciones_multiples` | Ubicaciones múltiples | Sin cambios: dos o más pines sin decir cuál vale. Deja de serlo si el cliente dice que el último reemplaza al anterior o el negocio registra el nuevo. |
+
+Lo que **no** es un cambio: una referencia escrita que completa el pin (piso, color del edificio, «al costado de la
+bodega»), reenviar la misma ubicación porque se la pidieron, y la invitación del bot («📍 Si desea cambiar su
+ubicación, diga "Cambio de Ubicación"»), que va en cada «Ubicación registrada» y no es una petición del cliente.
+Si pide el cambio y luego manda la nueva, es `ubicacion_cambiada`; si la cambió y luego pide otro cambio sin mandar
+la nueva, `quiere_cambiar_ubicacion` (manda la necesidad pendiente más reciente). Si después pregunta otra cosa (la
+hora, el pago), va la etiqueta de eso.
+
+Para el modelo, la regla general «mira solo lo que dice el cliente» tiene aquí su excepción: lo que contesta el
+negocio (registró la nueva / ya no se puede) es lo que dice si el cambio se hizo. Las instrucciones traen ejemplos en
+parejas que se parecen y cambian de etiqueta (el mismo «Cambio de Ubicación» hecho o pendiente; dos pines con y sin
+confirmación del negocio).
+
+**Compatibilidad.**
+
+- **Lo ya etiquetado no se toca**: ninguna nota ni conversación guardada con `cambiar_ubicacion` se reasigna. Se
+  sigue viendo con su nombre, se filtra y se cuenta como siempre (en Chats, el Embudo y Guardados). Los lotes solo
+  leen los chats de hoy: las notas de días anteriores se quedan como están, y una de hoy con `cambiar_ubicacion` solo
+  vuelve a la IA si el chat sigue (mensajes nuevos) o si una persona pulsa «Volver a etiquetar todo».
+- **Catálogos propios**: los guardados antes no se modifican y no reciben las etiquetas nuevas solas. Si solo tienen
+  `cambiar_ubicacion`, la IA recibe las pistas de siempre, y las reglas, el bot y «Probar la IA» ponen o piden la
+  general donde la de fábrica pondría una de las nuevas. Para usarlas, se añaden en el catálogo (o «Volver al de
+  fábrica») y conviene «Volver a etiquetar todo».
+- **Etiquetas a mano**: se pueden poner las tres; la IA y el bot no pisan una puesta a mano.
+- **Sin IA** (reglas de respaldo de Guardados): también distinguen hecho / pendiente / negado con los textos del bot
+  y una dirección escrita (vía y número); con un catálogo de antes dan `cambiar_ubicacion`.
+
+**La nota que pone el bot** (origen `reglas`, que GSG lee en el historial): al registrarse la nueva ubicación,
+`ubicacion_cambiada` (con un catálogo propio que solo tiene la general, `cambiar_ubicacion`, como antes). Si después
+pide otro cambio o no se le acepta (hora límite, cambios agotados, pin no registrado), el bot corrige **su propia**
+nota a `quiere_cambiar_ubicacion`, porque la IA no pisa las notas del bot. Si no había nota suya, no pone ninguna: la
+etiqueta la pone la IA al leer el chat. Nunca pisa una puesta a mano. Cada cambio queda en el registro
+(`etiqueta_bot`).
 
 Cada pulsación es un lote con su estado (`en_curso`, `completado`, `completado_con_errores` si alguno quedó sin
 clasificar, `fallido`) y sus cifras, y lo que pasa en él queda en un registro (inicio y fin del lote, fallos de la
@@ -247,15 +293,24 @@ clasificar») filtra toda la bandeja.
 Chats → ⋮ → «Probar la IA…» (también desde el catálogo). Mide, antes de fiarse de ella, si la IA del negocio pone
 bien las etiquetas, con su catálogo y el mismo clasificador que el botón. No toca ningún chat ni cambia ninguna nota.
 
-- **Prueba completa**: 50 conversaciones típicas del reparto con la etiqueta que les toca (`src/archive/evaluacion.ts`):
+- **Prueba completa**: 66 conversaciones típicas del reparto con la etiqueta que les toca (`src/archive/evaluacion.ts`):
   todas las etiquetas, chats donde todo va bien que suenan a otra cosa («ya pagué por Yape»), temas ajenos a la
   entrega (los únicos que van a `otro`), peticiones resueltas seguidas de otra pendiente y mensajes que intentan
   manipular a la IA. El informe dice el % de aciertos, cuántas veces puso `otro` de más o de menos, los aciertos
-  por etiqueta y cada fallo con su conversación. Los casos cuya etiqueta no está en el catálogo se saltan.
+  por etiqueta y cada fallo con su conversación. Los casos cuya etiqueta no está en el catálogo se saltan, salvo los
+  de `ubicacion_cambiada` y `quiere_cambiar_ubicacion`, que con un catálogo de antes se piden como `cambiar_ubicacion`.
+- El cambio de ubicación (7/11) tiene 7 casos de cambio hecho (pin, dirección escrita, confirmado por el bot o por
+  una persona, resuelto tras un «un momento»), 6 de pendiente o negado (aún no la manda, se mudó y no sabe mandar
+  el pin, segundo cambio pedido, hora límite, cambios agotados con pin, pin tardío), 1 de la general, 3 de
+  ubicaciones múltiples y los que no son cambio (invitación del bot, referencia del edificio, preguntar la hora tras
+  cambiarla). Las mismas frases («Cambio de Ubicación», «me equivoqué») aparecen en casos hechos y pendientes, para
+  que no se acierte por una palabra.
 - **Probar una conversación**: se escribe o pega una conversación y dice qué etiqueta le pondría.
 
-Con ese banco se afinaron las instrucciones del clasificador (28/10): con un modelo capaz (Claude Sonnet) acierta
-50 de 50 y usa `otro` solo cuando corresponde; con uno pequeño (Claude Haiku) ronda el 93 %. Si un negocio ve
+Con ese banco se afinaron las instrucciones del clasificador (28/10): con un modelo capaz (Claude Sonnet) acertaba
+50 de 50 y usaba `otro` solo cuando corresponde; con uno pequeño (Claude Haiku) rondaba el 93 %. Los casos del cambio
+de ubicación (7/11) aún no se han medido con un modelo real: conviene pasar «Probar la IA» y mirar los aciertos
+de esas tres etiquetas. Si un negocio ve
 menos del 90 %, lo primero es un modelo más capaz en Asistente IA y luego mejorar la descripción de las etiquetas
 que fallan.
 
@@ -326,7 +381,9 @@ GSG»:
 
 En el sistema: la marca «Cambió su ubicación (hora)» en Hoy y Números del día; en el detalle del pedido,
 **todas las ubicaciones guardadas** (la primera y cada cambio, con su hora y su mapa, y la que vale marcada); y la
-nota del chat `cambiar_ubicacion` (origen `reglas`), que GSG ve en el historial. Los textos se editan en Pedidos
+nota del chat `ubicacion_cambiada` (origen `reglas`; `quiere_cambiar_ubicacion` si luego pide otro o no se le
+acepta; `cambiar_ubicacion` con un catálogo propio de antes), que GSG ve en el historial (ver
+[Las etiquetas del cambio de ubicación](#las-etiquetas-del-cambio-de-ubicación-711)). Los textos se editan en Pedidos
 GSG → Horarios de entrega y textos de entrega (`invitarCambioUbicacion`, `invitarOtroCambioUbicacion`,
 `cambioUbicacionAntes`, `ubicacionCambiada`, `cambiosUbicacionAgotados`).
 

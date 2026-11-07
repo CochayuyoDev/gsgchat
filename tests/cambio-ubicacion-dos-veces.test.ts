@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { CATALOGO_POR_DEFECTO } from '../src/archive/clasificar.js';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG } from './escenario-entregas.js';
 import { setFakeClock } from './fakes.js';
 
@@ -8,7 +9,10 @@ import { setFakeClock } from './fakes.js';
  * cambiarla; al decir «cambiar ubicación» el bot le pide la nueva (y mientras
  * se queda la que tenía); la nueva se registra y se le dice cómo volver a
  * cambiarla. Como mucho 2 cambios al día: al tercero se le dice que no. Se ven
- * todas las ubicaciones guardadas y el chat queda con la nota «cambiar_ubicacion».
+ * todas las ubicaciones guardadas y la nota del chat sigue como va el cambio:
+ * «ubicacion_cambiada» al registrarse la nueva, «quiere_cambiar_ubicacion»
+ * mientras pide otra o cuando ya no se le acepta. Con un catalogo de antes
+ * (solo «cambiar_ubicacion»), la de siempre.
  */
 const telefono = '987601377';
 const phone = '51' + telefono;
@@ -22,6 +26,9 @@ const MANANA = new Date('2026-10-28T15:00:00Z');
 // 4:00 PM en Lima (pasada la hora límite).
 const TARDE = new Date('2026-10-28T21:00:00Z');
 afterEach(() => setFakeClock(null));
+
+/** La nota del chat que GSG lee en el historial. */
+const notaDe = async (e: Awaited<ReturnType<typeof crearEscenarioEntregas>>) => (await e.repos.chatEtiquetas!.ultimas([phone])).get(phone);
 
 /** El cuerpo de cada mensaje que salió (texto o el de la petición de ubicación). */
 const cuerpos = (ms: Array<Record<string, unknown>>): string[] => ms.map((m) => String(m.text ?? m.body ?? (m.interactive as { body?: string } | undefined)?.body ?? ''));
@@ -49,6 +56,8 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       let ent = (await e.entrega('GSG-CAMBIO-2'))!;
       expect(ent).toMatchObject({ ubicacionEstado: 'recibida', lat: A.lat, lng: A.lng });
       expect(ent.estado).not.toBe('incidencia');
+      // Pedirlo la primera vez no pone nota: la etiqueta la pone la IA al leer el chat.
+      expect(await notaDe(e)).toBeUndefined();
 
       // 3. La nueva: se registra como cambio 1 y se le dice cómo volver a cambiarla.
       e.avanzar(5);
@@ -58,11 +67,15 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       expect(ultimo).toMatch(/Si quiere volver a cambiar su ubicación, diga "Cambio de Ubicación"\. Le queda 1 cambio más/);
       ent = (await e.entrega('GSG-CAMBIO-2'))!;
       expect(ent).toMatchObject({ ubicacionEstado: 'recibida', lat: B.lat, lng: B.lng, ubicacionCambios: 1 });
+      // La nota del chat: cambió su ubicación, puesta por el bot.
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'ubicacion_cambiada', origen: 'reglas' });
 
       // 4. Otra vez: segundo y último cambio; ya no se le ofrece otro.
       e.avanzar(5);
       await e.contesta(telefono, { texto: 'cambiar ubicacion' });
       expect(cuerpos(e.mensajesA(telefono)).at(-1)).toBe('Por favor, comparta su nueva ubicación 📍');
+      // Mientras no manda la nueva, «cambió» ya no es cierto: quiere cambiarla.
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'quiere_cambiar_ubicacion', origen: 'reglas' });
       e.avanzar(5);
       await e.contesta(telefono, { pin: C });
       ultimo = cuerpos(e.mensajesA(telefono)).at(-1)!;
@@ -71,6 +84,7 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       ent = (await e.entrega('GSG-CAMBIO-2'))!;
       expect(ent).toMatchObject({ lat: C.lat, lng: C.lng, ubicacionCambios: 2 });
       expect(ent.cambioUbicacion).toMatch(/cambió su ubicación 2 veces/);
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'ubicacion_cambiada', origen: 'reglas' });
 
       // 5. Un tercero: no. Con el último cambio registrado el bot ya se calla
       // (regla del dueño, 29/10): ni a «cambiar ubicación» ni a otro pin. Lo ve soporte por la nota.
@@ -93,9 +107,11 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       ]);
       expect(detalle.ubicaciones.slice(1).every((u) => u.cambio)).toBe(true);
 
-      // La nota del chat, que GSG lee en el historial: «cambiar_ubicacion», puesta por el bot.
-      const nota = (await e.repos.chatEtiquetas!.ultimas([phone])).get(phone);
-      expect(nota).toMatchObject({ etiqueta: 'cambiar_ubicacion', origen: 'reglas' });
+      // La nota del chat, que GSG lee en el historial: el tercer cambio no se aceptó,
+      // así que queda «quiere_cambiar_ubicacion», puesta por el bot.
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'quiere_cambiar_ubicacion', origen: 'reglas' });
+      const registro = await e.repos.chatEtiquetas!.eventos({ phone, limite: 20 });
+      expect(registro.filter((r) => r.codigo === 'etiqueta_bot').map((r) => r.detalle)).toEqual(expect.arrayContaining([expect.stringMatching(/ubicacion_cambiada/), expect.stringMatching(/quiere_cambiar_ubicacion/)]));
 
       // A GSG le llegaron las tres ubicaciones; las dos últimas como cambio.
       await e.despacharAGsg();
@@ -118,6 +134,49 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       const ent = (await e.entrega('GSG-CAMBIO-2'))!;
       expect(ent).toMatchObject({ ubicacionEstado: 'recibida', lat: B.lat, ubicacionCambios: 1 });
       expect(cuerpos(e.mensajesA(telefono)).at(-1)).toMatch(/Su nueva ubicación se registró correctamente[\s\S]*Le queda 1 cambio más/);
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'ubicacion_cambiada', origen: 'reglas' });
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('con un catálogo de antes (solo «cambiar_ubicacion») el bot pone la general y no la cambia al negarse', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: MANANA });
+    try {
+      const deAntes = CATALOGO_POR_DEFECTO.filter((x) => x.codigo !== 'ubicacion_cambiada' && x.codigo !== 'quiere_cambiar_ubicacion');
+      await e.repos.chatEtiquetas!.guardarCatalogo(deAntes);
+      await e.api.post('/api/v1/entregas', pedido);
+      await e.trabajar();
+      await e.contesta(telefono, { pin: A });
+      e.avanzar(3);
+      await e.contesta(telefono, { pin: B });
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'cambiar_ubicacion', origen: 'reglas' });
+      // Otro pedido de cambio: con la general no hay nada que corregir.
+      e.avanzar(3);
+      await e.contesta(telefono, { texto: 'cambiar ubicación' });
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'cambiar_ubicacion', origen: 'reglas' });
+      // El catálogo guardado del negocio no se tocó.
+      expect((await e.repos.chatEtiquetas!.catalogo())!.map((x) => x.codigo)).toEqual(deAntes.map((x) => x.codigo));
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('una etiqueta puesta a mano no la cambia el bot, ni al cambiar ni al negarse', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: MANANA });
+    try {
+      await e.api.post('/api/v1/entregas', pedido);
+      await e.trabajar();
+      await e.contesta(telefono, { pin: A });
+      const dia = '2026-10-28';
+      await e.repos.chatEtiquetas!.guardar({ phone, dia, etiqueta: 'reclamo', origen: 'manual', huella: 'manual-1', mensajes: 1, motivo: null, loteId: null });
+      e.avanzar(3);
+      await e.contesta(telefono, { pin: B });
+      e.avanzar(3);
+      await e.contesta(telefono, { texto: 'cambiar ubicación' });
+      expect(await notaDe(e)).toMatchObject({ etiqueta: 'reclamo', origen: 'manual' });
+      expect((await e.repos.chatEtiquetas!.delDia(dia, [phone]))[0]).toMatchObject({ etiqueta: 'reclamo', origen: 'manual' });
+      expect((await e.repos.chatEtiquetas!.eventos({ phone, limite: 20 })).some((r) => r.codigo === 'etiqueta_bot')).toBe(false);
     } finally {
       await e.cerrar();
     }
@@ -132,6 +191,8 @@ describe('cambiar la ubicación: hasta 2 veces, lo atiende el bot', () => {
       expect(cuerpos(e.mensajesA(telefono)).at(-1)).not.toMatch(/cambiar ubicación/);
       await e.contesta(telefono, { texto: 'cambiar ubicación' });
       expect(cuerpos(e.mensajesA(telefono)).at(-1)).toMatch(/después de la 3:00/);
+      // Sin una nota del bot que corregir, no pone ninguna: la etiqueta («quiere cambiar») la pone la IA.
+      expect(await notaDe(e)).toBeUndefined();
     } finally {
       await e.cerrar();
     }
