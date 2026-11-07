@@ -153,7 +153,17 @@ export interface DatosEnvio {
    */
   motorizadoNombre?: string | null;
   telefonoMotorizado?: string | null;
+  /**
+   * `first_message` del contrato: el texto exacto del PRIMER mensaje que se
+   * le manda al cliente por este pedido, redactado por GSG. Si viene,
+   * reemplaza al texto editable de GSGchat solo en ese primer mensaje; los
+   * recordatorios y el resto del flujo siguen igual.
+   */
+  firstMessage?: string | null;
 }
+
+/** Lo maximo que admite WhatsApp en el cuerpo de un mensaje con botones. */
+export const MAX_FIRST_MESSAGE = 1024;
 
 const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['costServ', 'referenciaDireccion', 'fecRegistro', 'fecRuta', 'observacionCliente', 'detalleProducto', 'telefono2', 'tamano', 'cantBultos', 'clientePagaDelivery', 'sede', 'tipoRuta', 'nroDocumento', 'agenciaNombre', 'agenciaDestino', 'pagoEnDestino', 'producto', 'empresaCodigo', 'empresaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'motorizadoNombre', 'telefonoMotorizado'];
 
@@ -167,6 +177,9 @@ export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio 
     const texto = String(v).trim().slice(0, 200);
     if (texto) limpio[clave] = texto;
   }
+  // El primer mensaje es un texto entero (con saltos de linea): no se recorta a 200.
+  const primero = (d as Record<string, unknown>).firstMessage;
+  if (typeof primero === 'string' && primero.trim()) limpio.firstMessage = primero.trim().slice(0, MAX_FIRST_MESSAGE);
   return Object.keys(limpio).length ? limpio : null;
 }
 
