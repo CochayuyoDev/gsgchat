@@ -45,6 +45,7 @@ import type { WhatsAppClient } from '../whatsapp/client.js';
 import { crearSesionLocal, type SesionLocal } from '../whatsapp/local/session.js';
 import { crearServicioLineas } from '../whatsapp/lineas.js';
 import { crearRegistroClientes } from '../whatsapp/registro.js';
+import { algunaLineaConectada, algunaLineaConfigurada } from '../whatsapp/estado-conexion.js';
 import { crearRepartoDeLineas } from '../whatsapp/reparto-lineas.js';
 import { keyFromBase64 } from '../settings/crypto.js';
 
@@ -271,11 +272,13 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
        * caida o llego a su maximo del dia.
        */
       const alternativas = async (excluir: string | null) => {
+        // La principal de uso («Hacer principal») va primero: es la que la tienda eligio como respaldo.
+        const preferida = await lineas.preferida?.().catch(() => null);
         const vivas = (await registro.estados())
           .filter((e) => e.conectada && e.linea.habilitada && e.linea.id !== excluir)
-          .sort((a, b) => a.linea.posicion - b.linea.posicion || (a.linea.id < b.linea.id ? -1 : 1));
-        const lineas = await Promise.all(vivas.map((e) => resolverLinea(e.linea.id)));
-        return lineas.filter((l): l is NonNullable<typeof l> => l !== null);
+          .sort((a, b) => Number(b.linea.id === preferida) - Number(a.linea.id === preferida) || a.linea.posicion - b.linea.posicion || (a.linea.id < b.linea.id ? -1 : 1));
+        const resueltas = await Promise.all(vivas.map((e) => resolverLinea(e.linea.id)));
+        return resueltas.filter((l): l is NonNullable<typeof l> => l !== null);
       };
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
@@ -406,7 +409,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
       });
       entrenamiento.conectarIA(iaParaEntrenar(ia));
       parteDeSalud.dar = async () => ({
-        whatsapp: !settings.isConfigured() ? 'sin_conectar' : (wa.conectado?.() ?? true) ? 'conectado' : 'caido',
+        // Con varias lineas: «conectado» si queda alguna viva (la principal caida no deja a la tienda sin WhatsApp).
+        whatsapp: !algunaLineaConfigurada({ settings, wa, registro }) ? 'sin_conectar' : algunaLineaConectada({ settings, wa, registro }) ? 'conectado' : 'caido',
         mensajesHoy: (await salud.snapshot()).ritmo.hoy,
         fallosIA: ia.uso().hoy.fallos,
         entregasHoy: (await entregas.resumen()).cifras.total,
@@ -423,7 +427,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         nombreNegocio: () => ajustes.nombreNegocio(),
         entregas,
         ia: () => (ia.estado().tieneToken ? { completar: (m, op) => ia.completar(m, op) } : null),
-        whatsappConectado: () => settings.isConfigured() && (wa.conectado?.() ?? true),
+        whatsappConectado: () => algunaLineaConectada({ settings, wa, registro }),
         zonaHoraria: () => ajustes.zonaHoraria(),
         timezone: config.timezone,
         publicBaseUrl: config.PUBLIC_BASE_URL,

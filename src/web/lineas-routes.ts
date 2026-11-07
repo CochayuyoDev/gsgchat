@@ -51,17 +51,24 @@ const cambiarSchema = z.object({
 export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRoutesDeps): Promise<void> {
   const { lineas, registro } = deps;
 
+  /** La principal de uso (ver `ServicioLineas.preferida`); sin el metodo, la de /setup. */
+  const preferida = async (): Promise<string | null> => (lineas.preferida ? lineas.preferida().catch(() => null) : null);
+
   /** Una linea tal como la ve la pantalla: sin credenciales, con su estado vivo y, si toca, el QR. */
-  async function vista(linea: Linea) {
+  async function vista(linea: Linea, preferidaId?: string | null) {
     const t = await registro.transporte(linea.id);
     const vivo = t?.sesion && linea.proveedor === 'local' ? t.sesion.getLocalState() : null;
+    const idPrincipal = preferidaId === undefined ? await preferida() : preferidaId;
     return {
       id: linea.id,
       etiqueta: linea.etiqueta,
       numero: linea.telefono || vivo?.phone || '',
       proveedor: linea.proveedor,
       estado: linea.estado,
-      principal: linea.principal,
+      // `principal` = la de uso (la que eligio la tienda). `deSetup` = la conexion
+      // de siempre: se conecta y desvincula desde su pantalla y no se puede quitar.
+      principal: idPrincipal ? linea.id === idPrincipal : linea.principal,
+      deSetup: linea.principal,
       habilitada: linea.habilitada,
       limiteDiario: linea.limiteDiario,
       conectada: await registro.conectada(linea.id),
@@ -80,7 +87,24 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
 
   app.get('/admin/lineas', async () => {
     const todas = await lineas.listar();
-    return { max: MAX_LINEAS, lineas: await Promise.all(todas.map(vista)) };
+    const idPrincipal = await preferida();
+    return { max: MAX_LINEAS, puedeElegirPrincipal: Boolean(lineas.fijarPreferida), lineas: await Promise.all(todas.map((l) => vista(l, idPrincipal))) };
+  });
+
+  /**
+   * «Hacer principal»: cualquier linea habilitada pasa a ser la principal de uso
+   * (la que se rotula como principal y la primera a la que pasa un envio cuando
+   * la linea del cliente esta caida). Cada cliente sigue con su linea.
+   */
+  app.post<{ Params: { id: string } }>('/admin/lineas/:id/principal', async (request, reply) => {
+    if (request.usuario && request.usuario.rol !== 'admin') return reply.code(403).send({ error: 'Solo un administrador elige la línea principal.' });
+    if (!lineas.fijarPreferida) return reply.code(404).send({ error: 'Elegir la línea principal no está disponible aquí.' });
+    try {
+      const linea = await lineas.fijarPreferida(request.params.id);
+      return { ok: true, linea: await vista((await lineas.obtener(linea.id))!) };
+    } catch (error) {
+      return responderError(error, reply);
+    }
   });
 
   app.post('/admin/lineas', async (request, reply) => {

@@ -111,7 +111,20 @@ export interface ServicioLineas {
   /** Quita una linea que no sea la principal. Sus mensajes viejos conservan su etiqueta. */
   eliminar(id: string): Promise<void>;
   credenciales(id: string): Promise<CredencialesLinea>;
+  /**
+   * La linea que la tienda eligio como principal («Hacer principal»). Es la
+   * principal DE USO: la que se rotula y se prefiere cuando la del cliente esta
+   * caida. La conexion de /setup (`principal: true`, id fijo) no se mueve: su
+   * sesion, sus credenciales y sus mensajes viejos siguen donde estaban.
+   * Sin eleccion (o si la elegida ya no existe o esta deshabilitada), la de /setup.
+   */
+  preferida?(): Promise<string>;
+  /** Fija la principal de uso. Solo una linea que exista y este habilitada. */
+  fijarPreferida?(id: string): Promise<Linea>;
 }
+
+/** No empieza por `whatsapp.`: esas claves las lee el servicio de ajustes como credenciales. */
+export const CLAVE_LINEA_PREFERIDA = 'lineas.principal_de_uso';
 
 export function crearServicioLineas(pool: Pool, claveCifrado: Buffer, base: string): ServicioLineas {
   /**
@@ -140,8 +153,47 @@ export function crearServicioLineas(pool: Pool, claveCifrado: Buffer, base: stri
     return linea;
   }
 
+  // En memoria: se consulta en cada envio que necesita alternativa. Un proceso
+  // por tienda, y quien la cambia es este mismo servicio.
+  let preferidaGuardada: string | null | undefined;
+  async function leerPreferida(): Promise<string | null> {
+    if (preferidaGuardada !== undefined) return preferidaGuardada;
+    try {
+      const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [CLAVE_LINEA_PREFERIDA]);
+      preferidaGuardada = rows[0]?.value?.trim() || null;
+    } catch {
+      // Sin tabla de ajustes (bases de prueba): la de siempre, sin cachear el fallo.
+      return null;
+    }
+    return preferidaGuardada;
+  }
+
   return {
     obtener,
+
+    async preferida() {
+      const id = await leerPreferida();
+      if (!id || id === ID_LINEA_PRINCIPAL) return ID_LINEA_PRINCIPAL;
+      const linea = await obtener(id);
+      return linea && linea.habilitada ? linea.id : ID_LINEA_PRINCIPAL;
+    },
+
+    async fijarPreferida(id) {
+      const linea = await exigir(id);
+      if (!linea.principal && !linea.habilitada) throw new LineasError('principal', 'Una línea deshabilitada no puede ser la principal: habilítala primero.');
+      if (linea.principal) {
+        await pool.query('delete from settings where `key` = $1', [CLAVE_LINEA_PREFERIDA]);
+        preferidaGuardada = null;
+      } else {
+        await pool.query(
+          `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
+           on duplicate key update value = values(value), updated_at = now(3)`,
+          [CLAVE_LINEA_PREFERIDA, linea.id],
+        );
+        preferidaGuardada = linea.id;
+      }
+      return linea;
+    },
 
     async listar() {
       await asegurarPrincipal();

@@ -378,7 +378,12 @@ async function loadChats(keepScroll, anexar) {
       conversations = Array.from(porId.values());
       offsetChats = offset + data.items.length;
     } else { conversations = data.items; offsetChats = data.items.length; }
-    if (data.lineas) LINEAS = data.lineas;
+    if (data.lineas) {
+      LINEAS = data.lineas;
+      /* El aviso de conexion pudo pintarse antes de saber las lineas: se corrige ya. */
+      var avisoCon = document.getElementById('aviso-conexion');
+      if (avisoCon && !avisoCon.classList.contains('hidden')) revisarConexion();
+    }
     hasMoreChats = Boolean(data.hasMore);
     if (window.actualizarNoLeidos) window.actualizarNoLeidos(data.unread || 0);
     var badge = document.getElementById('unread');
@@ -2038,6 +2043,16 @@ async function revisarConexion() {
   try {
     var estado = await api('/admin/' + PROVEEDOR + '/status');
     if (estado.connected) { caja.classList.add('hidden'); return; }
+    /* La que se cayo es la conexion de /setup. Si otra linea sigue viva, los chats
+       salen por la linea de cada cliente (o por otra viva): no es «no va a salir». */
+    var vivas = LINEAS.filter(function (l) { return l.estado === 'conectado'; });
+    if (vivas.length) {
+      caja.innerHTML = 'La línea de la conexión principal está caída' + (estado.detail ? ' (' + esc(estado.detail) + ')' : '') +
+        '. Siguen activas: ' + vivas.map(function (l) { return esc(l.etiqueta || l.numero || 'línea'); }).join(', ') +
+        '. Cada chat sale por el número de su cliente y, si el suyo está caído, por otro activo. <a href="/setup">Ver conexión</a>';
+      caja.classList.remove('hidden');
+      return;
+    }
     caja.innerHTML = 'WhatsApp no está conectado' + (estado.detail ? ' (' + esc(estado.detail) + ')' : '') +
       ': lo que escribas aquí no va a salir. <a href="/setup">Conectar ahora</a>';
     caja.classList.remove('hidden');

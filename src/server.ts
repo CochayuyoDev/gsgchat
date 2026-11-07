@@ -15,6 +15,7 @@ import { registrarLimpiezaChat } from './whatsapp/limpieza-chat.js';
 import type { Repos } from './db/repos.js';
 import { WhatsAppApiError, type WhatsAppClient } from './whatsapp/client.js';
 import { NotConfiguredError } from './whatsapp/dynamic.js';
+import { algunaLineaConectada, algunaLineaConfigurada } from './whatsapp/estado-conexion.js';
 import type { Sender } from './outbound/sender.js';
 import type { OutboundQueue } from './outbound/queue.js';
 import { registerWebhookRoutes } from './whatsapp/webhook.js';
@@ -316,7 +317,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // `connected` distingue "tiene proveedor" de "el telefono esta vinculado":
   // con el cliente local, configurado no significa conectado hasta escanear el QR.
-  app.get('/health', async () => ({ ok: true, version: VERSION, configured: settings.isConfigured(), connected: settings.isConfigured() && (wa.conectado?.() ?? true) }));
+  // Con varias lineas, `connected` = queda alguna viva: la principal caida no es «sin WhatsApp».
+  const fuentesConexion = { settings, wa, registro: deps.registroClientes ?? null };
+  app.get('/health', async () => ({ ok: true, version: VERSION, configured: algunaLineaConfigurada(fuentesConexion), connected: algunaLineaConectada(fuentesConexion) }));
 
   // El orden importa: registerAuth instala el hook que resuelve quien pide
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las
@@ -367,6 +370,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   await registerAdminRoutes(app, {
     lineas: deps.lineas,
+    registroClientes: deps.registroClientes,
     numeroDeSalud: deps.numeroDeSalud,
     bus: deps.bus,
     repos,
@@ -394,10 +398,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
-  await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, fetchImpl: deps.webhooks?.fetchImpl });
+  await registerApiV1(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
-  await registerApiConversacionesGsg(app, { repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
+  await registerApiConversacionesGsg(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
   // Los archivos de ese historial (`archivo.url`): enlace firmado, sin clave. Ver src/api/v1/archivos-gsg.ts.
   await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa });
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });

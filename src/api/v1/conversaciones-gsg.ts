@@ -44,6 +44,13 @@ export interface ApiConversacionesGsgDeps {
   mediaDir?: string;
   /** Con que se bajan los ficheros de `media.url`. Para pruebas. */
   fetchImpl?: typeof fetch;
+  /**
+   * Las lineas de WhatsApp: el historial dice por cual va ese cliente y si
+   * esta viva. GSG escribe por esa misma linea (la elige el sender), no por la
+   * principal; con la principal caida el chat sigue funcionando.
+   */
+  lineas?: import('../../whatsapp/lineas.js').ServicioLineas;
+  registroClientes?: Pick<import('../../whatsapp/registro.js').RegistroClientes, 'conectada'>;
 }
 
 /** Un token del chat embebido solo abre la conversacion para la que se emitio. */
@@ -154,6 +161,25 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     }
   };
 
+  /**
+   * La linea de este chat: la del cliente (por la que salio su pedido). Es por
+   * donde va a salir lo que GSG escriba; si esta caida, el sender lo manda por
+   * otra viva sin cambiarle la linea al cliente. null = aun no tiene linea.
+   */
+  const lineaDe = async (contactId: string) => {
+    if (!deps.lineas) return null;
+    try {
+      const id = await repos.messages.lineaDeLaConversacion(contactId);
+      const linea = id ? await deps.lineas.obtener(id) : await deps.lineas.principal();
+      if (!linea) return null;
+      const conectada = deps.registroClientes ? await deps.registroClientes.conectada(linea.id) : null;
+      return { id: linea.id, etiqueta: linea.etiqueta, numero: linea.telefono || null, conectada, asignada: Boolean(id) };
+    } catch {
+      // Es un dato de ayuda: si falla, el historial sale igual.
+      return null;
+    }
+  };
+
   // --- GET: el historial -----------------------------------------------------
 
   const leerChat = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -172,6 +198,7 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
       tracking,
       contacto: { id: contact.id, telefono: contact.phone, nombre: contact.name },
       nota: await notaDe(contact.phone),
+      linea: await lineaDe(contact.id),
       mensajes: messages.map(mensajeDeChat),
       hayMas: messages.length === q.limite,
     };
@@ -248,7 +275,9 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
           .catch(() => undefined);
       }
       const r = respuestaDeEnvio(outcome);
-      return reply.code(r.codigo).send(outcome.ok ? { ...r.cuerpo, duplicado: false } : r.cuerpo);
+      // Por que linea salio (o lo intento): la del cliente o, si estaba caida, otra viva.
+      const lineaId = outcome.ok ? outcome.whatsappNumberId ?? null : (outcome as { whatsappNumberId?: string | null }).whatsappNumberId ?? null;
+      return reply.code(r.codigo).send(outcome.ok ? { ...r.cuerpo, duplicado: false, lineaId } : { ...r.cuerpo, lineaId });
     } finally {
       enCurso.delete(b.idExterno);
     }

@@ -21,6 +21,7 @@ import type { Sender } from '../outbound/sender.js';
 import { extractLocation } from '../geo/extract.js';
 import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
+import { algunaLineaConectada, algunaLineaConfigurada, estadoConexion, nombrarLineas } from '../whatsapp/estado-conexion.js';
 import { CATALOG, type CatalogTemplate } from '../templates/catalog.js';
 import { hasErrors, lintTemplate } from '../templates/lint.js';
 import { countVariables } from '../templates/render.js';
@@ -71,6 +72,8 @@ export interface AdminDeps {
   /** La voz del asistente: desde el chat, un texto puede salir como nota de voz. */
   voz?: import('../voz/servicio.js').ServicioVoz;
   lineas?: import('../whatsapp/lineas.js').ServicioLineas;
+  /** El cliente de cada linea: con varias, «conectado» es que quede alguna viva, no solo la principal. */
+  registroClientes?: import('../whatsapp/registro.js').RegistroClientes;
   /** La puerta a GSG (la configurable desde la pantalla). Sin ella, la del .env. */
   gsg?: import('../rutas/gsg.js').PuertoGsg;
   /** Las entregas del dia: ligan cada conversacion guardada a su pedido. Ver src/entregas. */
@@ -172,6 +175,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // monitor de salud (ver src/salud/numero.ts). Sin la de la tienda, la de
   // siempre: solo el id de Meta, o 'local'.
   const phoneNumberId = deps.numeroDeSalud ?? (() => settings.current().phoneNumberId || 'local');
+  // Con varias lineas, «conectado» = queda alguna viva (ver src/whatsapp/estado-conexion.ts).
+  const fuentesConexion = { settings, wa, registro: deps.registroClientes ?? null, preferida: deps.lineas?.preferida ? () => deps.lineas!.preferida!() : null };
 
   // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
@@ -305,10 +310,20 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     // El plan va el primero: si esta vencido, explica por que lo demas esta parado.
     const avisoPlan = deps.plan?.estado().aviso ?? null;
     if (avisoPlan) avisos.push({ tipo: 'plan', nivel: avisoPlan.nivel, texto: avisoPlan.texto, href: '/panel#configuracion' });
-    const configurado = settings.isConfigured();
-    const conectado = configurado && (wa.conectado?.() ?? true);
-    if (!configurado) avisos.push({ tipo: 'sin_configurar', nivel: 'bad', texto: 'WhatsApp sin conectar: no sale ni entra nada', href: '/setup' });
-    else if (!conectado) avisos.push({ tipo: 'desconectado', nivel: 'bad', texto: 'WhatsApp desconectado: vuelve a vincular el telefono', href: '/setup' });
+    const conexion = await estadoConexion(fuentesConexion);
+    const caidas = conexion.lineas.filter((l) => !l.conectada);
+    const vivas = conexion.lineas.filter((l) => l.conectada);
+    if (!conexion.configurado) avisos.push({ tipo: 'sin_configurar', nivel: 'bad', texto: 'WhatsApp sin conectar: no sale ni entra nada', href: '/setup' });
+    else if (!conexion.conectado) avisos.push({ tipo: 'desconectado', nivel: 'bad', texto: 'WhatsApp desconectado: vuelve a vincular el telefono', href: '/setup' });
+    else if (caidas.length && vivas.length) {
+      // Con alguna viva NO es «WhatsApp desconectado»: cada chat sale por su linea, y si esa cae, por otra viva.
+      avisos.push({
+        tipo: 'linea_caida',
+        nivel: 'warn',
+        texto: `${caidas.length === 1 ? 'Caída la línea' : 'Caídas las líneas'} ${nombrarLineas(caidas)}. Siguen activas ${nombrarLineas(vivas)}: cada chat sale por su número y, si el suyo está caído, por otro activo.`,
+        href: '/setup',
+      });
+    }
     if (estado.paused) avisos.push({ tipo: 'pausado', nivel: 'warn', texto: `Envios pausados${estado.pausedReason ? ': ' + estado.pausedReason : ''}`, href: '/panel#estado' });
     const nivel = estado.nivel ?? 'verde';
     if (nivel === 'rojo') avisos.push({ tipo: 'riesgo', nivel: 'bad', texto: 'El numero esta en rojo: todo pausado hasta que mejore', href: '/panel#salud' });
@@ -462,8 +477,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       },
       semana,
       numero: {
-        conectado: settings.isConfigured() && (wa.conectado?.() ?? true),
-        configurado: settings.isConfigured(),
+        conectado: algunaLineaConectada(fuentesConexion),
+        configurado: algunaLineaConfigurada(fuentesConexion),
         calidad: estado.quality,
         pausado: estado.paused,
         motivoPausa: estado.pausedReason,
@@ -482,7 +497,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       // Para la lista de "primeros pasos" del inicio: que esta hecho y que no.
       primerosPasos: {
         proveedor: providerOf(settings.current()),
-        conectado: settings.isConfigured() && (wa.conectado?.() ?? true),
+        conectado: algunaLineaConectada(fuentesConexion),
         usuarios,
         plantillas: plantillas.length,
         contactos: contactos.total,
