@@ -3505,7 +3505,7 @@ ${lista}
       await repo.actualizar(e.id, { confirmacionProximoAt: null });
       return { ok: false, motivo: 'el primer mensaje espera a una persona (bandeja de errores)' };
     }
-    // El primer mensaje lo pudo redactar GSG (first_message). Solo si esta
+    // El primer mensaje lo pudo redactar GSG (firstMessage). Solo si esta
     // pregunta ES el primer mensaje del pedido (`seguido`): si antes ya salio
     // el pedido de ubicacion, ese fue el primero y aqui va el texto de siempre.
     const deGsg = seguido ? primerMensajeDeGsg([e], true) : null;
@@ -4571,7 +4571,7 @@ ${lista}
   const pedidosEnEnvio = new Map<string, number[]>();
 
   /**
-   * El primer mensaje que GSG mando ya redactado (`first_message`), o null
+   * El primer mensaje que GSG mando ya redactado (`firstMessage`), o null
    * para usar el texto editable de GSGchat. Con varios pedidos en un mismo
    * mensaje, solo vale si TODOS lo traen (si no, el de alguno se perderia):
    * se juntan los distintos, y si no caben en un mensaje se usa el de siempre.
@@ -5328,7 +5328,7 @@ ${lista}
       const pedidos = await pedidosDelMensaje(solicitud);
       if (!pedidos.length) {
         // El pedido pudo cambiar de lote mientras esperaba su turno en la cola
-        // (el motor de entregas lo vuelve a encolar): su first_message se
+        // (el motor de entregas lo vuelve a encolar): su firstMessage se
         // busca por telefono y referencia para que no se pierda. Sin el, todo
         // sigue como antes (null = la redaccion de siempre).
         if (!solicitud.phone || !solicitud.referencia) return null;
@@ -5336,7 +5336,7 @@ ${lista}
         const suyo = vivas.find((e) => e.referencia === solicitud.referencia && e.ubicacionEstado === 'pendiente');
         return suyo ? primerMensajeDeGsg([suyo]) : null;
       }
-      // GSG ya redacto el primer mensaje (first_message): sale tal cual.
+      // GSG ya redacto el primer mensaje (firstMessage): sale tal cual.
       const deGsg = primerMensajeDeGsg(pedidos);
       if (deGsg) return deGsg;
       if (pedidos.length === 1) return textoDe('solicitudUbicacion', ajustes, contexto(pedidos[0]!));

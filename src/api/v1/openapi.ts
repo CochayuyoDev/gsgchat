@@ -758,7 +758,7 @@ export function openApi(baseUrl: string): Json {
             metodoPago: { type: 'string', nullable: true, description: '"YAPE", "Efectivo", "Pagado"...' },
             monto: { oneOf: [{ type: 'number' }, { type: 'string' }], nullable: true, description: 'Lo que el motorizado cobra: 85 o "85.00" (un numero sale con 2 decimales)' },
             remitente: { type: 'string', nullable: true, description: 'Quien firma el envío ("Juan Quispe"). El primer mensaje al cliente dice "Somos GSG Courier"' },
-            first_message: { type: 'string', nullable: true, maxLength: 1024, description: 'El texto exacto del PRIMER mensaje que se le manda al cliente por WhatsApp. Si viene, sale tal cual en lugar del texto editable de GSGchat (con el mismo botón de ubicación o de SÍ/NO); si no viene, va el de siempre. Solo cambia ese primer mensaje: los recordatorios y el resto del flujo no cambian. Con la API oficial de Meta fuera de la ventana de 24 h se manda la plantilla aprobada, no este texto.' },
+            firstMessage: { type: 'string', nullable: true, maxLength: 1024, description: 'El texto exacto del PRIMER mensaje que se le manda al cliente por WhatsApp. Si viene, sale tal cual en lugar del texto editable de GSGchat (con el mismo botón de ubicación o de SÍ/NO); si no viene, va el de siempre. Solo cambia ese primer mensaje: los recordatorios y el resto del flujo no cambian. Con la API oficial de Meta fuera de la ventana de 24 h se manda la plantilla aprobada, no este texto.' },
           },
         },
         NumeroReportado: {
