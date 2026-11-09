@@ -487,13 +487,16 @@ document.getElementById('archivo').addEventListener('change', function () {
 /* ---------------------------------- respuestas rapidas: "/" o el menu "+" */
 
 var atajos = [];
+/* Atajos de comando («/cambio»): no se le mandan al cliente, los ejecuta el sistema. Solo en el chat de un cliente. */
+var comandos = [];
 var atajoSel = 0;
 
 async function cargarAtajos() {
-  try { atajos = (await api('/admin/chat/atajos')).atajos || []; }
-  catch (error) { atajos = []; console.log('[chat] no se pudieron cargar las respuestas rápidas:', error && error.message); }
+  try { var r = await api('/admin/chat/atajos'); atajos = r.atajos || []; comandos = r.comandos || []; }
+  catch (error) { atajos = []; comandos = []; console.log('[chat] no se pudieron cargar las respuestas rápidas:', error && error.message); }
   pintarBarraRapidas();
 }
+function comandosDelChat() { return current && current.tipo !== 'grupo' ? comandos : []; }
 function negocioNombre() {
   var app = document.getElementById('s-app');
   return app ? app.getAttribute('data-negocio') || '' : '';
@@ -509,7 +512,8 @@ function abrirAtajos(filtro) { cerrarPaneles('panel-atajos'); pintarAtajos(filtr
 
 function pintarAtajos(filtro) {
   var box = document.getElementById('panel-atajos');
-  var lista = atajos.filter(function (a) { return !filtro || a.atajo.indexOf(filtro) === 0 || a.texto.toLowerCase().indexOf(filtro) >= 0; });
+  var coincide = function (a) { return !filtro || a.atajo.indexOf(filtro) === 0 || a.texto.toLowerCase().indexOf(filtro) >= 0; };
+  var lista = comandosDelChat().map(function (c) { return { atajo: c.atajo, texto: c.texto, descripcion: c.descripcion, comando: true }; }).filter(coincide).concat(atajos.filter(coincide));
   if (!lista.length) {
     box.innerHTML = '<div class="pie">Ninguna respuesta rápida empieza por «/' + esc(filtro) + '». Se crean en <a class="link" href="/panel#automatizacion">Panel → Automatización</a>.</div>';
     box.classList.remove('hidden');
@@ -518,6 +522,7 @@ function pintarAtajos(filtro) {
   }
   if (atajoSel >= lista.length) atajoSel = 0;
   box.innerHTML = '<div class="atajos">' + lista.map(function (a, i) {
+    if (a.comando) return '<div class="op comando' + (i === atajoSel ? ' sel' : '') + '" data-i="' + i + '" title="' + esc(a.descripcion || '') + '"><b>/' + esc(a.atajo) + '</b><span><em class="tipo-comando">Comando</em> ' + esc(a.texto) + ' · ' + esc(a.descripcion || '') + '</span></div>';
     return '<div class="op' + (i === atajoSel ? ' sel' : '') + '" data-i="' + i + '"><b>/' + esc(a.atajo) + '</b><span>' + esc(rellenarAtajo(a.texto)) + '</span></div>';
   }).join('') + '</div><div class="pie">↑↓ para moverte · Enter o Tab para poner el texto · Esc para cerrar</div>';
   box._lista = lista;
@@ -540,7 +545,8 @@ function elegirAtajo() {
   var a = lista[atajoSel];
   cerrarAtajos();
   if (!a) return;
-  ponerTexto(rellenarAtajo(a.texto));
+  /* Un comando queda escrito tal cual: con Enter lo ejecuta el sistema (no le llega al cliente). */
+  ponerTexto(a.comando ? a.texto : rellenarAtajo(a.texto));
 }
 function ponerTexto(texto) {
   input.value = texto;
@@ -558,13 +564,34 @@ function etiquetaDe(atajo) {
 function pintarBarraRapidas() {
   var barra = document.getElementById('rapidas-barra');
   if (!barra) return;
-  /* Sin respuestas rapidas, la barra no existe: una fila vacia es ruido. */
-  if (!atajos.length) { barra.classList.add('hidden'); return; }
+  var cmds = comandosDelChat();
+  /* Sin respuestas rapidas ni comandos, la barra no existe: una fila vacia es ruido. */
+  if (!atajos.length && !cmds.length) { barra.classList.add('hidden'); return; }
   barra.classList.remove('hidden');
-  var html = atajos.map(function (a, i) {
+  var html = cmds.map(function (c, i) {
+    return '<button class="chip comando" type="button" data-comando="' + i + '" title="' + esc(c.descripcion) + ' Pide confirmar con un segundo clic.">' + esc(c.etiqueta) + '</button>';
+  }).join('') + atajos.map(function (a, i) {
     return '<button class="chip" type="button" data-rapida="' + i + '" title="Manda: ' + esc(rellenarAtajo(a.texto)) + ' (Shift+clic para retocarlo antes)">' + esc(etiquetaDe(a.atajo)) + '</button>';
-  }).join('') + '<a class="chip editar" href="/panel#automatizacion" title="Añadir, cambiar o quitar respuestas rápidas">✎ Editar</a>';
+  }).join('') + (atajos.length ? '<a class="chip editar" href="/panel#automatizacion" title="Añadir, cambiar o quitar respuestas rápidas">✎ Editar</a>' : '');
   if (barra.innerHTML !== html) barra.innerHTML = html;
+  /* El comando cambia datos del pedido: el primer clic pide confirmar en la misma pastilla, el segundo lo ejecuta. */
+  barra.querySelectorAll('[data-comando]').forEach(function (b) {
+    b.onclick = function () {
+      var c = cmds[Number(b.getAttribute('data-comando'))];
+      if (!c) return;
+      if (!b.classList.contains('confirmar')) {
+        b.classList.add('confirmar');
+        b.textContent = '¿Seguro? Clic otra vez para cambiarla';
+        clearTimeout(b._vuelta);
+        b._vuelta = setTimeout(function () { b.classList.remove('confirmar'); b.textContent = c.etiqueta; }, 5000);
+        return;
+      }
+      clearTimeout(b._vuelta);
+      b.classList.remove('confirmar');
+      b.textContent = c.etiqueta;
+      enviar({ text: c.texto });
+    };
+  });
   barra.querySelectorAll('[data-rapida]').forEach(function (b) {
     b.onclick = function (ev) {
       var a = atajos[Number(b.getAttribute('data-rapida'))];

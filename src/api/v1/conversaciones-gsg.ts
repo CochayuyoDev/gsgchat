@@ -6,6 +6,8 @@
  *                                 la nota automatica del chat (`nota`: la etiqueta que le puso la IA).
  *  POST /api/v1/chat              un usuario de GSG escribe: GSGchat lo manda por WhatsApp al numero de ese
  *                                 tracking, lo apunta con quien lo escribio y calla al bot (mensajes:enviar).
+ *                                 «proceder cambio de ubicación» no sale al cliente: es un comando (ver
+ *                                 src/entregas/comando-cambio-ubicacion.js) y la respuesta trae `estado: 'comando'`.
  *
  * En las dos GSG manda SOLO el tracking: el telefono ya lo dio en POST /api/v1/entregas y esta guardado en el
  * pedido (si GSG lo corrigio despues, vale el corregido). Un cliente con varios trackings tiene un solo chat.

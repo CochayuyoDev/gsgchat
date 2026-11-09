@@ -18,6 +18,7 @@ import type { ServicioIA } from '../ia/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
+import { esComandoCambioUbicacion, type ResultadoComandoCambio } from '../entregas/comando-cambio-ubicacion.js';
 import type { Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
@@ -46,6 +47,23 @@ interface ProgresoHistorial {
   sinReferencia: number;
   detalle: string;
 }
+/**
+ * «proceder cambio de ubicación» escrito desde el WhatsApp conectado (lo que
+ * se manda desde el teléfono, nunca lo que entra del cliente). Nunca rompe el
+ * guardado del mensaje.
+ */
+export async function comandoDesdeTelefono(entregas: Pick<ServicioEntregas, 'procederCambioUbicacion'>, phone: string, texto: string, quien: string): Promise<ResultadoComandoCambio | null> {
+  if (!esComandoCambioUbicacion(texto)) return null;
+  try {
+    const r = await entregas.procederCambioUbicacion(phone, quien);
+    console.log(`[comando] «proceder cambio de ubicación» desde el teléfono (${phone}): ${r.resultado}`);
+    return r;
+  } catch (error) {
+    console.error('[comando] fallo el cambio de ubicación pedido desde el teléfono:', error);
+    return null;
+  }
+}
+
 /** Tope por chat: 40 lotes de 50 = 2000 mensajes por vuelta. */
 const LOTES_POR_CHAT = 40;
 
@@ -264,6 +282,11 @@ export async function registerLocalRoutes(
           if (!mensaje.grupo && !mensaje.historial && deps.entregas) {
             await deps.entregas.atendidoPorPersona(contacto.phone, 'una persona desde el teléfono').catch(() => 0);
           }
+          // «proceder cambio de ubicación» escrito desde el teléfono: el cliente ya
+          // lo ve (salió del teléfono), pero el sistema toma su última ubicación.
+          if (!mensaje.grupo && !mensaje.historial && deps.entregas && leido.kind === 'text') {
+            await comandoDesdeTelefono(deps.entregas, contacto.phone, String(leido.body ?? ''), 'una persona desde el teléfono (línea principal)');
+          }
           // Pruebas con el MISMO número conectado registrado como motorizado
           // (pedido del dueño, 25/09): los pedidos le llegan al chat «Tú» y lo
           // que conteste ahí (a mano, desde el teléfono) cuenta como respuesta
@@ -329,6 +352,9 @@ export async function registerLocalRoutes(
               lineaEtiqueta: actual.etiqueta,
               lineaNumero: actual.telefono || t.sesion!.getLocalState().phone || null,
             });
+            if (!mensaje.historial && deps.entregas && leido.kind === 'text') {
+              await comandoDesdeTelefono(deps.entregas, contacto.phone, String(leido.body ?? ''), `una persona desde el teléfono (línea ${actual.etiqueta})`);
+            }
           } catch (error) {
             console.error(`${marca} fallo guardando un mensaje propio:`, error);
           }

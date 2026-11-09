@@ -162,6 +162,11 @@ const mensajeSchema = z
 
 /** Lo que devuelve un envio, con nombres que no cambian. */
 export function respuestaDeEnvio(outcome: SendOutcome) {
+  // Un comando («proceder cambio de ubicación»): no salió al cliente; se devuelve lo que hizo.
+  if (outcome.ok && outcome.comando) {
+    const { nombre, ...resultado } = outcome.comando;
+    return { codigo: 200, cuerpo: { ok: true, estado: 'comando', mensajeId: outcome.wamid, entregaId: null, comando: { nombre, ...resultado } } };
+  }
   if (outcome.ok) return { codigo: 200, cuerpo: { ok: true, estado: 'enviado', mensajeId: outcome.wamid, entregaId: outcome.deliveryId } };
   if (outcome.blocked) {
     return {
