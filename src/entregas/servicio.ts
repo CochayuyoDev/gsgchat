@@ -101,6 +101,7 @@ import {
   soporteEnPalabras,
   telefonoEnPalabras,
 } from './textos.js';
+import { MAX_FIRST_MESSAGE } from './repo.js';
 import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, EstadoMensaje, EventoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado, ViaMensaje } from './repo.js';
 import { datosEnvioDeCrudo, fusionarDatosEnvio } from './datos-envio.js';
 import { desenlaceDeEnvio, esperaDelReintento, MENSAJE_EN_CURSO, MENSAJE_REINTENTABLE, motivoLegible, REINTENTOS_POR_DEFECTO, vistaMensaje, type Desenlace, type ReintentosMensaje, type VistaMensaje } from './primer-mensaje.js';
@@ -3450,9 +3451,14 @@ ${lista}
       await repo.actualizar(e.id, { confirmacionProximoAt: null });
       return { ok: false, motivo: 'el primer mensaje espera a una persona (bandeja de errores)' };
     }
-    const texto = conRegla
-      ? textoDe(primera ? 'confirmarEntregaGsg' : 'recordarConfirmarGsg', ajustes, contexto(e))
-      : textoDe(primera ? 'pedirConfirmacion' : 'insistirConfirmacion', ajustes, contexto(e));
+    // El primer mensaje lo pudo redactar GSG (first_message). Solo si esta
+    // pregunta ES el primer mensaje del pedido (`seguido`): si antes ya salio
+    // el pedido de ubicacion, ese fue el primero y aqui va el texto de siempre.
+    const deGsg = seguido ? primerMensajeDeGsg([e], true) : null;
+    const texto = deGsg
+      ?? (conRegla
+        ? textoDe(primera ? 'confirmarEntregaGsg' : 'recordarConfirmarGsg', ajustes, contexto(e))
+        : textoDe(primera ? 'pedirConfirmacion' : 'insistirConfirmacion', ajustes, contexto(e)));
     const salida = await enviarA(e.phone, texto, 'confirmacion', variablesCliente(e), { separacionMs: Math.min(ajustes.confirmacionEsperaMin * 60_000, 60_000), maxPorDia: ajustes.confirmacionMaxIntentos + 3 }, botonesConfirmacion(e), { conReglaGsg: conRegla });
     const decision = seguido ? await aplicarDesenlace((await repo.entrega(e.id)) ?? e, desenlaceDeEnvio(salida)) : {};
     if (!salida.ok) {
@@ -4496,7 +4502,7 @@ ${lista}
       const base = { phone: marcada.phone, category: 'UTILITY' as const };
       const salida = deps.usarPlantilla?.() && !ventana
         ? await sender.send({ ...base, kind: 'template', templateName: PLANTILLA_PEDIDOS_GSG, templateLanguage: 'es', variables: mensaje.variables })
-        : await sender.send({ ...base, kind: 'freeform', text: mensaje.texto });
+        : await sender.send({ ...base, kind: 'freeform', text: primerMensajeDeGsg([marcada]) ?? mensaje.texto });
       await aplicarDesenlace(marcada, desenlaceDeEnvio(salida));
       return (await repo.entrega(fresca.id)) ?? fresca;
     }
@@ -4509,6 +4515,27 @@ ${lista}
   }
 
   const pedidosEnEnvio = new Map<string, number[]>();
+
+  /**
+   * El primer mensaje que GSG mando ya redactado (`first_message`), o null
+   * para usar el texto editable de GSGchat. Con varios pedidos en un mismo
+   * mensaje, solo vale si TODOS lo traen (si no, el de alguno se perderia):
+   * se juntan los distintos, y si no caben en un mensaje se usa el de siempre.
+   *
+   * Solo para el mensaje que de verdad es el primero del pedido: el de un
+   * pedido cuyo primer mensaje aun no salio (pendiente, en cola, reintentando
+   * o enviandose ahora). Un pedido al que ya se le escribio (p. ej. la
+   * ubicacion antes de la pregunta SÍ/NO) no repite el texto de GSG.
+   * `yaEsElPrimero`: quien llama ya lo comprobo.
+   */
+  function primerMensajeDeGsg(pedidos: Entrega[], yaEsElPrimero = false): string | null {
+    const aunSinPrimero = (e: Entrega) => ['pendiente', 'encolado', 'reintentando', 'enviando'].includes(e.mensajeEstado ?? 'no_aplica');
+    if (!yaEsElPrimero && !pedidos.every(aunSinPrimero)) return null;
+    const textos = pedidos.map((e) => e.datosEnvio?.firstMessage?.trim() || null);
+    if (!textos.length || textos.some((t) => !t)) return null;
+    const junto = [...new Set(textos as string[])].join('\n\n');
+    return junto.length <= MAX_FIRST_MESSAGE ? junto : null;
+  }
 
   /** Solo pedidos activos del mismo lote, teléfono y día: sin mezclar rutas ni retenidos. */
   async function pedidosDelMensaje(s: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<Entrega[]> {
@@ -5245,7 +5272,19 @@ ${lista}
     textoUbicacionRegistrada,
     async textoSolicitudUbicacion(solicitud) {
       const pedidos = await pedidosDelMensaje(solicitud);
-      if (!pedidos.length) return null;
+      if (!pedidos.length) {
+        // El pedido pudo cambiar de lote mientras esperaba su turno en la cola
+        // (el motor de entregas lo vuelve a encolar): su first_message se
+        // busca por telefono y referencia para que no se pierda. Sin el, todo
+        // sigue como antes (null = la redaccion de siempre).
+        if (!solicitud.phone || !solicitud.referencia) return null;
+        const vivas = await repo.vivasPorTelefono(solicitud.phone).catch(() => [] as Entrega[]);
+        const suyo = vivas.find((e) => e.referencia === solicitud.referencia && e.ubicacionEstado === 'pendiente');
+        return suyo ? primerMensajeDeGsg([suyo]) : null;
+      }
+      // GSG ya redacto el primer mensaje (first_message): sale tal cual.
+      const deGsg = primerMensajeDeGsg(pedidos);
+      if (deGsg) return deGsg;
       if (pedidos.length === 1) return textoDe('solicitudUbicacion', ajustes, contexto(pedidos[0]!));
       return solicitudDePedidos(pedidos.map((e) => contexto(e))).texto;
     },

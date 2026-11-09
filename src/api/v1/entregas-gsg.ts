@@ -37,7 +37,7 @@ import { z } from 'zod';
 import { responderLectura } from '../../web/cache-lectura.js';
 import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
 import { telefonoParaGsg } from '../../entregas/servicio.js';
-import type { EntregasRepo } from '../../entregas/repo.js';
+import { MAX_FIRST_MESSAGE, type EntregasRepo } from '../../entregas/repo.js';
 import type { ActividadRepo } from '../../auth/actividad.js';
 import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio } from '../../entregas/datos-envio.js';
 import { horarioGsgSchema } from '../../entregas/seguimiento-gsg.js';
@@ -123,6 +123,8 @@ export const CAMPOS_DATOS_ENVIO = {
   metodoPago: textoOpc,
   monto: textoOpc,
   remitente: textoOpc,
+  /** El texto del primer mensaje al cliente, ya redactado por GSG. Sin el, va el texto de GSGchat. */
+  first_message: z.string().max(MAX_FIRST_MESSAGE, `como mucho ${MAX_FIRST_MESSAGE} caracteres (lo que WhatsApp admite en un mensaje con botones)`).nullable().optional(),
 };
 
 /** Lo que se puede cambiar de un pedido ya mandado. El telefono no: eso es otro pedido. */
@@ -307,6 +309,7 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     metodoPago: e.datosEnvio?.metodoPago ?? null,
     monto: e.datosEnvio?.monto ?? null,
     remitente: e.datosEnvio?.remitente ?? null,
+    first_message: e.datosEnvio?.firstMessage ?? null,
     estado: e.estado,
     situacion: e.situacion,
     prioridad: e.prioridad ?? 'normal',
