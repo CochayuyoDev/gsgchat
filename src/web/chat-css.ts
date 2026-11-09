@@ -548,6 +548,10 @@ export const CHAT_CSS = `
   /* Son botones con forma de pildora, no chips de estado: sin el punto del armazon. */
   .rapidas-barra .chip::before { display: none; }
   .rapidas-barra .chip.editar { color: var(--muted); border-style: dashed; text-decoration: none; }
+  /* Atajo de comando: lo ejecuta el sistema, no sale al cliente. Se distingue de las respuestas rápidas. */
+  .rapidas-barra .chip.comando { color: var(--accent); border-color: var(--line); background: var(--panel); }
+  .rapidas-barra .chip.comando.confirmar { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .tipo-comando { font-style: normal; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--accent); margin-right: 4px; }
   .rapidas-barra.ocupada .chip { opacity: .5; pointer-events: none; }
 
   /* previa del adjunto que se va a mandar */

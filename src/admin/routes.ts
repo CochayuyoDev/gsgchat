@@ -40,6 +40,7 @@ import type { Monitor } from '../salud/monitor.js';
 import { politicaDesdeConfig, type Politica } from '../salud/politica.js';
 import { VERSION } from '../version.js';
 import { ZONAS_HORARIAS, ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, fechaDelNegocio, type ServicioAjustes } from '../ajustes/generales.js';
+import { COMANDOS_CHAT } from '../entregas/comando-cambio-ubicacion.js';
 import { horaLocal } from '../salud/ritmo.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
@@ -287,7 +288,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
 
   // --- respuestas rapidas del chat ("/atajo") --------------------------------
 
-  app.get('/admin/chat/atajos', async () => ({ atajos: deps.ajustes?.atajos() ?? ATAJOS_POR_DEFECTO, deFabrica: !deps.ajustes || deps.ajustes.actual().atajos === null }));
+  // `comandos`: atajos fijos que no se le mandan al cliente, los ejecuta el sistema («/cambio»).
+  app.get('/admin/chat/atajos', async () => ({ atajos: deps.ajustes?.atajos() ?? ATAJOS_POR_DEFECTO, deFabrica: !deps.ajustes || deps.ajustes.actual().atajos === null, comandos: COMANDOS_CHAT }));
 
   app.post('/admin/chat/atajos', async (request, reply) => {
     if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });

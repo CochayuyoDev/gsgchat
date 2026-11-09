@@ -213,7 +213,14 @@ export interface AccionMensaje {
 }
 
 export type SendOutcome =
-  | { ok: true; wamid: string; deliveryId: number; whatsappNumberId?: string | null }
+  | {
+      ok: true;
+      wamid: string;
+      deliveryId: number;
+      whatsappNumberId?: string | null;
+      /** Era un comando del chat («proceder cambio de ubicación»): no salió al cliente, lo ejecutó el sistema. Ver src/entregas/regla-gsg.ts. */
+      comando?: import('../entregas/comando-cambio-ubicacion.js').ResultadoComandoCambio & { nombre: 'cambio_ubicacion' };
+    }
   | {
       ok: false;
       blocked: true;

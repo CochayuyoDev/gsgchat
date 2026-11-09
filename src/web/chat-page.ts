@@ -241,15 +241,15 @@ function ver(id, visible) {
   if (el) el.classList.toggle('hidden', !visible);
 }
 var ultimoAviso = { texto: '', cuando: 0 };
-function toast(text) {
-  if (ultimoAviso.texto === text && Date.now() - ultimoAviso.cuando < 60000) return;
+function toast(text, ms) {
+  if (ultimoAviso.texto === text && Date.now() - ultimoAviso.cuando < 60000 && !ms) return;
   ultimoAviso = { texto: text, cuando: Date.now() };
   var el = document.createElement('div');
   el.className = 'toast';
   el.setAttribute('role', 'status');
   el.textContent = text;
   document.body.appendChild(el);
-  setTimeout(function () { el.remove(); }, 4200);
+  setTimeout(function () { el.remove(); }, ms || 4200);
 }
 /**
  * El color del avatar, derivado del telefono.
@@ -1847,7 +1847,11 @@ async function enviar(payload) {
     var lineaDeEnvio = lineaElegidaAMano();
     if (lineaDeEnvio) payload.lineaId = lineaDeEnvio;
     var r = await api('/admin/chat/send', { method: 'POST', body: payload });
-    if (r.ok === false) {
+    /* Un comando («proceder cambio de ubicación»): no le salió al cliente; se dice qué hizo el sistema. */
+    if (r.comando) {
+      if (pendiente) pendiente.remove();
+      toast((r.comando.ok ? '✅ ' : '⚠️ ') + r.comando.mensaje, 9000);
+    } else if (r.ok === false) {
       if (pendiente) pendiente.remove();
       toast('No salió: ' + (r.reason || r.error || 'bloqueado por las guardas'));
     }
