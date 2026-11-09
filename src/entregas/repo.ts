@@ -154,7 +154,7 @@ export interface DatosEnvio {
   motorizadoNombre?: string | null;
   telefonoMotorizado?: string | null;
   /**
-   * `first_message` del contrato: el texto exacto del PRIMER mensaje que se
+   * `firstMessage` del contrato: el texto exacto del PRIMER mensaje que se
    * le manda al cliente por este pedido, redactado por GSG. Si viene,
    * reemplaza al texto editable de GSGchat solo en ese primer mensaje; los
    * recordatorios y el resto del flujo siguen igual.

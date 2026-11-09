@@ -1,5 +1,5 @@
 /**
- * `first_message`: GSG puede mandar ya redactado el PRIMER mensaje que se le
+ * `firstMessage`: GSG puede mandar ya redactado el PRIMER mensaje que se le
  * escribe al cliente. Si viene, sale tal cual (con su boton de siempre); si
  * no, va el texto editable de GSGchat. Los recordatorios y el resto del flujo
  * no cambian.
@@ -26,39 +26,39 @@ const pedido = (tracking: string, telefono: string, extra: Record<string, unknow
 
 const PRIMERO = 'Hola Ana 👋, te escribe GSG Courier.\nHoy llega tu pedido FM-1 de Tienda Lima.\n¿Nos compartes tu ubicación?';
 
-describe('first_message: leerlo y guardarlo', () => {
+describe('firstMessage: leerlo y guardarlo', () => {
   it('se lee del pedido crudo sin recortarlo a 200 y conserva los saltos de línea', () => {
     const largo = `${'a'.repeat(600)}\n${'b'.repeat(300)}`;
-    expect(datosEnvioDeCrudo({ first_message: `  ${largo}  ` })).toEqual({ firstMessage: largo });
-    expect(datosEnvioDeCrudo({ first_message: '   ' })).toBeNull();
-    expect(datosEnvioDeCrudo({ first_message: null })).toBeNull();
+    expect(datosEnvioDeCrudo({ firstMessage: `  ${largo}  ` })).toEqual({ firstMessage: largo });
+    expect(datosEnvioDeCrudo({ firstMessage: '   ' })).toBeNull();
+    expect(datosEnvioDeCrudo({ firstMessage: null })).toBeNull();
   });
 
   it('el verificador del contrato no lo marca como campo sobrante', () => {
-    expect(CAMPOS_PEDIDO.has('first_message')).toBe(true);
+    expect(CAMPOS_PEDIDO.has('firstMessage')).toBe(true);
   });
 
   it('la API lo guarda, lo devuelve al consultar y rechaza uno que no cabe en WhatsApp', async () => {
     const e = await crearEscenarioEntregas();
     try {
-      expect((await e.api.post('/api/v1/entregas', pedido('FM-G1', '987600701', { first_message: PRIMERO }))).status).toBe(201);
+      expect((await e.api.post('/api/v1/entregas', pedido('FM-G1', '987600701', { firstMessage: PRIMERO }))).status).toBe(201);
       expect((await e.entrega('FM-G1'))?.datosEnvio?.firstMessage).toBe(PRIMERO);
       const uno = await e.api.get<{ entrega: Record<string, unknown> }>('/api/v1/entregas/FM-G1');
-      expect(uno.body.entrega.first_message).toBe(PRIMERO);
+      expect(uno.body.entrega.firstMessage).toBe(PRIMERO);
 
-      const r = await e.api.post<{ error: { mensaje?: string } } & Record<string, unknown>>('/api/v1/entregas', pedido('FM-G2', '987600702', { first_message: 'x'.repeat(MAX_FIRST_MESSAGE + 1) }));
+      const r = await e.api.post<{ error: { mensaje?: string } } & Record<string, unknown>>('/api/v1/entregas', pedido('FM-G2', '987600702', { firstMessage: 'x'.repeat(MAX_FIRST_MESSAGE + 1) }));
       expect(r.status).toBe(400);
-      expect(JSON.stringify(r.body)).toContain('first_message');
+      expect(JSON.stringify(r.body)).toContain('firstMessage');
       expect(await e.entrega('FM-G2')).toBeUndefined();
     } finally { await e.cerrar(); }
   });
 });
 
-describe('first_message: el primer mensaje al cliente', () => {
+describe('firstMessage: el primer mensaje al cliente', () => {
   it('pedir la ubicación: sale el texto de GSG tal cual; el recordatorio es el de siempre', async () => {
     const e = await crearEscenarioEntregas();
     try {
-      expect((await e.api.post('/api/v1/entregas', pedido('FM-1', '987600711', { first_message: PRIMERO }))).status).toBe(201);
+      expect((await e.api.post('/api/v1/entregas', pedido('FM-1', '987600711', { firstMessage: PRIMERO }))).status).toBe(201);
       await e.trabajar();
       const textos = e.textosA('987600711');
       expect(textos).toHaveLength(1);
@@ -81,10 +81,10 @@ describe('first_message: el primer mensaje al cliente', () => {
     } finally { await e.cerrar(); }
   });
 
-  it('si el pedido cambió de lote mientras esperaba en la cola, igual sale su first_message', async () => {
+  it('si el pedido cambió de lote mientras esperaba en la cola, igual sale su firstMessage', async () => {
     const e = await crearEscenarioEntregas();
     try {
-      await e.api.post('/api/v1/entregas', pedido('FM-L', '987600716', { first_message: 'Mensaje de GSG para FM-L' }));
+      await e.api.post('/api/v1/entregas', pedido('FM-L', '987600716', { firstMessage: 'Mensaje de GSG para FM-L' }));
       const entrega = (await e.entrega('FM-L'))!;
       // Como cuando el motor de entregas lo vuelve a encolar en otro lote antes de que salga.
       await e.repos.entregas!.actualizar(entrega.id, { loteId: '00000000-0000-0000-0000-000000000000' });
@@ -93,7 +93,7 @@ describe('first_message: el primer mensaje al cliente', () => {
     } finally { await e.cerrar(); }
   });
 
-  it('sin first_message sale el texto editable de GSGchat, como siempre', async () => {
+  it('sin firstMessage sale el texto editable de GSGchat, como siempre', async () => {
     const e = await crearEscenarioEntregas();
     try {
       await e.api.post('/api/v1/entregas', pedido('FM-2', '987600712'));
@@ -110,14 +110,14 @@ describe('first_message: el primer mensaje al cliente', () => {
     const e = await crearEscenarioEntregas();
     try {
       await e.api.post('/api/v1/entregas', [
-        pedido('FM-A', '987600713', { first_message: 'Mensaje de GSG para FM-A' }),
-        pedido('FM-B', '987600713', { first_message: 'Mensaje de GSG para FM-B' }),
+        pedido('FM-A', '987600713', { firstMessage: 'Mensaje de GSG para FM-A' }),
+        pedido('FM-B', '987600713', { firstMessage: 'Mensaje de GSG para FM-B' }),
       ]);
       await e.trabajar();
       expect(e.textosA('987600713')).toEqual(['Mensaje de GSG para FM-A\n\nMensaje de GSG para FM-B']);
 
       await e.api.post('/api/v1/entregas', [
-        pedido('FM-C', '987600714', { first_message: 'Mensaje de GSG para FM-C' }),
+        pedido('FM-C', '987600714', { firstMessage: 'Mensaje de GSG para FM-C' }),
         pedido('FM-D', '987600714'),
       ]);
       await e.trabajar();
@@ -133,7 +133,7 @@ describe('first_message: el primer mensaje al cliente', () => {
     const e = await crearEscenarioEntregas();
     try {
       const texto = 'GSG Courier: hoy entregamos tu pedido FM-3. ¿Lo podrás recibir?';
-      expect((await e.api.post('/api/v1/entregas', pedido('FM-3', '987600715', { lat: -12.1211, lng: -77.0301, faltaConfirmar: true, first_message: texto }))).status).toBe(201);
+      expect((await e.api.post('/api/v1/entregas', pedido('FM-3', '987600715', { lat: -12.1211, lng: -77.0301, faltaConfirmar: true, firstMessage: texto }))).status).toBe(201);
       await e.trabajar();
       const primeros = e.mensajesA('987600715');
       expect(primeros.length).toBeGreaterThanOrEqual(1);
