@@ -569,6 +569,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         settings,
         wa,
         hayLineaConectada: () => registro.algunaConectada(),
+        lineas,
+        registro,
         sender,
         salud,
         politica,

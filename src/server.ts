@@ -10,6 +10,8 @@ import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
 import { codigoPorStatus, cuerpoError, ErrorApi, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError } from './api/errores.js';
 import { paginaError } from './web/pagina-error.js';
+import { syncTemplates } from './templates/registry.js';
+import { clienteDeMeta } from './templates/cliente-meta.js';
 import type { Config } from './config.js';
 import { registrarLimpiezaChat } from './whatsapp/limpieza-chat.js';
 import type { Repos } from './db/repos.js';
@@ -335,7 +337,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas, mediaDir, lineas: deps.lineas, registroClientes: deps.registroClientes, webhookMeta: deps.webhookMeta });
   if (deps.webhookMeta) await registerWebhookMetaRoutes(app, { webhookMeta: deps.webhookMeta, settings, publicBase: config.PUBLIC_BASE_URL });
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
-  if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, webhooks: repos.webhooks, simulador: deps.simuladorGsg, config });
+  if (entregas) {
+    await registerEntregasRoutes(app, {
+      entregas,
+      conexionGsg: deps.conexionGsg,
+      webhooks: repos.webhooks,
+      simulador: deps.simuladorGsg,
+      config,
+      traerPlantillas: async () => {
+        const cliente = await clienteDeMeta({ settings, wa, lineas: deps.lineas, registro: deps.registroClientes });
+        return cliente ? (await syncTemplates(cliente, repos)).length : null;
+      },
+    });
+  }
   if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });
   // El resumen del dia por WhatsApp (Ajustes → Resumen del dia). Ver src/resumenes.
   if (deps.resumenes) await registerResumenesRoutes(app, { resumenes: deps.resumenes });

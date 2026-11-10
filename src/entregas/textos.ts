@@ -112,6 +112,18 @@ export const ajustesEntregasSchema = z.object({
    * sale como texto de siempre: nunca se queda sin mandar.
    */
   usarBotones: z.boolean().default(true),
+  /**
+   * La plantilla aprobada por Meta para el primer mensaje (pedido del dueño,
+   * 10/11): con una línea de WhatsApp API en uso, el primer mensaje de un
+   * pedido sale con ella si Meta ya la aprobó. Sus 8 datos, en orden, están
+   * en `VARIABLES_PLANTILLA_ENTREGA`.
+   */
+  plantillaMeta: z
+    .object({
+      usar: z.boolean().default(true),
+      nombre: z.string().trim().regex(/^[a-z0-9_]{1,512}$/, 'El nombre de la plantilla va en minúsculas, números y guion bajo, como en Meta (por ejemplo solicitud_ubicacion_entrega).').default('solicitud_ubicacion_entrega'),
+    })
+    .default({}),
   /** Si al cliente se le avisa cuando el motorizado escribe "cerca" / "llegando". */
   avisarCerca: z.boolean().default(true),
   /**
@@ -665,6 +677,60 @@ export function textoDe(clave: keyof AjustesEntregas['textos'], ajustes: Ajustes
   // La hora límite sale de los ajustes si quien llama no la trae (si no, quedaba «antes de la  para…»).
   return rellenar(propio || TEXTOS_POR_DEFECTO[clave], { ...ctxConHorario, horaLimite: ctx.horaLimite || horaEnPalabras(ajustes.cambioUbicacionHasta) });
 }
+/**
+ * Los 8 datos de la plantilla aprobada por Meta, en el orden de sus {{n}}:
+ * «¡Hola {{1}}! Somos GSG Courier… Producto {{2}}, Empresa {{3}}, Código
+ * {{4}}, Método de Pago {{5}}, Monto S/ {{6}}, Dirección {{7}}, Horario {{8}}».
+ */
+export const VARIABLES_PLANTILLA_ENTREGA = [
+  'nombre del cliente',
+  'producto',
+  'empresa',
+  'código',
+  'método de pago',
+  'monto a cobrar (sin «S/»)',
+  'dirección',
+  'horario de entrega',
+] as const;
+
+/** Una variable de Meta: sin saltos de línea ni tabuladores, sin más de 3 espacios seguidos y nunca vacía. */
+function variableMeta(valor: string, siVacio: string): string {
+  const limpio = valor.replace(/[\n\r\t]+/g, ' ').replace(/ {2,}/g, ' ').trim().slice(0, 300);
+  return limpio || siVacio;
+}
+
+/** El monto como lo pide la plantilla («85.00»): sin «S/», con dos decimales si es una cifra. */
+export function montoParaPlantilla(monto: string | null | undefined): string {
+  const crudo = (monto ?? '').trim().replace(/^s\/\.?\s*/i, '').replace(/,/g, '.');
+  return /^\d+(\.\d+)?$/.test(crudo) ? Number(crudo).toFixed(2) : crudo;
+}
+
+/** Los 8 valores de la plantilla de Meta para un pedido, con el horario de los ajustes si el pedido no trae el suyo. */
+export function variablesPlantillaEntrega(ctx: ContextoTexto, ajustes: AjustesEntregas): string[] {
+  const c: ContextoTexto = { ...ctx, horario: ctx.horario ?? horarioEnPalabras(ajustes.horarioEntregas.desde, ajustes.horarioEntregas.hasta) };
+  const v = (clave: string) => rellenar(`{${clave}}`, c);
+  return [
+    variableMeta(v('nombreCompleto'), 'cliente'),
+    variableMeta(v('producto'), 'tu pedido'),
+    variableMeta(v('empresa'), 'la tienda'),
+    variableMeta(v('tracking') || (ctx.pedido ?? ''), 'tu pedido'),
+    variableMeta(v('metodoPago'), 'por confirmar'),
+    variableMeta(montoParaPlantilla(ctx.envio?.monto), 'por confirmar'),
+    variableMeta(v('direccionCompleta'), 'la dirección registrada'),
+    variableMeta(v('horario'), 'durante el día'),
+  ];
+}
+
+/** Varios pedidos en una sola plantilla: cada dato distinto unido con « / » (el nombre, el del primero). */
+export function juntarVariablesPlantilla(listas: string[][]): string[] {
+  if (!listas.length) return [];
+  return listas[0]!.map((_, i) => {
+    if (i === 0) return listas[0]![0]!;
+    const distintos = [...new Set(listas.map((l) => l[i] ?? '').filter(Boolean))];
+    return variableMeta(distintos.join(' / '), listas[0]![i]!);
+  });
+}
+
 /** El texto para el motorizado, con el distrito entre paréntesis si lo hay. */
 export function contextoMotorizado(ctx: ContextoTexto): ContextoTexto {
   return { ...ctx, distrito: ctx.distrito ? ` (${ctx.distrito})` : '', distritoTalCual: true, notas: ctx.notas ? `Nota: ${ctx.notas}` : '' };

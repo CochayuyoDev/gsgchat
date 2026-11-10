@@ -101,6 +101,9 @@ import {
   horaEnPalabras,
   soporteEnPalabras,
   telefonoEnPalabras,
+  VARIABLES_PLANTILLA_ENTREGA,
+  juntarVariablesPlantilla,
+  variablesPlantillaEntrega,
 } from './textos.js';
 import { MAX_FIRST_MESSAGE } from './repo.js';
 import type { ComoEntrego, DatosEnvio, Entrega, EntregasRepo, EstadoEntrega, EstadoMensaje, EventoEntrega, Motorizado, NuevoMotorizado, PatchEntrega, PatchMotorizado, ViaMensaje } from './repo.js';
@@ -552,7 +555,16 @@ export interface ServicioEntregas {
    * ese telefono no tiene entrega viva: el reparto usa su texto de siempre.
    */
   textoSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<string | null>;
-  plantillaSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<{ name: string; variables: string[] } | null>;
+  plantillaSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<{ name: string; language?: string; variables: string[] } | null>;
+  /** Si la plantilla de Meta de los ajustes está activada y aprobada (entonces el primer mensaje sale con ella por la API). */
+  usaPlantillaMeta(): Promise<boolean>;
+  /** Lo que muestra «Plantillas aprobadas por Meta» en Ajustes de chat. */
+  estadoPlantillaMeta(): Promise<{
+    usar: boolean;
+    nombre: string;
+    plantilla: { estado: string; idioma: string; cuerpo: string; variables: number } | null;
+    datos: Array<{ n: number; dato: string; ejemplo: string }>;
+  }>;
   /** Los textos del agente operativo (por qué la ubicación, el cierre), con los datos de la entrega viva de ese teléfono si hay. */
   textoAgente(clave: 'porQueUbicacion' | 'cierreAgente', phone: string, nombre?: string | null): Promise<string>;
   /**
@@ -1245,7 +1257,7 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     if (ventanaAbierta) return libre();
     const nombre = ajustes.plantillas[plantilla];
     if (!nombre) {
-      return { ok: false, sinPlantilla: true, reason: `con la API de Meta hace falta una plantilla aprobada para escribirle fuera de la ventana de 24 h: elige una en Entregas del día → Ajustes → Plantillas (${plantilla})` };
+      return { ok: false, sinPlantilla: true, reason: `con la API de Meta hace falta una plantilla aprobada para escribirle fuera de la ventana de 24 h (${plantilla}): las plantillas se traen en Pedidos GSG → Ajustes de chat → Plantillas aprobadas por Meta` };
     }
     const registrada = await repos.templates.get(nombre, 'es').catch(() => null);
     const cuantas = registrada?.variables ?? variables.length;
@@ -4591,6 +4603,13 @@ ${lista}
     return junto.length <= MAX_FIRST_MESSAGE ? junto : null;
   }
 
+  /** La plantilla de Meta de los ajustes, solo si está activada y Meta ya la aprobó (el registro se trae de Meta). */
+  async function plantillaMetaAprobada(): Promise<{ name: string; language: string } | null> {
+    if (!ajustes.plantillaMeta.usar) return null;
+    const t = (await repos.templates.list().catch(() => [])).find((x) => x.name === ajustes.plantillaMeta.nombre && x.status === 'APPROVED');
+    return t ? { name: t.name, language: t.language } : null;
+  }
+
   /** Solo pedidos activos del mismo lote, teléfono y día: sin mezclar rutas ni retenidos. */
   async function pedidosDelMensaje(s: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<Entrega[]> {
     if (!s.phone) return [];
@@ -5291,7 +5310,7 @@ ${lista}
     ajustes: () => ajustes,
     resumenAvisos,
     async guardarAjustes(patch) {
-      const siguiente = ajustesEntregasSchema.parse({ ...ajustes, ...patch, textos: { ...ajustes.textos, ...(patch.textos ?? {}) }, plantillas: { ...ajustes.plantillas, ...(patch.plantillas ?? {}) }, cierreDelDia: { ...ajustes.cierreDelDia, ...(patch.cierreDelDia ?? {}) }, segundaVisita: { ...ajustes.segundaVisita, ...(patch.segundaVisita ?? {}) }, horarioEntregas: { ...ajustes.horarioEntregas, ...(patch.horarioEntregas ?? {}) }, soporte: { ...ajustes.soporte, ...(patch.soporte ?? {}) }, clienteRecurrente: { ...ajustes.clienteRecurrente, ...(patch.clienteRecurrente ?? {}) } });
+      const siguiente = ajustesEntregasSchema.parse({ ...ajustes, ...patch, textos: { ...ajustes.textos, ...(patch.textos ?? {}) }, plantillas: { ...ajustes.plantillas, ...(patch.plantillas ?? {}) }, cierreDelDia: { ...ajustes.cierreDelDia, ...(patch.cierreDelDia ?? {}) }, segundaVisita: { ...ajustes.segundaVisita, ...(patch.segundaVisita ?? {}) }, horarioEntregas: { ...ajustes.horarioEntregas, ...(patch.horarioEntregas ?? {}) }, soporte: { ...ajustes.soporte, ...(patch.soporte ?? {}) }, clienteRecurrente: { ...ajustes.clienteRecurrente, ...(patch.clienteRecurrente ?? {}) }, plantillaMeta: { ...ajustes.plantillaMeta, ...(patch.plantillaMeta ?? {}) } });
       await deps.settingsRepo.put(CLAVE_AJUSTES, JSON.stringify(siguiente), false);
       const horarioAntes = ajustes.horarioEntregas;
       ajustes = siguiente;
@@ -5344,8 +5363,32 @@ ${lista}
     },
     async plantillaSolicitudUbicacion(solicitud) {
       const pedidos = await pedidosDelMensaje(solicitud);
-      if (pedidos.length < 2) return null;
-      return { name: PLANTILLA_PEDIDOS_GSG, variables: solicitudDePedidos(pedidos.map((e) => contexto(e))).variables };
+      // La plantilla aprobada por Meta de los ajustes (con sus 8 datos), si la hay.
+      const meta = await plantillaMetaAprobada();
+      if (pedidos.length >= 2) {
+        const varios = await repos.templates.get(PLANTILLA_PEDIDOS_GSG, 'es').catch(() => null);
+        if (varios?.status === 'APPROVED' || !meta) return { name: PLANTILLA_PEDIDOS_GSG, variables: solicitudDePedidos(pedidos.map((e) => contexto(e))).variables };
+        return { name: meta.name, language: meta.language, variables: juntarVariablesPlantilla(pedidos.map((e) => variablesPlantillaEntrega(contexto(e), ajustes))) };
+      }
+      if (pedidos.length === 1 && meta) return { name: meta.name, language: meta.language, variables: variablesPlantillaEntrega(contexto(pedidos[0]!), ajustes) };
+      return null;
+    },
+    async usaPlantillaMeta() {
+      return Boolean(await plantillaMetaAprobada());
+    },
+    async estadoPlantillaMeta() {
+      const { usar, nombre } = ajustes.plantillaMeta;
+      const t = (await repos.templates.list().catch(() => [])).find((x) => x.name === nombre) ?? null;
+      const ejemplo = variablesPlantillaEntrega(
+        { nombre: 'Ali', negocio: deps.nombreNegocio(), pedido: 'GSG-E-215', direccion: 'Av. Lima 123', distrito: 'Lince', envio: { producto: 'Zapatos', empresaNombre: 'Tienda Uno', tracking: 'GSG-E-215', metodoPago: 'Efectivo', monto: '85' } as never },
+        ajustes,
+      );
+      return {
+        usar,
+        nombre,
+        plantilla: t ? { estado: t.status, idioma: t.language, cuerpo: t.body ?? '', variables: t.variables } : null,
+        datos: VARIABLES_PLANTILLA_ENTREGA.map((d, i) => ({ n: i + 1, dato: d, ejemplo: ejemplo[i] ?? '' })),
+      };
     },
     async textoAgente(clave, phone, nombre) {
       const vivas = await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[]);

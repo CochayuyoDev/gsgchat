@@ -52,6 +52,8 @@ export interface EntregasRoutesDeps {
   webhooks?: WebhooksRepo;
   simulador?: GsgSimulado;
   config: Pick<Config, 'bbox'>;
+  /** Trae de Meta el estado de las plantillas (por la principal o la línea de API). null = no hay WhatsApp API. */
+  traerPlantillas?: () => Promise<number | null>;
 }
 
 const quienEs = (u: { nombre?: string; usuario?: string } | null | undefined): string => u?.nombre || u?.usuario || 'alguien del panel';
@@ -91,6 +93,28 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
 
   // Numeros del dia: la lista de GSG numero por numero y las acciones en masa (ver numeros.ts).
   await registerNumerosRoutes(app, { entregas });
+
+  // «Plantillas aprobadas por Meta» en Pedidos GSG → Ajustes de chat.
+  app.get('/admin/entregas/plantilla-meta', async () => ({ ok: true, ...(await entregas.estadoPlantillaMeta()), puedeTraer: Boolean(deps.traerPlantillas) }));
+  app.post('/admin/entregas/plantilla-meta', async (request, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia la plantilla de Meta.' });
+    const leido = ajustesEntregasSchema.shape.plantillaMeta.removeDefault().partial().safeParse(request.body ?? {});
+    if (!leido.success) return reply.code(400).send({ error: leido.error.issues[0]?.message ?? 'Revisa el nombre de la plantilla.' });
+    await entregas.guardarAjustes({ plantillaMeta: { ...entregas.ajustes().plantillaMeta, ...leido.data } } as never);
+    return { ok: true, ...(await entregas.estadoPlantillaMeta()), puedeTraer: Boolean(deps.traerPlantillas) };
+  });
+  app.post('/admin/entregas/plantilla-meta/traer', async (request, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador trae las plantillas de Meta.' });
+    if (!deps.traerPlantillas) return reply.code(404).send({ error: 'Traer plantillas no está disponible aquí.' });
+    try {
+      const cuantas = await deps.traerPlantillas();
+      if (cuantas === null) return reply.code(409).send({ error: 'No hay una línea de WhatsApp API en uso: agrégala en Conexión WhatsApp → Líneas.' });
+      return { ok: true, traidas: cuantas, ...(await entregas.estadoPlantillaMeta()), puedeTraer: true };
+    } catch (error) {
+      const texto = error instanceof Error ? error.message : String(error);
+      return reply.code(502).send({ error: /token|OAuth|190|401/i.test(texto) ? 'Meta no aceptó el token de la línea de API: revísalo en Conexión WhatsApp.' : `Meta no respondió: ${texto.slice(0, 160)}` });
+    }
+  });
 
   app.post('/admin/entregas/ajustes', async (request, reply) => {
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia los ajustes de las entregas.' });
