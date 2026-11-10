@@ -138,6 +138,17 @@ describe('el lote del dia', () => {
     expect(await repo.delDia('2026-10-27', ['51911000001'])).toEqual([]);
   });
 
+  it('si el cliente no escribió nada, la IA no puede inventar una etiqueta: solo vale «Otro» (10/11)', async () => {
+    // La IA contesta «Pedido no reconocido» para todo, como pasó con el chat que solo tenía la plantilla y un «hola».
+    const { ia } = iaDePrueba(() => '{"etiqueta":"pedido_no_reconocido"}');
+    await etiquetarDelDia(deps(repo, () => ia), ALCANCE);
+    const hoy = new Map((await repo.delDia('2026-10-27', ['51911000002', '51911000004'])).map((e) => [e.phone, e]));
+    // Ana no escribió: «Otro».
+    expect(hoy.get('51911000004')).toMatchObject({ etiqueta: 'otro', origen: 'ia' });
+    // Rosa sí escribió: lo que diga la IA vale.
+    expect(hoy.get('51911000002')).toMatchObject({ etiqueta: 'pedido_no_reconocido', origen: 'ia' });
+  });
+
   it('si los mensajes no cambiaron, se reutiliza sin llamar a la IA; si cambian, solo se repite esa', async () => {
     const primera = iaDePrueba(porTexto);
     await etiquetarDelDia(deps(repo, () => primera.ia), ALCANCE);

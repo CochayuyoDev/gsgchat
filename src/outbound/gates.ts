@@ -33,6 +33,11 @@ export interface SendIntent {
    * peticion explicita de una persona, ni el freno de emergencia.
    */
   manual?: boolean;
+  /**
+   * Escrito por una persona en Chats: aunque sea a mano, la ventana de 24 h
+   * de Meta lo frena si sale por una línea de la API (Meta no lo entregaría).
+   */
+  respetarVentana?: boolean;
 }
 
 export interface GateSnapshot {
@@ -177,7 +182,10 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   //    no nuestra: tampoco la salta un mensaje a mano (Meta lo acepta y luego
   //    no lo entrega; en el chat se quedaba con un solo check, 10/11).
   const ventanaAplica = snapshot.serviceWindowApplies !== false;
-  if (ventanaAplica && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
+  //    Solo lo escrito por una persona en Chats (`respetarVentana`) se frena
+  //    aunque sea a mano; los demás envíos «a mano» del sistema (avisos al
+  //    supervisor, a la tienda...) siguen como siempre.
+  if ((!manual || intent.respetarVentana) && ventanaAplica && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
     return {
       allow: false,
       code: 'window_closed',

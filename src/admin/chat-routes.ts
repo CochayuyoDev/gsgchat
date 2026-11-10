@@ -1157,7 +1157,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         phone,
         kind: 'interactive',
         category: 'UTILITY',
-        manual: aMano(),
+        manual: aMano(), respetarVentana: true,
         ...firma,
         interactive: {
           body: body.text?.trim() || textoPedirUbicacion(),
@@ -1180,7 +1180,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         phone,
         kind: 'location',
         category: 'UTILITY',
-        manual: aMano(),
+        manual: aMano(), respetarVentana: true,
         ...firma,
         location: { latitude: result.lat, longitude: result.lng },
       });
@@ -1209,7 +1209,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         phone,
         kind: 'template',
         category: template.category,
-        manual: aMano(),
+        manual: aMano(), respetarVentana: true,
         ...firma,
         templateName: template.name,
         templateLanguage: template.language,
@@ -1225,7 +1225,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       return { ...r.outcome, voz: { enviada: r.enviadoComo === 'audio', motivo: r.motivo } };
     }
 
-    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), ...firma, ...(cita && !('error' in cita) ? { cita } : {}) });
+    return sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: body.text, manual: aMano(), respetarVentana: true, ...firma, ...(cita && !('error' in cita) ? { cita } : {}) });
   });
 
   /**
@@ -1270,7 +1270,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       phone: contact.phone,
       kind: 'media',
       category: 'UTILITY',
-      manual: aMano(),
+      manual: aMano(), respetarVentana: true,
       ...quien(request, body),
       ...(cita && !('error' in cita) ? { cita } : {}),
       // Una nota de voz grabada aqui va como nota de voz de verdad (ptt), no
@@ -1443,7 +1443,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         try {
           const location = (m.payload as { location?: { latitude?: number; longitude?: number; name?: string; address?: string } } | null)?.location;
           if (m.kind === 'location' && location && Number.isFinite(location.latitude) && Number.isFinite(location.longitude)) {
-            const outcome = await sender.send({ phone: destino.phone, kind: 'location', category: 'UTILITY', manual: aMano(), reenviado: true, ...firma, location: { latitude: location.latitude!, longitude: location.longitude!, name: location.name, address: location.address } });
+            const outcome = await sender.send({ phone: destino.phone, kind: 'location', category: 'UTILITY', manual: aMano(), respetarVentana: true, reenviado: true, ...firma, location: { latitude: location.latitude!, longitude: location.longitude!, name: location.name, address: location.address } });
             if (outcome.ok) enviados++;
             else fallos.push('reason' in outcome ? outcome.reason : outcome.error);
             continue;
@@ -1455,7 +1455,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
             phone: destino.phone,
             kind: 'freeform',
             category: 'UTILITY',
-            manual: aMano(),
+            manual: aMano(), respetarVentana: true,
             reenviado: true,
             ...firma,
             text: texto,
