@@ -276,9 +276,11 @@ const CSS = `
 .check-principal .ayuda { font-weight: 400; margin: 0; }
 .api-ejemplo { margin: var(--esp-3, 12px) 0 var(--esp-2, 8px); }
 .api-ejemplo summary { cursor: pointer; font-weight: 600; color: var(--primario); }
-.api-ejemplo table { font-size: 13px; margin-top: 8px; }
-.api-ejemplo td { vertical-align: top; }
+.api-ejemplo-lista { margin: 8px 0; padding-left: 20px; font-size: 13.5px; line-height: 1.55; }
+.api-ejemplo-lista li { margin: 4px 0; }
 .api-ejemplo code { overflow-wrap: anywhere; }
+.con-mas { margin: 0 0 var(--esp-3, 12px); }
+.con-mas summary { cursor: pointer; font-weight: 600; color: var(--primario); font-size: 14px; }
   .webhook-url { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
   .linea-fila.en-pausa { opacity: .78; }
   .ayuda.separada { margin-top: var(--esp-2); }
@@ -519,8 +521,10 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
 </section>
 <section class="tarjeta con-card" id="card-lineas">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📱</span><div class="con-tit"><h2>Líneas de WhatsApp</h2><span id="lineas-chip" class="chip tono-gris">Revisando…</span></div></div>
-  <p class="con-frase">Hasta 8 números por tienda, todos en la misma bandeja y un solo hilo por cliente. La etiqueta (por ejemplo <b>wsp-ali</b>) aparece en cada chat y cada mensaje para saber qué celular revisar. Si una línea se cae, las demás siguen.</p>
-  <p class="con-frase">Cada cliente nuevo entra por una línea conectada elegida al azar y se queda con ella: siempre se le escribe desde el mismo número. Solo cambia si su línea lleva más de 2 minutos desconectada o WhatsApp la bloquea (pasa a otra conectada y se queda en ella), si quitas o deshabilitas la línea, si él escribe a otro de tus números o si tú eliges otra en el chat.</p>
+  <p class="con-frase">Hasta 8 números en la misma bandeja. Si una línea se cae, las demás siguen.</p>
+  <details class="con-mas"><summary>¿Cómo se reparten los clientes?</summary>
+    <p class="ayuda">Cada cliente nuevo entra por una línea conectada y se queda con ella: siempre se le escribe desde el mismo número. Solo cambia si su línea lleva más de 2 minutos caída o WhatsApp la bloquea, si quitas o deshabilitas la línea, si él escribe a otro de tus números o si tú eliges otra en el chat. La etiqueta (por ejemplo <b>wsp-ali</b>) aparece en cada chat para saber qué celular revisar.</p>
+  </details>
   <div id="lineas-modo" class="bloque" hidden>
     <h3>¿Qué WhatsApp se usa?</h3>
     <div class="acciones" id="lineas-modo-botones" role="radiogroup" aria-label="Qué líneas se usan"></div>
@@ -537,7 +541,7 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <input id="linea-nueva" class="corto" maxlength="80" placeholder="Nombre de la línea (ej. wsp-kevin)" aria-label="Nombre de la nueva línea">
     </div>
     <div id="linea-api" hidden>
-      <p class="ayuda">Los datos salen de <b>developers.facebook.com</b> → tu app → WhatsApp → Configuración de la API. El token debe ser el <b>permanente</b> (de un usuario del sistema), no el de 24 h.</p>
+      <p class="ayuda">Los datos salen de <b>developers.facebook.com</b> → tu app → WhatsApp → Configuración de la API.</p>
       <div class="lineas-api-campos">
         <label class="api-campo">Token de acceso <input id="api-token" data-campo="token" type="password" autocomplete="off" maxlength="1000" placeholder="EAAG… (muy largo, unos 200 caracteres)" aria-describedby="api-token-error"><span class="api-error" id="api-token-error" hidden></span></label>
         <label class="api-campo">Phone number ID <input id="api-pnid" data-campo="phoneNumberId" inputmode="numeric" maxlength="100" placeholder="Ej. 123456789012345 (no el número de teléfono)" aria-describedby="api-pnid-error"><span class="api-error" id="api-pnid-error" hidden></span></label>
@@ -545,22 +549,19 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
         <label class="api-campo">App secret (clave secreta de la app) <input id="api-secret" data-campo="appSecret" type="password" autocomplete="off" maxlength="300" placeholder="32 letras y números" aria-describedby="api-secret-error"><span class="api-error" id="api-secret-error" hidden></span></label>
         <label class="api-campo">Verify token (una palabra que tú inventas) <input id="api-verify" data-campo="verifyToken" maxlength="300" autocomplete="off" placeholder="Ej. gsgwhatsapp2026" aria-describedby="api-verify-error"><span class="api-error" id="api-verify-error" hidden></span></label>
       </div>
-      <label class="check-principal"><input type="checkbox" id="api-principal"> Usarla como línea principal <span class="ayuda">(los mensajes salen primero por esta; después se puede cambiar con «Hacer principal»)</span></label>
+      <label class="check-principal"><input type="checkbox" id="api-principal"> Usarla como línea principal</label>
       <details class="api-ejemplo">
-        <summary>Ver un ejemplo de cómo se llena y de dónde sale cada dato</summary>
-        <div class="tablewrap"><table>
-          <thead><tr><th>Campo</th><th>Ejemplo (inventado)</th><th>Dónde está en Meta</th></tr></thead>
-          <tbody>
-            <tr><td>Token de acceso</td><td><code>EAAGm0PX4ZCpsBO7…</code> (unos 200 caracteres)</td><td>Business Manager → Configuración del negocio → Usuarios del sistema → Generar token (permisos <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>, caducidad «Nunca»)</td></tr>
-            <tr><td>Phone number ID</td><td><code>123456789012345</code></td><td>developers.facebook.com → tu app → WhatsApp → Configuración de la API → elige tu número en «De» → «Identificador del número de teléfono». <b>No</b> es el número <code>+51 9…</code></td></tr>
-            <tr><td>WhatsApp Business Account ID</td><td><code>1144600514634989</code></td><td>La misma pantalla, debajo: «Identificador de la cuenta de WhatsApp Business»</td></tr>
-            <tr><td>App secret</td><td><code>3f9a1c0b7e2d4a6f8b1c3e5d7a9f0b2c</code> (32 caracteres)</td><td>Configuración de la app → Básica → «Clave secreta de la app» → Mostrar. <b>No</b> es el identificador de la app (solo cifras)</td></tr>
-            <tr><td>Verify token</td><td><code>gsgwhatsapp2026</code></td><td>Lo inventas tú (8 caracteres o más, sin espacios). Se pega igual en Meta → WhatsApp → Configuración → Webhook</td></tr>
-          </tbody>
-        </table></div>
+        <summary>Ver ejemplo y dónde sale cada dato</summary>
+        <ul class="api-ejemplo-lista">
+          <li><b>Token de acceso:</b> <code>EAAGm0PX4ZCpsBO7…</code> (muy largo). El <b>permanente</b>: Business Manager → Usuarios del sistema → Generar token.</li>
+          <li><b>Phone number ID:</b> <code>123456789012345</code>. En Configuración de la API, debajo del número: «Identificador del número de teléfono». <b>No</b> es el <code>+51 9…</code></li>
+          <li><b>WhatsApp Business Account ID:</b> <code>1144600514634989</code>. La misma pantalla, «Identificador de la cuenta de WhatsApp Business».</li>
+          <li><b>App secret:</b> <code>3f9a1c0b7e2d4a6f8b1c3e5d7a9f0b2c</code> (32 caracteres). Configuración de la app → Básica → Clave secreta → Mostrar.</li>
+          <li><b>Verify token:</b> <code>gsgwhatsapp2026</code>. Lo inventas tú y lo pegas igual en el webhook de Meta.</li>
+        </ul>
+        <p class="ayuda">Meta también pide las <a class="link" href="/legal" target="_blank" rel="noopener">páginas legales</a> (privacidad, términos y eliminación de datos).</p>
       </details>
       <p class="ayuda" id="linea-api-webhook"></p>
-      <p class="ayuda">Para que Meta apruebe la app te pide tres direcciones públicas (Configuración de la app → Básica): la <a class="link" href="/privacidad" target="_blank" rel="noopener">política de privacidad</a>, los <a class="link" href="/terminos" target="_blank" rel="noopener">términos y condiciones</a> y las <a class="link" href="/eliminacion-de-datos" target="_blank" rel="noopener">instrucciones para eliminar datos</a>. En <a class="link" href="/legal" target="_blank" rel="noopener">Información legal</a> están listas para copiar.</p>
     </div>
     <div class="acciones">
       <button class="btn primario" id="linea-agregar" type="button">Agregar línea</button>
