@@ -389,6 +389,11 @@ export async function registerLocalRoutes(
         const info = await createWhatsAppClient({ ...cred, graphVersion: config.GRAPH_API_VERSION }).getPhoneNumber();
         return { numero: info.displayPhoneNumber.replace(/\D+/g, ''), nombre: info.verifiedName };
       },
+      // «Suscribir webhooks» de Meta: sin esto no llega nada de lo que escribe el cliente.
+      suscribirApi: async (cred) => {
+        const r = await createWhatsAppClient({ ...cred, graphVersion: config.GRAPH_API_VERSION }).subscribeApp();
+        if (!r.success) throw new Error('Meta no confirmó la suscripción');
+      },
       webhookUrl: () => `${config.PUBLIC_BASE_URL.replace(/\/+$/, '')}/webhooks/whatsapp`,
     });
     await registerLineasLimitesRoutes(app, { lineas, uso: repos.usoLineas, salud: crearSaludDeLineas({ lineas, registro }) });

@@ -293,6 +293,14 @@ describe('la ventana de servicio segun el proveedor', () => {
     ).toMatchObject({ allow: false, code: 'window_closed' });
   });
 
+  it('con la Cloud API tampoco sale a mano: Meta no lo entregaría, y se explica', () => {
+    const r = evaluateGates(intent({ contact: frio, kind: 'freeform', template: null, manual: true }), snapshot());
+    expect(r).toMatchObject({ allow: false, code: 'window_closed' });
+    expect((r as { reason: string }).reason).toContain('últimas 24 h');
+    // Sin Cloud API (QR), a mano sigue saliendo.
+    expect(evaluateGates(intent({ contact: frio, kind: 'freeform', template: null, manual: true }), snapshot({ serviceWindowApplies: false })).allow).toBe(true);
+  });
+
   it('sin Cloud API detras, la ventana no frena nada', () => {
     expect(
       evaluateGates(

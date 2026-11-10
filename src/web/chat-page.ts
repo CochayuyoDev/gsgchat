@@ -573,7 +573,11 @@ var conteoEtiquetas = null;
 function opcionesEtiqueta() {
   var d = conteoEtiquetas;
   if (!d) return [];
-  var con = d.etiquetas.filter(function (e) { return e.n > 0; }).sort(function (a, b) { return b.n - a.n; });
+  /* Todas las del catálogo, siempre: primero las que tienen chats (de más a menos) y después las que hoy no tienen
+     ninguno, en el orden del catálogo. Esconder las de 0 parecía que se habían borrado (10/11). */
+  var con = d.etiquetas.map(function (e, i) { return { e: e, i: i }; })
+    .sort(function (a, b) { return (b.e.n > 0) - (a.e.n > 0) || b.e.n - a.e.n || a.i - b.i; })
+    .map(function (x) { return x.e; });
   var estados = [];
   if (d.sinEtiquetar) estados.push({ valor: 'sin_etiquetar', texto: 'Sin etiquetar', n: d.sinEtiquetar, tono: 'hueco' });
   if (d.sinClasificar) estados.push({ valor: 'sin_clasificar', texto: 'Sin clasificar', n: d.sinClasificar, tono: 'sin' });
@@ -622,7 +626,7 @@ function abrirListaFiltro(boton, grupos, actual, elegir) {
   panel.innerHTML = grupos.map(function (g) {
     return (g.titulo ? '<div class="lf-titulo">' + esc(g.titulo) + '</div>' : '') + g.opciones.map(function (o) {
       var es = o.valor === actual;
-      return '<button type="button" class="lf-op' + (es ? ' activo' : '') + '" role="option" aria-selected="' + (es ? 'true' : 'false') + '" data-valor="' + esc(o.valor) + '">' +
+      return '<button type="button" class="lf-op' + (es ? ' activo' : '') + (o.n === 0 ? ' vacia' : '') + '" role="option" aria-selected="' + (es ? 'true' : 'false') + '" data-valor="' + esc(o.valor) + '">' +
         '<span class="lf-marca" aria-hidden="true">' + (es ? '✓' : '') + '</span>' +
         (o.tono ? '<i class="punto ' + esc(o.tono) + '" aria-hidden="true"></i>' : '') +
         '<span class="lf-texto">' + esc(o.texto) + '</span>' +

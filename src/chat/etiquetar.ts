@@ -261,6 +261,18 @@ export async function etiquetarDelDia(
     // 3. Lo demas, a la IA: solo clasifica, no contesta a nadie.
     const una = async (c: ChatDeLoteConMensajes) => {
       const base = { phone: c.phone, dia, huella: c.huella, mensajes: c.totalMensajes, loteId: lote.id };
+      // Sin nada del cliente no hay qué leer: solo hablamos nosotros (la plantilla,
+      // un «hola» del operador). La IA, sin datos, inventaba una etiqueta
+      // («Pedido no reconocido», 10/11). Queda sin etiqueta hasta que escriba.
+      if (!(c.mensajes ?? []).some((m) => m.direction === 'in')) {
+        const previa = (await deps.repo.delDia(dia, [c.phone]))[0];
+        if (previa?.origen === 'ia' && previa.etiqueta) await deps.repo.guardar({ ...base, etiqueta: null, origen: 'ia', motivo: null });
+        await deps.repo.marcarChatLote(lote.id, c.phone, { estado: 'reutilizada', etiqueta: null });
+        estado.reutilizadas++;
+        estado.hechas++;
+        alAvanzar({ ...estado });
+        return;
+      }
       try {
         const r = await clasificarConIA(ia, c.mensajes ?? [], c.nombre, negocio, { catalogo, conReglas: false, ejemplos });
         // Mientras la IA leia, una persona pudo ponerla a mano: esa manda y no se pisa.
