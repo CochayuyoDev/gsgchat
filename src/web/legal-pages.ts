@@ -36,7 +36,7 @@ export interface DatosLegales {
 }
 
 /** Cuando cambie el texto de estas paginas, se cambia esta fecha. */
-export const ULTIMA_ACTUALIZACION = '09/11/2026';
+export const ULTIMA_ACTUALIZACION = '10/11/2026';
 
 /**
  * Los datos publicos de GSG, tal como los publica GSG en
@@ -124,6 +124,7 @@ ${ICONOS_HEAD}
   main { background: var(--papel); border: 1px solid var(--borde); border-radius: 12px; padding: 24px 20px; margin-top: 16px; }
   h1 { font-size: 26px; line-height: 1.25; margin: 0 0 4px; }
   h2 { font-size: 19px; margin: 28px 0 6px; }
+  h3 { font-size: 16px; margin: 18px 0 4px; }
   .fecha { color: var(--suave); font-size: 14px; margin: 0 0 16px; }
   a { color: var(--primario); overflow-wrap: anywhere; }
   ul { padding-left: 22px; }
@@ -154,131 +155,336 @@ ${cuerpo}
 </html>`;
 }
 
+/** Los datos del titular, uno por línea, solo los que existen. */
+function fichaTitular(d: DatosLegales): string {
+  const filas = [
+    ['Razón social', d.razonSocial || d.nombreComercial],
+    ['Nombre comercial', d.razonSocial && d.nombreComercial !== d.razonSocial ? d.nombreComercial : ''],
+    ['RUC', d.ruc],
+    ['Domicilio', d.direccion],
+    ['Correo', d.correo ? `<a href="mailto:${esc(d.correo)}">${esc(d.correo)}</a>` : ''],
+    ['WhatsApp / teléfono', d.telefono ? esc(d.telefono) : ''],
+  ].filter(([, v]) => v);
+  return `<table>${filas.map(([k, v]) => `<tr><th>${k}</th><td>${k === 'Correo' || k === 'WhatsApp / teléfono' ? v : esc(v!)}</td></tr>`).join('')}</table>`;
+}
+
 export function privacidadPage(d: DatosLegales): string {
   return pagina('Política de privacidad', d, `
 <h1>Política de privacidad</h1>
-<p class="fecha">Última actualización: ${esc(d.actualizado)}</p>
+<p class="fecha">Fecha de última actualización: ${esc(d.actualizado)}</p>
 
-<p>Esta política explica qué datos personales tratamos cuando te escribimos o nos escribes por WhatsApp a través de ${esc(d.nombreComercial)}, para qué los usamos, con quién los compartimos y cómo puedes ejercer tus derechos. Cumple la Ley N.º 29733, Ley de Protección de Datos Personales del Perú, y su Reglamento.</p>
+<h2>1. Información general</h2>
+<p>${esc(d.nombreComercial)} (en adelante, «la Plataforma», «nosotros») es un servicio en la nube para que empresas de venta y reparto atiendan a sus clientes por WhatsApp —con WhatsApp vinculado por QR o con WhatsApp Business API de Meta— y, si la empresa lo activa, con ayuda de inteligencia artificial: pedir y confirmar la ubicación de entrega, avisar el estado del pedido y responder consultas.</p>
+<p>Esta política explica qué datos personales tratamos, para qué, con quién los compartimos y cómo puedes ejercer tus derechos. Cumple la Ley N.º 29733, Ley de Protección de Datos Personales del Perú, y su Reglamento.</p>
+<p><b>Titular del banco de datos personales y proveedor del servicio:</b> ${quienSomos(d)}.</p>
+${fichaTitular(d)}
 
-<h2>1. Quién es el responsable</h2>
-<p>El responsable del tratamiento es ${quienSomos(d)}. Para cualquier consulta sobre tus datos, escríbenos ${contacto(d)}.</p>
-<p>${esc(d.nombreComercial)} es un sistema de atención por WhatsApp que usan empresas de venta y reparto (por ejemplo, para coordinar la entrega de un pedido). Cuando una empresa te atiende con ${esc(d.nombreComercial)}, esa empresa decide para qué te escribe y nosotros tratamos tus datos por su encargo y según esta política.</p>
-
-<h2>2. Qué datos tratamos</h2>
+<h2>2. Datos personales que tratamos</h2>
+<h3>2.1 Datos de las empresas y su equipo (usuarios de la Plataforma)</h3>
+<ul>
+  <li>Datos de registro: nombre, usuario, correo o teléfono de contacto.</li>
+  <li>Datos de la empresa: nombre comercial, razón social, RUC y dirección.</li>
+  <li>Contraseñas (guardadas cifradas, nunca en texto) y el rol de cada persona.</li>
+  <li>Credenciales de conexión que la empresa entrega (token de WhatsApp Business API, clave secreta de la app de Meta, claves de API de proveedores de IA), guardadas cifradas.</li>
+  <li>Registro de las acciones hechas en el panel.</li>
+</ul>
+<h3>2.2 Datos de los clientes finales (las personas que reciben y envían mensajes)</h3>
+<p>Estos datos los aporta la empresa que te vendió o que te lleva el pedido, que actúa como responsable de su tratamiento.</p>
 <ul>
   <li><b>Tu número de WhatsApp y tu nombre de perfil</b>, tal como los muestra WhatsApp.</li>
   <li><b>Los mensajes que intercambiamos</b>: textos, notas de voz, fotos, videos, documentos y stickers.</li>
   <li><b>La ubicación que compartes</b> (el pin de WhatsApp o un enlace de mapa) para entregarte tu pedido.</li>
-  <li><b>Los datos del pedido</b> que nos pasa la empresa que te vendió o que te lo lleva: número de pedido, dirección, distrito, referencia, producto y horario de entrega.</li>
-  <li><b>Datos técnicos</b> del envío de cada mensaje (fecha, hora, si se entregó o se leyó).</li>
-  <li>De las personas que usan el panel (el equipo de la empresa): nombre, usuario, contraseña cifrada y un registro de las acciones que hacen.</li>
+  <li><b>Los datos del pedido</b>: código o tracking, producto, empresa, dirección, distrito, referencia, método de pago, monto a cobrar y horario de entrega.</li>
+  <li><b>Metadatos</b> de cada mensaje: fecha, hora y estado (enviado, entregado, leído).</li>
 </ul>
-<p>No pedimos datos sensibles (salud, religión, opiniones políticas, datos de tarjetas). Te pedimos que no los envíes por el chat.</p>
-
-<h2>3. Para qué los usamos</h2>
+<p><b>Advertencia:</b> no pedimos datos sensibles (salud, religión, opiniones políticas, datos de tarjetas). Te pedimos que no los envíes por el chat. Si un mensaje los trae, solo se usan para atender tu pedido.</p>
+<h3>2.3 Datos técnicos</h3>
 <ul>
-  <li>Coordinar la entrega de tu pedido: pedirte y confirmar tu ubicación, avisarte la hora de llegada y avisarte cuando se entregó.</li>
-  <li>Responder tus consultas sobre tu pedido.</li>
-  <li>Avisos del servicio que tú esperas recibir (por ejemplo, un cambio en tu entrega).</li>
-  <li>Mantener la seguridad del servicio, evitar abusos y cumplir obligaciones legales.</li>
+  <li>Dirección IP, navegador y sistema operativo de quien entra al panel o a estas páginas.</li>
+  <li>Cookies necesarias para la sesión (ver punto 9).</li>
+  <li>Registros de seguridad y de funcionamiento del servicio.</li>
 </ul>
-<p><b>No usamos tus datos para publicidad</b> sin tu consentimiento expreso, <b>no los vendemos</b> y no los usamos para tomar decisiones que te afecten de forma automática sin intervención de una persona.</p>
 
-<h2>4. Base legal</h2>
-<p>Tratamos tus datos porque son necesarios para entregarte el pedido que compraste (la relación que tienes con la empresa que te atiende) y, cuando corresponde, por tu consentimiento: al escribirnos o al aceptar recibir mensajes por WhatsApp. Puedes retirar tu consentimiento cuando quieras (ver punto 8).</p>
-
-<h2>5. Con quién los compartimos</h2>
+<h2>3. Finalidades y bases legales del tratamiento</h2>
+<p>Tratamos los datos conforme a los principios y condiciones de la Ley N.º 29733.</p>
+<h3>3.1 Consentimiento</h3>
+<p>Cuando nos escribes o aceptas recibir mensajes por WhatsApp sobre tu pedido, y cuando la empresa crea su cuenta, se otorga el consentimiento para: gestionar la cuenta, enviar y recibir mensajes por WhatsApp, analizar las conversaciones con inteligencia artificial (si la empresa lo activa) y guardar el historial necesario para atender el pedido. Puedes retirarlo cuando quieras (punto 7).</p>
+<h3>3.2 Ejecución de la relación contractual</h3>
 <ul>
-  <li><b>La empresa que te atiende</b> (la tienda o la empresa de reparto, por ejemplo GSG): recibe tu ubicación y el estado de tu entrega.</li>
-  <li><b>El motorizado o repartidor</b> asignado: recibe tu nombre, tu dirección, tu ubicación y tu número, solo para llevarte el pedido.</li>
-  <li><b>Meta Platforms (WhatsApp)</b>: es el canal por el que viajan los mensajes. Meta trata esos datos según sus propias políticas: <a href="https://www.whatsapp.com/legal/privacy-policy" rel="noopener">política de privacidad de WhatsApp</a>.</li>
-  <li><b>Proveedores de inteligencia artificial</b>, solo si la empresa activa el asistente automático: el texto de tu mensaje se envía al proveedor elegido para redactar la respuesta. No se usa para entrenar modelos de terceros con tus datos cuando el proveedor lo permite configurar así.</li>
-  <li><b>Proveedor de voz</b> (ElevenLabs), solo si la empresa activa las respuestas por audio o la transcripción de notas de voz.</li>
-  <li><b>Proveedores de servidores</b> donde se aloja el sistema, obligados a guardar confidencialidad.</li>
-  <li><b>Autoridades</b>, cuando una ley o una orden judicial lo exijan.</li>
+  <li>Coordinar la entrega de tu pedido: pedirte y confirmar tu ubicación, avisarte la hora de llegada y que se entregó.</li>
+  <li>Prestar el servicio a la empresa y darle soporte técnico.</li>
+  <li>Facturación y avisos operativos del servicio.</li>
 </ul>
-
-<h2>6. Transferencias fuera del Perú</h2>
-<p>Algunos de estos proveedores (Meta, proveedores de inteligencia artificial y de voz) procesan datos fuera del Perú, principalmente en Estados Unidos. Solo trabajamos con proveedores que ofrecen niveles adecuados de protección, conforme a la Ley N.º 29733.</p>
-
-<h2>7. Cuánto tiempo los guardamos</h2>
+<h3>3.3 Interés legítimo</h3>
 <ul>
-  <li><b>Mensajes del chat</b>: se borran del chat a las ${horasDelChat} horas.</li>
-  <li><b>Conversaciones guardadas</b> por el equipo (por ejemplo, ante un reclamo): hasta que dejen de ser necesarias; al borrarlas pasan 30 días en una papelera y después se eliminan.</li>
-  <li><b>Datos del pedido y ubicación</b>: mientras dure la entrega y el plazo necesario para atender reclamos y cumplir obligaciones legales y tributarias.</li>
-  <li><b>Registros técnicos</b> de envío: el tiempo necesario para la seguridad y el buen funcionamiento del servicio.</li>
+  <li>Seguridad y continuidad de la Plataforma.</li>
+  <li>Prevención de fraude, spam y usos indebidos (por ejemplo, cuidar que un número de WhatsApp no sea bloqueado).</li>
+  <li>Mejorar el funcionamiento del sistema.</li>
 </ul>
+<p><b>No usamos tus datos para publicidad</b> sin tu consentimiento expreso, <b>no los vendemos</b> y no tomamos decisiones que te afecten de forma automática sin que una persona pueda intervenir.</p>
 
-<h2>8. Tus derechos</h2>
-<p>Puedes ejercer en cualquier momento tus derechos de <b>acceso, rectificación, cancelación (eliminación) y oposición</b>, así como <b>revocar tu consentimiento</b>. Escríbenos ${contacto(d)} indicando tu número de WhatsApp y lo que pides. Te responderemos dentro de los plazos de la ley.</p>
-<p>Si no quieres recibir más mensajes, responde <b>BAJA</b> en el chat o pídelo con tus palabras: una persona del equipo te quitará de la lista y no te volveremos a escribir. También puedes bloquear el número desde WhatsApp.</p>
-<p>Para borrar tus datos, sigue los pasos de <a href="/eliminacion-de-datos">Eliminar mis datos</a>.</p>
-<p>Si consideras que no atendimos tu pedido, puedes reclamar ante la Autoridad Nacional de Protección de Datos Personales del Ministerio de Justicia y Derechos Humanos.</p>
-
-<h2>9. Cómo protegemos tus datos</h2>
+<h2>4. Tratamiento de datos de terceros (clientes finales)</h2>
+<h3>4.1 La empresa usuaria: responsable del tratamiento</h3>
+<p>La empresa que usa ${esc(d.nombreComercial)} para escribir a sus clientes es responsable de esos datos y se compromete a:</p>
 <ul>
-  <li>Las credenciales y claves del sistema se guardan cifradas.</li>
-  <li>Al panel solo entra el equipo autorizado, con usuario y contraseña, y cada persona ve lo que su rol le permite.</li>
-  <li>Las acciones importantes quedan registradas.</li>
-  <li>La conexión con el sistema va cifrada (HTTPS).</li>
+  <li>Tener el consentimiento válido de sus clientes para escribirles por WhatsApp.</li>
+  <li>Informarles para qué usa sus datos.</li>
+  <li>Cumplir la Ley N.º 29733, su Reglamento y las políticas de WhatsApp.</li>
+  <li>No usar los datos para fines distintos de los informados.</li>
 </ul>
+<p>${esc(d.nombreComercial)} no responde por incumplimientos de la empresa usuaria al obtener esos consentimientos o al informar a sus clientes.</p>
+<h3>4.2 Nuestro rol: encargado del tratamiento</h3>
+<p>Respecto de los datos de los clientes finales, actuamos por encargo de la empresa usuaria y nos comprometemos a:</p>
+<ul>
+  <li>Tratarlos solo según sus instrucciones y para prestar el servicio.</li>
+  <li>Aplicar medidas técnicas y organizativas adecuadas.</li>
+  <li>No usarlos para fines propios.</li>
+  <li>Avisar a la empresa de incidentes de seguridad relevantes.</li>
+</ul>
+
+<h2>5. Con quién compartimos los datos y transferencias</h2>
+<h3>5.1 Destinatarios y proveedores necesarios</h3>
+<table>
+  <tr><th>Destinatario</th><td><b>País · para qué</b></td></tr>
+  <tr><th>La empresa que te atiende (por ejemplo, GSG)</th><td>Perú · recibe tu ubicación y el estado de tu entrega.</td></tr>
+  <tr><th>El motorizado o repartidor asignado</th><td>Perú · recibe tu nombre, dirección, ubicación y número, solo para llevarte el pedido.</td></tr>
+  <tr><th>Meta Platforms (WhatsApp)</th><td>EE.UU. · el canal por el que viajan los mensajes (WhatsApp Business Platform). Meta trata esos datos según su <a href="https://www.whatsapp.com/legal/privacy-policy" rel="noopener">política de privacidad</a>.</td></tr>
+  <tr><th>Proveedores de inteligencia artificial</th><td>EE.UU. · solo si la empresa activa el asistente: el texto del mensaje se envía al proveedor elegido para leerlo o redactar la respuesta.</td></tr>
+  <tr><th>Proveedor de voz (ElevenLabs)</th><td>EE.UU. · solo si la empresa activa las respuestas por audio o la transcripción de notas de voz.</td></tr>
+  <tr><th>Proveedores de servidores</th><td>Donde se aloja el sistema · obligados a guardar confidencialidad.</td></tr>
+  <tr><th>Autoridades</th><td>Cuando una ley o una orden judicial lo exijan.</td></tr>
+</table>
+<h3>5.2 Transferencias internacionales</h3>
+<p>Algunos proveedores están en países que pueden no tener un nivel de protección equivalente al peruano (por ejemplo, Estados Unidos). Esas transferencias se hacen con las garantías que exigen la Ley N.º 29733 y su Reglamento: contratos de encargo y cláusulas de protección de datos.</p>
+<h3>5.3 No compartimos tus datos para</h3>
+<ul>
+  <li>Venderlos, alquilarlos o cederlos comercialmente.</li>
+  <li>Publicidad de terceros.</li>
+  <li>Cualquier fin que no esté descrito en esta política.</li>
+</ul>
+
+<h2>6. Medidas de seguridad</h2>
+<ul>
+  <li>Conexión cifrada (HTTPS) entre tu navegador o WhatsApp y el sistema.</li>
+  <li>Contraseñas, tokens y claves guardados cifrados.</li>
+  <li>Acceso al panel solo para el equipo autorizado, con usuario y contraseña, y cada persona ve lo que su rol le permite.</li>
+  <li>Comprobación de la firma de Meta en cada aviso que llega de WhatsApp.</li>
+  <li>Registro de las acciones importantes y copias de seguridad.</li>
+</ul>
+
+<h2>7. Tus derechos (ARCO)</h2>
+<p>Como titular de tus datos puedes ejercer en cualquier momento tus derechos de:</p>
+<ul>
+  <li><b>Acceso</b>: saber qué datos tuyos tratamos.</li>
+  <li><b>Rectificación</b>: corregir los que estén mal.</li>
+  <li><b>Cancelación</b>: pedir que los eliminemos (<a href="/eliminacion-de-datos">cómo hacerlo</a>).</li>
+  <li><b>Oposición</b>: oponerte a un uso que no sea necesario.</li>
+</ul>
+<h3>7.1 Copia de tus datos</h3>
+<p>Puedes pedirnos una copia de tus datos en un formato ordenado.</p>
+<h3>7.2 Revocar tu consentimiento</h3>
+<p>Puedes retirarlo en cualquier momento. Si no quieres recibir más mensajes, responde <b>BAJA</b> en el chat o pídelo con tus palabras: una persona del equipo te quitará de la lista y no te volveremos a escribir. También puedes bloquear el número desde WhatsApp.</p>
+<h3>7.3 Cómo ejercerlos</h3>
+<p>Escríbenos ${contacto(d)}${d.direccion ? ` o envía una carta a ${esc(d.direccion)}` : ''}, indicando tu número de WhatsApp y lo que pides. Te responderemos en un plazo máximo de 10 días hábiles, o el que fije la ley para cada derecho.</p>
+
+<h2>8. Plazos de conservación</h2>
+<table>
+  <tr><th>Mensajes del chat</th><td>Se borran del chat a las ${horasDelChat} horas.</td></tr>
+  <tr><th>Conversaciones guardadas por el equipo (por ejemplo, ante un reclamo)</th><td>Hasta que dejen de ser necesarias; al borrarlas pasan 30 días en una papelera y después se eliminan.</td></tr>
+  <tr><th>Datos del pedido y ubicación</th><td>Mientras dure la entrega y el plazo necesario para atender reclamos.</td></tr>
+  <tr><th>Datos de la cuenta de la empresa y su equipo</th><td>Mientras la cuenta esté activa.</td></tr>
+  <tr><th>Datos de facturación</th><td>El plazo que exijan las normas tributarias.</td></tr>
+  <tr><th>Registros técnicos</th><td>El tiempo necesario para la seguridad y el buen funcionamiento del servicio.</td></tr>
+</table>
+<p>Pasados esos plazos, los datos se eliminan de forma segura o se anonimizan.</p>
+
+<h2>9. Cookies</h2>
+<p>Usamos solo las cookies necesarias para que funcionen la sesión del panel y tus preferencias (por ejemplo, el tema claro u oscuro). No usamos cookies de publicidad ni de analítica de terceros. Puedes borrarlas o bloquearlas desde tu navegador; sin ellas no podrás entrar al panel.</p>
 
 <h2>10. Menores de edad</h2>
-<p>El servicio no está dirigido a menores de 14 años. Si eres padre, madre o tutor y crees que un menor nos dio datos, escríbenos y los eliminaremos.</p>
+<p>El panel es para personas mayores de 18 años que actúan por una empresa. A los clientes finales no les pedimos la edad; si eres padre, madre o tutor y crees que un menor de 14 años nos dio sus datos sin tu consentimiento, escríbenos y los eliminaremos.</p>
 
 <h2>11. Cambios a esta política</h2>
-<p>Si cambiamos esta política, publicaremos la nueva versión en esta misma página con su fecha de actualización.</p>
+<p>Si cambiamos esta política, publicaremos la nueva versión en esta página con su fecha. Los cambios relevantes se avisarán a las empresas usuarias con anticipación razonable.</p>
+
+<h2>12. Autoridad de protección de datos</h2>
+<p>Si consideras que no atendimos tu pedido, puedes presentar un reclamo ante la Autoridad Nacional de Protección de Datos Personales del Ministerio de Justicia y Derechos Humanos.</p>
+
+<h2>13. Contacto</h2>
+<p>Para consultas o para ejercer tus derechos, escríbenos ${contacto(d)}.</p>
+${fichaTitular(d)}
 `, '/privacidad');
 }
 
 export function terminosPage(d: DatosLegales): string {
+  const nombre = esc(d.nombreComercial);
   return pagina('Términos y condiciones', d, `
-<h1>Términos y condiciones</h1>
-<p class="fecha">Última actualización: ${esc(d.actualizado)}</p>
+<h1>Términos y condiciones de uso</h1>
+<p class="fecha">Fecha de última actualización: ${esc(d.actualizado)}</p>
 
-<p>Estos términos regulan el uso de ${esc(d.nombreComercial)}, ofrecido por ${quienSomos(d)}. Al usar el sistema (como empresa que atiende a sus clientes o como persona que recibe mensajes) aceptas estos términos.</p>
+<h2>1. Aceptación</h2>
+<p>Al registrarte, entrar o usar ${nombre} (en adelante, «la Plataforma», «el Servicio», «nosotros»), ofrecido por ${quienSomos(d)}, declaras haber leído, entendido y aceptado estos Términos y Condiciones y nuestra <a href="/privacidad">Política de privacidad</a>.</p>
+<p>Este documento es un contrato electrónico válido conforme al Código Civil del Perú. <b>Si no aceptas estos términos, no uses el Servicio.</b></p>
 
-<h2>1. Qué es el servicio</h2>
-<p>${esc(d.nombreComercial)} es un sistema para que empresas de venta y reparto atiendan a sus clientes por WhatsApp: pedir y confirmar la ubicación de entrega, avisar el estado del pedido, coordinar a los repartidores y responder consultas, con ayuda opcional de un asistente automático.</p>
+<h2>2. Definiciones</h2>
+<ul>
+  <li><b>Usuario o empresa:</b> la persona natural o jurídica que usa el Servicio para atender a sus clientes.</li>
+  <li><b>Plataforma:</b> el software en la nube ${nombre}.</li>
+  <li><b>Servicio:</b> las funciones de la Plataforma: mensajería por WhatsApp, pedido y confirmación de ubicación, etiquetas, reportes, automatizaciones e integraciones.</li>
+  <li><b>Contenido del usuario:</b> la información, mensajes, archivos y datos que la empresa aporta.</li>
+  <li><b>Cliente final:</b> la persona que recibe y envía mensajes por WhatsApp sobre su pedido.</li>
+  <li><b>Credenciales:</b> los tokens, claves secretas y claves de API que la empresa entrega para conectar WhatsApp, Meta u otros servicios.</li>
+  <li><b>Encargado del tratamiento:</b> ${nombre}, respecto de los datos de los clientes finales.</li>
+  <li><b>Responsable del tratamiento:</b> la empresa usuaria, respecto de los datos de sus clientes.</li>
+</ul>
 
-<h2>2. Para las personas que reciben mensajes</h2>
+<h2>3. Alcance y descripción del servicio</h2>
+<h3>3.1 Funciones incluidas</h3>
+<ul>
+  <li>Conexión con WhatsApp vinculado por QR y con WhatsApp Business API de Meta.</li>
+  <li>Bandeja de chats con etiquetas, ficha del cliente y varias líneas.</li>
+  <li>Pedido de ubicación y confirmación de entrega, con recordatorios.</li>
+  <li>Plantillas de mensajes aprobadas por Meta (Message Templates).</li>
+  <li>Reportes, avisos y estado del servicio.</li>
+  <li>Integraciones con otros sistemas por API (por ejemplo, el de la empresa de reparto).</li>
+  <li>Uso opcional de inteligencia artificial y de voz, si la empresa los configura.</li>
+</ul>
+<h3>3.2 Dependencia de terceros</h3>
+<p>El Servicio funciona con proveedores externos: Meta / WhatsApp Business Platform, proveedores de servidores y, según la configuración de la empresa, proveedores de inteligencia artificial y de voz. No respondemos por fallas, suspensiones o cambios que hagan esos terceros.</p>
+<h3>3.3 Disponibilidad internacional</h3>
+<p>El Servicio está disponible solo donde lo permitan las políticas de WhatsApp.</p>
+
+<h2>4. Requisitos para usar el servicio</h2>
+<h3>4.1 Capacidad legal</h3>
+<p>Quien usa el Servicio garantiza que tiene 18 años o más, capacidad legal para contratar y, si actúa por una empresa, autoridad para hacerlo.</p>
+<h3>4.2 Requisitos técnicos</h3>
+<ul>
+  <li>Con WhatsApp Business API: una cuenta de Meta Business, un número de WhatsApp Business verificado y una app de Meta con sus credenciales.</li>
+  <li>Con WhatsApp por QR: un celular con WhatsApp para vincular.</li>
+  <li>Un navegador actualizado.</li>
+</ul>
+
+<h2>5. Creación, gestión y seguridad de la cuenta</h2>
+<h3>5.1 Registro</h3>
+<p>La empresa debe dar información veraz y actualizada, y crear credenciales seguras y personales para cada miembro de su equipo.</p>
+<h3>5.2 Responsabilidad del usuario</h3>
+<ul>
+  <li>Responde por toda la actividad hecha desde su cuenta.</li>
+  <li>Debe avisarnos de cualquier acceso no autorizado.</li>
+  <li>Debe mantener seguros sus dispositivos y credenciales.</li>
+</ul>
+<h3>5.3 Prohibiciones</h3>
+<ul>
+  <li>Crear varias cuentas para evadir límites.</li>
+  <li>Compartir accesos con terceros no autorizados.</li>
+  <li>Entrar a cuentas ajenas sin autorización.</li>
+</ul>
+
+<h2>6. Planes, precios, facturación y pagos</h2>
+<h3>6.1 Planes</h3>
+<p>Los planes pueden tener límites por número de líneas de WhatsApp, mensajes o funciones. El plan contratado se informa al contratar y en el panel.</p>
+<h3>6.2 Precios</h3>
+<p>Los precios se informan al contratar o en el panel. Pueden cambiar con un aviso previo de 30 días.</p>
+<h3>6.3 Facturación e impuestos</h3>
+<p>El cobro es por ciclos (mensual o anual) en la fecha de renovación. Los comprobantes se emiten conforme a las normas de la SUNAT. Salvo que se indique otra cosa, los precios no incluyen el IGV ni otros impuestos aplicables.</p>
+<h3>6.4 Suspensión por falta de pago</h3>
+<p>Si un pago no se procesa, el acceso puede suspenderse hasta regularizarlo.</p>
+<h3>6.5 Reembolsos</h3>
+<p>Los reembolsos se evalúan solo si se piden dentro de las primeras veinticuatro (24) horas siguientes al cobro de la renovación. Pasado ese plazo, el período se considera facturado y no se devuelve, aunque el servicio no se haya usado total o parcialmente. No hay reembolso cuando la suspensión o el término se deben a un uso indebido o a un incumplimiento de estos términos. Si se aprueba un reembolso, se pueden descontar las comisiones de las plataformas de pago y entidades financieras que no sean recuperables.</p>
+
+<h2>7. Costos de terceros</h2>
+<h3>7.1 WhatsApp Business API</h3>
+<p>La empresa reconoce que Meta cobra sus propias tarifas por los mensajes de WhatsApp Business API (por ejemplo, por cada plantilla entregada), que esos cargos son independientes de los nuestros y que los cobra Meta directamente a la cuenta de la empresa, que es responsable de ellos.</p>
+<h3>7.2 Inteligencia artificial y otras APIs</h3>
+<p>Si la empresa conecta claves de API de proveedores externos, es responsable de sus pagos, su configuración, su seguridad y su buen uso. No administramos ni cobramos esos servicios.</p>
+
+<h2>8. Uso aceptable</h2>
+<h3>8.1 Uso permitido</h3>
+<ul>
+  <li>Atención al cliente y coordinación de pedidos y entregas.</li>
+  <li>Confirmaciones de pedidos, de ubicación y de entrega por WhatsApp.</li>
+  <li>Automatización de procesos de la empresa.</li>
+  <li>Comunicación legítima con contactos que dieron su consentimiento.</li>
+</ul>
+<h3>8.2 Uso prohibido</h3>
+<ul>
+  <li>Enviar spam, mensajes no autorizados o publicidad no consentida.</li>
+  <li>Contenido ilegal, fraudulento, engañoso, sexual, violento, ofensivo o difamatorio.</li>
+  <li>Suplantar a otras personas o empresas.</li>
+  <li>Pedir o enviar información sensible sin consentimiento expreso.</li>
+  <li>Seguir escribiendo a quien pidió la baja.</li>
+</ul>
+<h3>8.3 Consecuencias</h3>
+<p>Incumplir el uso aceptable puede llevar a la suspensión inmediata, al término de la cuenta sin reembolso, al bloqueo definitivo del acceso y, si corresponde, a avisar a las autoridades.</p>
+
+<h2>9. Responsabilidades de la empresa usuaria</h2>
+<h3>9.1 Cumplimiento legal</h3>
+<p>La empresa se compromete a cumplir la Ley N.º 29733 (Protección de Datos Personales), la Ley N.º 29571 (Código de Protección y Defensa del Consumidor), las <a href="https://www.whatsapp.com/legal/business-policy" rel="noopener">Políticas de WhatsApp Business</a>, las <a href="https://www.whatsapp.com/legal/business-terms" rel="noopener">Condiciones de WhatsApp Business</a>, las políticas de Meta y las normas tributarias y comerciales.</p>
+<h3>9.2 Sus contactos</h3>
+<p>La empresa garantiza que tiene el consentimiento de sus clientes para escribirles, que les informó del tratamiento de sus datos, que respeta la baja (cualquier cliente puede responder <b>BAJA</b>) y que lo que comunica es verdadero.</p>
+<h3>9.3 Credenciales</h3>
+<p>Las credenciales y claves de API que entrega la empresa son de su exclusiva responsabilidad.</p>
+<h3>9.4 WhatsApp vinculado por QR</h3>
+<p>Una línea vinculada por QR no es una vía oficial de Meta: WhatsApp puede restringir o bloquear ese número. La empresa que la usa lo acepta.</p>
+
+<h2>10. Para las personas que reciben mensajes</h2>
 <ul>
   <li>Te escribimos por encargo de la empresa a la que le compraste, sobre tu pedido.</li>
   <li>Puedes dejar de recibir mensajes cuando quieras respondiendo <b>BAJA</b> o pidiéndolo en el chat.</li>
   <li>Algunas respuestas pueden ser automáticas. Siempre puedes pedir hablar con una persona.</li>
-  <li>Tus datos se tratan como explica la <a href="/privacidad">Política de privacidad</a>.</li>
+  <li>Tus datos se tratan como explica la <a href="/privacidad">Política de privacidad</a>, y puedes pedir que se borren en <a href="/eliminacion-de-datos">Eliminar mis datos</a>.</li>
 </ul>
 
-<h2>3. Para las empresas que usan el sistema</h2>
+<h2>11. Limitaciones del servicio</h2>
+<h3>11.1 Disponibilidad</h3>
+<p>Hacemos lo razonable para que el Servicio funcione sin interrupciones, pero no lo garantizamos de forma absoluta: hay mantenimientos, fallas de terceros y cambios de WhatsApp Business API. Tampoco garantizamos que cada mensaje llegue, por ejemplo si WhatsApp lo rechaza o el número del cliente no existe.</p>
+<h3>11.2 Límites técnicos</h3>
+<p>Según el plan y las reglas de Meta, puede haber límites de mensajes, de almacenamiento y de velocidad. El sistema también regula el ritmo de envío para cuidar que el número no sea bloqueado.</p>
+<h3>11.3 Funciones en prueba</h3>
+<p>Las funciones marcadas como de prueba pueden tener errores, cambiar o retirarse sin aviso.</p>
+
+<h2>12. Propiedad intelectual</h2>
+<p>El código, la marca, el diseño y los procesos de la Plataforma son de sus titulares. Se otorga a la empresa una licencia de uso no exclusiva, no transferible y revocable mientras dure el servicio. La empresa conserva la propiedad de su contenido y de los datos de sus clientes. Se prohíbe la ingeniería inversa, la copia del software y el uso de la marca sin autorización previa.</p>
+
+<h2>13. Limitación de responsabilidad</h2>
+<p>En la medida que lo permita la ley peruana, no respondemos por daños indirectos, especiales o consecuenciales, ni por lucro cesante; por pérdidas de datos causadas por fallas externas; por problemas causados por Meta, WhatsApp o proveedores de inteligencia artificial; ni por el uso indebido del Servicio por parte de la empresa. El Servicio es una herramienta: las decisiones sobre los pedidos, las entregas y lo que se le dice a cada cliente son de la empresa que lo usa.</p>
+<p>Nuestra responsabilidad máxima equivale al monto que la empresa pagó en los últimos 3 meses. Estas limitaciones no se aplican en casos de dolo, culpa grave o cuando la ley peruana lo prohíba.</p>
+
+<h2>14. Indemnización</h2>
+<p>La empresa nos indemnizará por los daños que resulten de su incumplimiento de estos términos, de la violación de derechos de terceros o de su uso de la Plataforma.</p>
+
+<h2>15. Datos personales y privacidad</h2>
+<p>El tratamiento de datos se rige por la <a href="/privacidad">Política de privacidad</a> vigente. La empresa usuaria es responsable del tratamiento de los datos de sus contactos.</p>
+
+<h2>16. Terminación</h2>
+<h3>16.1 Por la empresa</h3>
+<p>Puede dejar de usar el Servicio y pedir el cierre de su cuenta en cualquier momento.</p>
+<h3>16.2 Por nosotros</h3>
+<p>Podemos suspender o terminar el acceso por incumplimiento de estos términos o de las políticas de WhatsApp, por falta de pago, por actividad sospechosa que ponga en riesgo el Servicio o a terceros, o por orden de una autoridad.</p>
+<h3>16.3 Consecuencias</h3>
+<p>El acceso termina y los datos se eliminan según los plazos de la Política de privacidad. No hay reembolso por períodos no usados.</p>
+
+<h2>17. Modificaciones</h2>
+<p>Podemos actualizar estos términos. La versión vigente es la publicada en esta página, con su fecha; los cambios relevantes se avisarán a las empresas con 15 días de anticipación. También podemos cambiar o retirar funciones con un aviso razonable.</p>
+
+<h2>18. Ley aplicable y solución de controversias</h2>
+<p>Estos términos se rigen por las leyes de la República del Perú. Antes de acudir a un juez, las partes intentarán una negociación directa durante 30 días y, si no hay acuerdo, una conciliación. Cualquier controversia se someterá a los jueces y tribunales del Distrito Judicial de Lima Norte, salvo los derechos irrenunciables del consumidor, que puede reclamar en su propia jurisdicción.</p>
+
+<h2>19. Disposiciones generales</h2>
 <ul>
-  <li>Eres responsable de tener el consentimiento de tus clientes para escribirles por WhatsApp y de que la información que cargas (pedidos, teléfonos, direcciones) sea correcta y lícita.</li>
-  <li>Debes cumplir las <a href="https://www.whatsapp.com/legal/business-policy" rel="noopener">Políticas de WhatsApp Business</a>, las <a href="https://www.whatsapp.com/legal/business-terms" rel="noopener">Condiciones de WhatsApp Business</a> y la Ley N.º 29733.</li>
-  <li>No puedes usar el sistema para enviar spam, publicidad no solicitada, contenido ilegal, engañoso, ofensivo o que infrinja derechos de terceros, ni para suplantar a otras personas o empresas.</li>
-  <li>Cuidas tus usuarios y contraseñas y respondes por lo que se haga con ellos.</li>
-  <li>Si usas una línea vinculada con QR (WhatsApp normal), sabes que no es una vía oficial de Meta y que WhatsApp puede restringir o bloquear ese número. Con la API oficial de WhatsApp Business, los cargos por conversación los cobra Meta directamente a tu cuenta.</li>
+  <li>Este documento es el acuerdo completo entre las partes sobre el Servicio.</li>
+  <li>Si una cláusula es nula, las demás siguen vigentes.</li>
+  <li>No existe relación laboral, de agencia ni de sociedad entre las partes.</li>
+  <li>La empresa no puede ceder su cuenta sin autorización.</li>
+  <li>El caso fortuito y la fuerza mayor eximen temporalmente de responsabilidad.</li>
 </ul>
 
-<h2>4. Disponibilidad</h2>
-<p>Hacemos lo razonable para que el servicio funcione sin interrupciones, pero depende de terceros (WhatsApp, Meta, proveedores de internet, de inteligencia artificial y de servidores). No garantizamos que funcione sin cortes ni que cada mensaje llegue, por ejemplo si WhatsApp lo rechaza o el número del cliente no existe.</p>
+<h2>20. Libro de Reclamaciones</h2>
+<p>Ponemos a disposición nuestro <a href="/libro-de-reclamaciones">Libro de Reclamaciones virtual</a>, conforme al Código de Protección y Defensa del Consumidor y su reglamento.</p>
 
-<h2>5. Responsabilidad</h2>
-<p>El sistema es una herramienta: las decisiones sobre los pedidos, las entregas y lo que se le dice a cada cliente son de la empresa que lo usa. En la medida que la ley lo permita, no respondemos por daños indirectos, lucro cesante ni por fallas de servicios de terceros.</p>
-
-<h2>6. Suspensión</h2>
-<p>Podemos suspender una cuenta que incumpla estos términos o las políticas de WhatsApp, o que ponga en riesgo el servicio o a terceros.</p>
-
-<h2>7. Propiedad intelectual</h2>
-<p>El sistema, su diseño y su código son de su titular. La empresa conserva la propiedad de sus datos y de los de sus clientes.</p>
-
-<h2>8. Cambios</h2>
-<p>Podemos actualizar estos términos. La versión vigente es la publicada en esta página, con su fecha.</p>
-
-<h2>9. Ley y jurisdicción</h2>
-<p>Estos términos se rigen por las leyes de la República del Perú. Cualquier controversia se someterá a los jueces y tribunales de Lima, salvo que la ley de protección al consumidor disponga otra cosa.</p>
-
-<h2>10. Contacto</h2>
-<p>Escríbenos ${contacto(d)}.</p>
+<h2>21. Notificaciones y contacto</h2>
+<p>A la empresa le escribimos al correo o al teléfono que registró. A nosotros nos escribes ${contacto(d)}.</p>
+${fichaTitular(d)}
 `, '/terminos');
 }
 
