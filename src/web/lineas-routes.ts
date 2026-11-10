@@ -256,7 +256,8 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
         }
       }
       await lineas.fijarCredenciales(linea.id, body);
-      if (numero) await lineas.sincronizar(linea.id, { telefono: numero });
+      // Meta contesto: la linea queda conectada ya (sin esperar a la siguiente vuelta del registro).
+      if (deps.probarApi) await lineas.sincronizar(linea.id, { estado: 'conectado', ...(numero ? { telefono: numero } : {}) });
       // El cliente guardado se armo con los datos viejos.
       registro.olvidar(linea.id);
       return { ok: true, linea: await vista((await lineas.obtener(linea.id))!) };
@@ -302,6 +303,11 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
         }
       }
       const linea = await lineas.crear({ etiqueta: body.etiqueta, proveedor: body.proveedor, telefono, credenciales: body.credenciales });
+      // Una linea de la API que Meta acepto ya esta conectada.
+      if (body.proveedor === 'cloud' && deps.probarApi) {
+        await lineas.sincronizar(linea.id, { estado: 'conectado' });
+        return { ok: true, linea: await vista((await lineas.obtener(linea.id)) ?? linea) };
+      }
       return { ok: true, linea: await vista(linea) };
     } catch (error) {
       return responderError(error, reply);

@@ -271,6 +271,9 @@ const CSS = `
   .lineas-api-campos input { width: 100%; box-sizing: border-box; }
 .lineas-api-campos input[aria-invalid="true"] { border-color: var(--rojo); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rojo) 18%, transparent); }
 .api-error { color: var(--rojo); font-weight: 600; font-size: 12.5px; line-height: 1.45; }
+.linea-aviso { margin: 8px 0 0; padding: 9px 12px; border-radius: var(--radio-sm, 8px); font-size: 13.5px; font-weight: 600; border: 1px solid var(--borde); }
+.linea-aviso.ok { color: var(--primario); border-color: color-mix(in srgb, var(--primario) 40%, transparent); background: color-mix(in srgb, var(--primario) 10%, transparent); }
+.linea-aviso.mal { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); background: var(--rojo-suave); }
 .check-principal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: var(--esp-3, 12px) 0 0; font-weight: 600; font-size: 14px; }
 .check-principal input { width: auto; }
 .check-principal .ayuda { font-weight: 400; margin: 0; }
@@ -1825,6 +1828,23 @@ function lineasMsg(t, tono) {
   el.textContent = t || '';
   el.style.color = tono === 'rojo' ? '#b42318' : '';
 }
+/* La respuesta de cada accion sale dentro de su linea, junto a sus botones (y sobrevive al repintado). */
+var avisosLinea = {};
+var formsAbiertos = {};
+var avisoTimers = {};
+function avisoLinea(id, texto, mal) {
+  avisosLinea[id] = texto ? { t: texto, mal: Boolean(mal) } : null;
+  var fila = document.querySelector('[data-linea="' + id + '"]');
+  if (fila) {
+    var el = fila.querySelector('.linea-aviso');
+    if (!el) { el = document.createElement('p'); el.setAttribute('role', 'status'); fila.appendChild(el); }
+    el.textContent = texto || '';
+    el.className = 'linea-aviso ' + (mal ? 'mal' : 'ok');
+    el.hidden = !texto;
+  }
+  clearTimeout(avisoTimers[id]);
+  if (texto && !mal) avisoTimers[id] = setTimeout(function () { avisoLinea(id, ''); }, 15000);
+}
 var puedeElegirPrincipal = false;
 function filaLinea(l) {
   var tono = TONO_LINEA[l.estado] || 'gris';
@@ -1846,7 +1866,7 @@ function filaLinea(l) {
   if (l.api && !setup) {
     botones += '<button class="btn" type="button" data-acc="datos-api" data-id="' + esc(l.id) + '">Cambiar datos de la API</button>';
     datosApi = (l.api.faltan && l.api.faltan.length ? '<p class="ayuda" style="color:#b42318">Le falta ' + esc(l.api.faltan.join(', ')) + ': pulsa «Cambiar datos de la API».</p>' : '') +
-      '<div class="lineas-api-campos" data-form-api="' + esc(l.id) + '" hidden>' +
+      '<div class="lineas-api-campos" data-form-api="' + esc(l.id) + '"' + (formsAbiertos[l.id] ? '' : ' hidden') + '>' +
         '<label>Token de acceso <input type="password" autocomplete="off" data-api="token" placeholder="' + (l.api.conToken ? 'guardado: déjalo vacío para no cambiarlo' : '') + '"></label>' +
         '<label>Phone number ID <input inputmode="numeric" data-api="phoneNumberId" value="' + esc(l.api.phoneNumberId || '') + '"></label>' +
         '<label>WhatsApp Business Account ID <input inputmode="numeric" data-api="businessAccountId" value="' + esc(l.api.businessAccountId || '') + '"></label>' +
@@ -1873,6 +1893,7 @@ function filaLinea(l) {
     '<p class="ayuda">' + (l.numero ? 'Número: +' + esc(l.numero) : (esApi ? 'Número: se completa al comprobar los datos con Meta' : 'Número: se completa al conectar')) + ' · ' + (l.proveedor === 'local' ? 'QR / sesión vinculada' : l.proveedor === 'cloud' ? 'API oficial de Meta' : 'WAHA') + (setup ? ' · se conecta con la tarjeta de WhatsApp de arriba' : '') + (l.principal && !setup ? ' · elegida como principal: si la línea de un cliente se cae, sus mensajes pasan primero por esta' : '') + (pausa ? ' · sigue conectada: no recibe clientes nuevos y solo contesta los chats que siguen abiertos' : '') + '</p>' +
     qr + codigo + datosApi +
     (botones ? '<div class="acciones">' + botones + '</div>' : '') +
+    (avisosLinea[l.id] ? '<p class="linea-aviso ' + (avisosLinea[l.id].mal ? 'mal' : 'ok') + '" role="status">' + esc(avisosLinea[l.id].t) + '</p>' : '') +
   '</div>';
 }
 var modoLineas = '';
@@ -1921,40 +1942,59 @@ async function cargarLineas() {
   } catch (error) { lineasMsg(error.message, 'rojo'); }
 }
 async function accionLinea(acc, id, valor) {
+  var boton = document.querySelector('[data-acc="' + acc + '"][data-id="' + id + '"]');
+  var textoBoton = boton ? boton.textContent : '';
   try {
     if (acc === 'renombrar') {
       var campo = document.querySelector('[data-nombre="' + id + '"]');
       await api('/admin/lineas/' + id, { method: 'PATCH', body: { etiqueta: campo ? campo.value : '' } });
-      lineasMsg('Nombre guardado. Los mensajes viejos conservan el que tenían.');
+      avisoLinea(id, 'Nombre guardado. Los mensajes viejos conservan el que tenían.');
     } else if (acc === 'conectar') {
       await api('/admin/lineas/' + id + '/conectar', { method: 'POST' });
-      lineasMsg('Escanea el QR con el teléfono de esta línea. Si caduca, sale otro solo.');
+      avisoLinea(id, 'Escanea el QR con el teléfono de esta línea. Si caduca, sale otro solo.');
     } else if (acc === 'desconectar') {
       await api('/admin/lineas/' + id + '/desconectar', { method: 'POST' });
-      lineasMsg('Línea desvinculada. Las demás siguen conectadas.');
+      avisoLinea(id, 'Línea desvinculada. Las demás siguen conectadas.');
     } else if (acc === 'habilitar') {
       await api('/admin/lineas/' + id, { method: 'PATCH', body: { habilitada: valor === '1' } });
-      lineasMsg(valor === '1' ? 'Línea habilitada.' : 'Línea deshabilitada: no se enviará nada por ella.');
+      avisoLinea(id, valor === '1' ? 'Línea habilitada.' : 'Línea deshabilitada: no se enviará nada por ella.');
     } else if (acc === 'principal') {
       await api('/admin/lineas/' + id + '/principal', { method: 'POST' });
-      lineasMsg('Listo: esta es ahora la línea principal. Cada cliente sigue con su número; si el suyo se cae, sus mensajes pasan primero por esta.');
+      avisoLinea(id, 'Listo: esta es ahora la línea principal. Cada cliente sigue con su número; si el suyo se cae, sus mensajes pasan primero por esta.');
     } else if (acc === 'quitar') {
       await api('/admin/lineas/' + id, { method: 'DELETE' });
       lineasMsg('Línea quitada. Sus mensajes quedan en los chats con su etiqueta.');
     } else if (acc === 'datos-api') {
       var form = document.querySelector('[data-form-api="' + id + '"]');
-      if (form) form.hidden = !form.hidden;
+      formsAbiertos[id] = !formsAbiertos[id];
+      if (form) form.hidden = !formsAbiertos[id];
       return;
     } else if (acc === 'guardar-api') {
       var cuerpo = {};
-      document.querySelectorAll('[data-form-api="' + id + '"] [data-api]').forEach(function (i) { if (i.value.trim()) cuerpo[i.getAttribute('data-api')] = i.value.trim(); });
-      lineasMsg('Comprobando con Meta…');
-      await api('/admin/lineas/' + id + '/credenciales', { method: 'PATCH', body: cuerpo });
-      lineasMsg('Datos guardados y comprobados con Meta.');
+      document.querySelectorAll('[data-form-api="' + id + '"] [data-api]').forEach(function (i) { i.removeAttribute('aria-invalid'); if (i.value.trim()) cuerpo[i.getAttribute('data-api')] = i.value.trim(); });
+      if (boton) { boton.disabled = true; boton.textContent = 'Comprobando con Meta…'; }
+      avisoLinea(id, 'Comprobando los datos con Meta…');
+      var r = await api('/admin/lineas/' + id + '/credenciales', { method: 'PATCH', body: cuerpo });
+      formsAbiertos[id] = false;
+      var numero = r && r.linea && r.linea.numero ? ' Número: +' + r.linea.numero + '.' : '';
+      avisoLinea(id, 'Listo: Meta aceptó los datos y quedaron guardados.' + numero);
     }
     lineasVistas = '';
     await cargarLineas();
-  } catch (error) { lineasMsg(error.message, 'rojo'); }
+  } catch (error) {
+    if (acc === 'quitar') { lineasMsg(error.message, 'rojo'); return; }
+    avisoLinea(id, error.message, true);
+    var campoMal = error.datos && error.datos.campo;
+    var input = campoMal ? document.querySelector('[data-form-api="' + id + '"] [data-api="' + campoMal + '"]') : null;
+    if (input) {
+      formsAbiertos[id] = true;
+      input.closest('[data-form-api]').hidden = false;
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+    }
+  } finally {
+    if (boton && boton.isConnected) { boton.disabled = false; boton.textContent = textoBoton; }
+  }
 }
 var MOTIVO_CAMBIO = { cliente_escribio: 'el cliente escribió por esa línea', persona: 'lo eligió una persona', linea_no_disponible: 'su línea se quitó o se deshabilitó', linea_caida: 'su línea se desconectó o fue bloqueada' };
 async function cargarReparto() {
