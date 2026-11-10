@@ -20,7 +20,8 @@ import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 import { SISTEMA_CSS } from './sistema-css.js';
 import { escapeHtml } from './login-page.js';
-import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
+import { NOMBRE_SISTEMA } from '../marca.js';
+import { ICONOS_HEAD, RUTA_LOGO } from './marca-routes.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
 import { VERSION } from '../version.js';
 import { CONSULTAS_JS } from './consultas.js';
@@ -225,7 +226,7 @@ const CSS = `
   .s-plegar { width: 30px; height: 30px; border: 0; background: transparent; color: var(--s-muted); border-radius: 8px; cursor: pointer; display: grid; place-items: center; flex: none; }
   .s-plegar:hover { background: var(--s-hover); color: var(--s-text); }
   .s-logo { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--s-text); min-width: 0; }
-  .s-logo-mark { width: 32px; height: 32px; border-radius: 9px; background: var(--s-accent); color: var(--primario-texto); display: grid; place-items: center; font-weight: 800; flex: none; }
+  .s-logo-mark { width: 32px; height: 32px; object-fit: contain; flex: none; }
   .s-logo-text { font-weight: 800; font-size: 17px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-logo-text small { color: var(--s-accent); font-weight: 700; font-size: 17px; }
   .s-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 10px 12px; }
@@ -291,6 +292,13 @@ const CSS = `
   .s-top { height: 62px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 22px; background: var(--s-top); border-bottom: 1px solid var(--s-line); }
   .s-menu { display: none; width: 34px; height: 34px; border: 0; background: transparent; color: var(--s-text); border-radius: 8px; cursor: pointer; place-items: center; flex: none; }
   .s-titulo { min-width: 0; display: flex; flex-direction: column; justify-content: center; line-height: 1.2; }
+  /* En pantalla grande el titulo no se corta: cede el subtitulo, no el nombre de la pantalla. */
+  @media (min-width: 900px) { .s-titulo { flex: 0 1 auto; min-width: 170px; } }
+  /* Hasta 1360 px, Buscar y la ayuda quedan en icono (con su nombre para el lector y su Ctrl K): el titulo cabe entero. */
+  @media (max-width: 1360px) {
+    .s-top .s-buscar-boton, .s-top .s-ayuda-boton { min-width: 0; width: 38px; padding: 0; justify-content: center; }
+    .s-top .s-buscar-boton span, .s-top .s-buscar-boton kbd, .s-top .s-ayuda-boton span { display: none; }
+  }
   .s-miga { color: var(--s-muted); font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-miga:empty { display: none; }
   .s-titulo h1 { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
@@ -1252,7 +1260,6 @@ export function appShell(opts: ShellOpts): string {
       </div>`,
   ).join('\n      ');
   const demo = opts.demo ? '<span class="s-demo" title="Los mensajes no salen a WhatsApp">Demostración</span>' : '';
-  const favicon = opts.icono ?? '💬';
   // La ayuda de todas las pantallas va en la pagina (JSON); el navegador elige la de la ruta.
   const ayudaJson = JSON.stringify(AYUDA_PANTALLAS).replace(/<\//g, '<\\/');
 
@@ -1267,9 +1274,8 @@ ${TEMA_SCRIPT}
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="${NOMBRE_SISTEMA}">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/icono-192.png">
 <title>${escapeHtml(opts.titulo)} - ${negocio} · ${NOMBRE_SISTEMA}</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>${favicon}</text></svg>">
+${ICONOS_HEAD}
 <style>${CSS}${DIALOGO_CSS}${DIALOGO_ELEGIR_CSS}${opts.css ?? ''}</style>
 </head><body>
 <div class="s-app modo-${modo}" id="s-app" data-negocio="${negocio}" data-modo="${modo}" data-gsg="${conGsg ? '1' : '0'}">
@@ -1278,7 +1284,7 @@ ${TEMA_SCRIPT}
   <aside class="s-side">
     <div class="s-brand">
       <button class="s-plegar" id="s-plegar" type="button" title="Plegar el menú" aria-label="Plegar o desplegar el menú">${icono('plegar')}</button>
-      <a class="s-logo" href="/panel#inicio" title="${NOMBRE_SISTEMA}"><span class="s-logo-mark">${INICIAL_SISTEMA}</span><span class="s-logo-text">${negocio}</span></a>
+      <a class="s-logo" href="/panel#inicio" title="${NOMBRE_SISTEMA}"><img class="s-logo-mark" src="${RUTA_LOGO}" alt="" width="32" height="32"><span class="s-logo-text">${negocio}</span></a>
     </div>
     <nav class="s-nav">
       <div class="s-menu-gsg">

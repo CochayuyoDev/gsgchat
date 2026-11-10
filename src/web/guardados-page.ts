@@ -69,7 +69,7 @@ const CSS = `
 
   /* --- las dos columnas -------------------------------------------------- */
   .cols { display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 
   /* --- filtros y lista ---------------------------------------------------- */
   .filtros { padding: 10px var(--esp-4); border-bottom: 1px solid var(--borde); display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; background: var(--superficie-2); }
@@ -145,7 +145,7 @@ const CSS = `
 
   /* --- estadisticas ------------------------------------------------------- */
   .est { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--esp-4); }
-  @media (max-width: 760px) { .est { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .est { grid-template-columns: minmax(0, 1fr); } }
   .est h3 { font-size: 13px; color: var(--texto-suave); margin: 0 0 var(--esp-2); font-weight: 600; }
   .barras { display: flex; gap: 6px; align-items: flex-end; height: 120px; min-width: 0; }
   .barra { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
@@ -158,7 +158,7 @@ const CSS = `
 
   /* --- importar ------------------------------------------------------------ */
   .imp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--esp-2); }
-  @media (max-width: 760px) { .imp-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .imp-grid { grid-template-columns: minmax(0, 1fr); } }
   .imp-grid .ancho { grid-column: 1 / -1; }
   .imp-pie { display: flex; gap: var(--esp-2); align-items: center; flex-wrap: wrap; }
 `;

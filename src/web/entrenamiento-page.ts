@@ -77,7 +77,7 @@ const CSS = `
 
   /* --- las dos columnas: a la izquierda lo que sabe, a la derecha ensenar */
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: var(--esp-4); align-items: start; }
-  @media (max-width: 1080px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 1080px) { .cols { grid-template-columns: minmax(0, 1fr); } }
   .columna-titulo { margin: 0 0 var(--esp-3); font-size: var(--fs-h3); color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
 
   .tarjeta.caja { padding: 0; overflow: hidden; margin-bottom: var(--esp-4); }
@@ -154,13 +154,13 @@ const CSS = `
   .previa ul { margin: var(--esp-2) 0 0; padding-left: 18px; }
   .previa li { margin: 2px 0; }
   .elegidas h4 { margin: var(--esp-3) 0 var(--esp-1); font-size: var(--fs-small); color: var(--texto-suave); text-transform: uppercase; letter-spacing: .03em; }
-  .elegidas .item { margin: var(--esp-1) 0; padding: var(--esp-2) var(--esp-3); border-left: 3px solid var(--primario); border-radius: 0 var(--radio-sm) var(--radio-sm) 0; background: var(--superficie-2); font-size: var(--fs-small); white-space: pre-wrap; }
+  .elegidas .item { margin: var(--esp-1) 0; padding: var(--esp-2) var(--esp-3); border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font-size: var(--fs-small); white-space: pre-wrap; }
   .elegidas .item .sub { display: block; color: var(--texto-suave); }
 
   /* --- enseñarle a etiquetar --------------------------------------------- */
   #etiquetar > h2 .cab { box-sizing: border-box; }
   .et-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
-  @media (max-width: 900px) { .et-cols { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .et-cols { grid-template-columns: minmax(0, 1fr); } }
   .et-h { margin: var(--esp-3) 0 var(--esp-2); font-size: var(--fs-small); color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
   .et-cols > div > .et-h:first-child { margin-top: 0; }
   .et-item { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: var(--esp-3); margin-bottom: var(--esp-2); }

@@ -567,6 +567,8 @@ function pintarBarraRapidas() {
   var cmds = comandosDelChat();
   /* Sin respuestas rapidas ni comandos, la barra no existe: una fila vacia es ruido. */
   if (!atajos.length && !cmds.length) { barra.classList.add('hidden'); return; }
+  /* Sin un chat abierto no hay a quién mandarle nada: la barra se esconde. */
+  if (typeof current === 'undefined' || !current) { barra.classList.add('hidden'); return; }
   barra.classList.remove('hidden');
   var html = cmds.map(function (c, i) {
     return '<button class="chip comando" type="button" data-comando="' + i + '" title="' + esc(c.descripcion) + ' Pide confirmar con un segundo clic.">' + esc(c.etiqueta) + '</button>';

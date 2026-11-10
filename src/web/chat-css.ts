@@ -235,8 +235,8 @@ export const CHAT_CSS = `
   .prueba-dlg .pr-etiquetas .pe.falla .n { color: var(--rojo); font-weight: 600; }
   .prueba-dlg .pr-casos { display: flex; flex-direction: column; gap: 8px; }
   .prueba-dlg .pr-caso { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
-  .prueba-dlg .pr-caso.mal { border-left: 3px solid var(--rojo); }
-  .prueba-dlg .pr-caso.bien { border-left: 3px solid var(--verde); }
+  .prueba-dlg .pr-caso.mal { border-color: color-mix(in srgb, var(--rojo) 40%, var(--line)); background: color-mix(in srgb, var(--rojo-suave) 50%, transparent); }
+  .prueba-dlg .pr-caso.bien { border-color: color-mix(in srgb, var(--verde) 40%, var(--line)); background: color-mix(in srgb, var(--verde-suave) 50%, transparent); }
   .prueba-dlg .pr-caso .t { font-weight: 600; margin-bottom: 6px; }
   .prueba-dlg .pr-caso .comp { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; color: var(--muted); font-size: 12px; }
   .prueba-dlg .pr-caso .comp .etq { max-width: none; }
@@ -277,6 +277,29 @@ export const CHAT_CSS = `
   .ficha-acciones { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .ficha-acciones a { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: var(--radio-sm); text-decoration: none; font-weight: 600; border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); }
   .ficha-acciones a.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); }
+  /* «Lo pidió el cliente»: la baja o borrar sus datos, arriba del todo y en rojo suave. */
+  .ficha-privacidad { padding: 10px 12px; border-radius: var(--radio-sm); background: var(--rojo-suave); border: 1px solid color-mix(in srgb, var(--rojo) 35%, transparent); display: grid; gap: 6px; }
+  .ficha-privacidad h4 { color: var(--rojo) !important; }
+  .priv-caso { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+  .priv-caso blockquote { flex: 1 1 100%; margin: 2px 0 0; padding: 6px 10px; border-left: 3px solid var(--rojo); background: var(--superficie); border-radius: 6px; font-size: 13px; color: var(--texto); overflow-wrap: anywhere; }
+  .ficha-cuerpo button.sm.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); font-weight: 600; }
+  .ficha-cuerpo button.sm.peligro { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); font-weight: 600; }
+  .ficha-cuerpo button.sm.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
+  .ficha-datos { padding-top: 10px; border-top: 1px dashed var(--borde); }
+  .chip-privacidad { flex: none; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--rojo-suave); color: var(--rojo); white-space: nowrap; }
+  .dlg button:disabled { opacity: .55; cursor: not-allowed; }
+  /* Chats → «Piden baja o borrar datos»: una tarjeta por cliente, con sus botones. */
+  .priv-lista-cab { padding: 10px 14px; font-size: 13px; color: var(--rojo); background: var(--rojo-suave); border-bottom: 1px solid var(--borde); }
+  .priv-tarjeta { display: grid; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--borde); }
+  .priv-quien { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .priv-botones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .priv-botones button { min-height: 34px; padding: 4px 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--texto); }
+  .priv-botones button.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); }
+  .priv-botones button.peligro { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); }
+  .priv-botones button.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
+  .priv-botones button:disabled { opacity: .55; cursor: wait; }
+  .dlg .borrar-avisar { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 13.5px; line-height: 1.4; cursor: pointer; }
+  .dlg .borrar-avisar input { width: auto; margin-top: 2px; flex: none; }
 
   .messages {
     flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;

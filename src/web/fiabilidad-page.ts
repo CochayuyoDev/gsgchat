@@ -48,10 +48,11 @@ const CSS = `
   .aviso .botones { margin-top: 10px; }
 
   /* El veredicto: lo primero que se lee y lo unico que hace falta si va todo bien. */
-  .veredicto { margin-bottom: var(--esp-4); border-left: 4px solid var(--gris); }
-  .veredicto.verde { border-left-color: var(--verde); }
-  .veredicto.ambar { border-left-color: var(--ambar); }
-  .veredicto.rojo { border-left-color: var(--rojo); }
+  /* El veredicto se lee por el tono de toda la tarjeta (borde y fondo), no por una franja lateral. */
+  .veredicto { margin: var(--esp-4) 0; }
+  .veredicto.verde { border-color: color-mix(in srgb, var(--verde) 35%, var(--borde)); background: color-mix(in srgb, var(--verde-suave) 45%, var(--superficie)); }
+  .veredicto.ambar { border-color: color-mix(in srgb, var(--ambar) 35%, var(--borde)); background: color-mix(in srgb, var(--ambar-suave) 45%, var(--superficie)); }
+  .veredicto.rojo { border-color: color-mix(in srgb, var(--rojo) 35%, var(--borde)); background: color-mix(in srgb, var(--rojo-suave) 45%, var(--superficie)); }
   .veredicto .cabecera { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .veredicto h2 { font-size: var(--fs-h2); font-weight: 700; margin: 0; }
   .veredicto p { margin: var(--esp-2) 0 0; font-size: var(--fs-small); }
@@ -61,7 +62,10 @@ const CSS = `
   .veredicto li .que { flex: 1; min-width: 220px; }
 
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
-  @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
+  /* minmax(0, 1fr): una tabla ancha se desplaza dentro de su caja, no ensancha la pantalla. */
+  @media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .tabla-desliza { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabla-desliza table { min-width: 520px; }
   .caja { padding: 0; overflow: hidden; margin-bottom: var(--esp-4); min-width: 0; }
   .caja > h2 { font-size: var(--fs-h3); font-weight: 700; margin: 0; padding: var(--esp-3) var(--esp-4); border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .caja > h2 .sep { flex: 1; }
@@ -120,7 +124,7 @@ const CSS = `
   details.avanzado { border-top: 0; margin-top: var(--esp-2); padding-top: 0; }
   details.avanzado summary { font-weight: 500; color: var(--texto-suave); font-size: 13.5px; }
   .fila { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  @media (max-width: 560px) { .fila { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .fila { grid-template-columns: minmax(0, 1fr); } }
 
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: var(--fs-cuerpo); z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
 `;
@@ -145,10 +149,10 @@ export function fiabilidadPage(opts: { disponible: boolean; demo: boolean; nombr
 <section class="tarjeta caja" id="caja-numeros">
   <h2>Números de WhatsApp <span class="sep"></span><button class="btn sm" id="numeros-abrir" type="button">Agregar número</button><button class="btn sm" id="numeros-mirar" type="button">Actualizar</button></h2>
   <div class="cuerpo">
-    <table id="numeros-tabla">
+    <div class="tabla-desliza"><table id="numeros-tabla">
       <thead><tr><th>Número</th><th>Estado</th><th class="num">Mensajes hoy</th><th>Máximo por día</th></tr></thead>
       <tbody id="numeros-filas"><tr><td colspan="4" class="muted">Cargando…</td></tr></tbody>
-    </table>
+    </table></div>
     <p class="muted detalle" id="numeros-uno" hidden>Aquí salen todos los números de la tienda. Ahora hay uno: pulsa «Agregar número» para sumar otro (hasta 8) y ponerle su máximo.</p>
     <details id="numeros-nuevo">
       <summary>Agregar otro número (hasta 8 por tienda)</summary>

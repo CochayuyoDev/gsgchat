@@ -22,6 +22,7 @@
 
 import { NOMBRE_SISTEMA } from '../marca.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
+import { ICONOS_HEAD, RUTA_LOGO } from './marca-routes.js';
 
 export interface DatosLegales {
   nombreComercial: string;
@@ -88,6 +89,7 @@ function pagina(titulo: string, d: DatosLegales, cuerpo: string, actual: string)
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+${ICONOS_HEAD}
 <title>${esc(titulo)} · ${esc(d.nombreComercial)}</title>
 <meta name="description" content="${esc(titulo)} de ${esc(d.nombreComercial)}">
 <style>
@@ -97,7 +99,8 @@ function pagina(titulo: string, d: DatosLegales, cuerpo: string, actual: string)
   body { margin: 0; background: var(--fondo); color: var(--texto); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   header, main, footer { max-width: 820px; margin: 0 auto; padding: 0 16px; }
   header { padding-top: 24px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
-  header .marca { font-weight: 700; font-size: 18px; color: var(--texto); text-decoration: none; }
+  header .marca { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--texto); text-decoration: none; }
+  header .marca img { width: 30px; height: 30px; }
   nav { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; }
   nav a { color: var(--suave); }
   nav a[aria-current] { color: var(--primario); font-weight: 600; }
@@ -117,7 +120,7 @@ function pagina(titulo: string, d: DatosLegales, cuerpo: string, actual: string)
 </head>
 <body>
 <header>
-  <a class="marca" href="/legal">${esc(d.nombreComercial)}</a>
+  <a class="marca" href="/legal"><img src="${RUTA_LOGO}" alt="" width="30" height="30">${esc(d.nombreComercial)}</a>
   <nav aria-label="Páginas legales">
     ${enlace('/privacidad', 'Privacidad')}
     ${enlace('/terminos', 'Términos y condiciones')}
@@ -267,13 +270,19 @@ export function eliminacionPage(d: DatosLegales): string {
 
 <p>Puedes pedir en cualquier momento que borremos los datos que tenemos de ti (tu número, tus mensajes, tus ubicaciones y los datos de tus pedidos).</p>
 
-<h2>Pasos</h2>
+<h2>La forma más rápida: por el mismo WhatsApp</h2>
+<p>Escríbenos desde tu número, en el mismo chat, algo como <b>«Borren mis datos»</b>. Queda registrado al instante, el sistema deja de escribirte y una persona del equipo lo atiende. Como escribes desde tu propio número, no hace falta comprobar nada más.</p>
+
+<h2>Por correo</h2>
 <ol>
   <li>Escríbenos ${contacto(d)} con el asunto <b>«Eliminar mis datos»</b>.</li>
   <li>Indica el <b>número de WhatsApp</b> con el que hablaste con nosotros (con el código del país, por ejemplo +51 9xx xxx xxx).</li>
   <li>Para confirmar que el número es tuyo, te escribiremos a ese WhatsApp y te pediremos que respondas <b>SÍ</b>.</li>
-  <li>Al confirmar, borramos tus mensajes, tus conversaciones guardadas, tus ubicaciones y tu ficha de contacto, y te avisamos cuando esté hecho.</li>
 </ol>
+
+<h2>Qué borramos</h2>
+<p>Tus mensajes, tus conversaciones guardadas, tus fotos y audios, tus ubicaciones, los datos de tus pedidos y tu ficha de contacto. Te avisamos cuando esté hecho. Solo guardamos una constancia de que lo pediste y de que se cumplió, sin tu número completo ni lo que escribiste.</p>
+<p>Si más adelante haces un pedido nuevo con una tienda que trabaja con nosotros, empezamos de cero: solo usaremos los datos de ese pedido.</p>
 
 <h2>Plazos y excepciones</h2>
 <ul>

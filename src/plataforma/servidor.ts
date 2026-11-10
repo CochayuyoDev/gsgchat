@@ -38,6 +38,7 @@ import type { Plataforma } from './plataforma.js';
 import type { TiendaViva } from './tienda.js';
 import { cuerpoError, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, registrarCatalogoErrores } from '../api/errores.js';
 import { normalizarRuta } from '../util/ruta-normalizada.js';
+import { RUTAS_MARCA, registerMarcaRoutes } from '../web/marca-routes.js';
 import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, rechazoSinClave, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
@@ -47,7 +48,7 @@ const RUTAS_LEGALES = ['/legal', '/privacidad', '/terminos', '/eliminacion-de-da
 const PREFIJO = '/tienda/';
 
 /** Rutas que atiende la plataforma y no una tienda. */
-const DE_LA_PLATAFORMA = new Set(['/', '/login', '/registro', '/registro/disponible', '/logout', '/login/primera-cuenta', '/admin/cuentas-plataforma', ...RUTAS_LEGALES]);
+const DE_LA_PLATAFORMA = new Set(['/', '/login', '/registro', '/registro/disponible', '/logout', '/login/primera-cuenta', '/admin/cuentas-plataforma', ...RUTAS_LEGALES, ...RUTAS_MARCA.map(([ruta]) => ruta)]);
 
 export interface OpcionesServidor {
   plataforma: Plataforma;
@@ -354,6 +355,9 @@ async function rutasDeLaPlataforma(plataforma: Plataforma, segura: boolean, logg
   web.get('/privacidad', legal((d) => privacidadPage(d)));
   web.get('/terminos', legal((d) => terminosPage(d)));
   web.get('/eliminacion-de-datos', legal((d) => eliminacionPage(d)));
+
+  // El favicon y el logo: los piden la portada, el login y el panel de cada tienda.
+  registerMarcaRoutes(web);
 
   // El catalogo de errores de la API (igual en todas las tiendas).
   registrarCatalogoErrores(web);

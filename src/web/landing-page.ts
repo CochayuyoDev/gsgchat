@@ -12,23 +12,26 @@
  * la conversacion de WhatsApp encima, y el recorrido de un pedido es una linea
  * de ruta con sus paradas. Todo dibujado con HTML y CSS: sin imagenes.
  *
- * No lleva armazon: define su CSS aqui, con su propia paleta (asfalto, amarillo
- * señal, papel) en claro y en oscuro. Respeta el tema elegido en el sistema
+ * No lleva armazon: define su CSS aqui, con su propia paleta (el verde del logo
+ * para las franjas, un menta suave para botones y resaltados, papel) en claro y
+ * en oscuro. Los nombres de los tonos (asfalto, senal) vienen de la version
+ * anterior; lo que cuenta es su papel, no el nombre. Respeta el tema elegido en el sistema
  * (`data-tema`) y `prefers-reduced-motion`.
  */
 
-import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
+import { NOMBRE_SISTEMA } from '../marca.js';
+import { ICONOS_HEAD, RUTA_LOGO } from './marca-routes.js';
 import { escapeHtml, FUENTES_MARCA } from './login-page.js';
 import { TEMA_SCRIPT } from './tokens.js';
 
 const CLARO = `
-    --fondo: #EEF2F6; --papel: #FFFFFF; --tinta: #0D141C; --tinta-suave: #4A5868; --linea: #D5DDE6;
-    --asfalto: #18273A; --asfalto-2: #22364E; --sobre-asfalto: #E9EEF4; --sobre-asfalto-suave: #A9B6C6;
-    --senal: #FFC21A; --senal-tinta: #1A1300; --wa: #1FA855; --wa-suave: #DCF5E5; --burbuja: #FFFFFF; --burbuja-mia: #D9FDD3; --chat-fondo: #EFE7DC;`;
+    --fondo: #F1F6F2; --papel: #FFFFFF; --tinta: #0F1B15; --tinta-suave: #4B5E54; --linea: #D4E2D9;
+    --asfalto: #0B5A3C; --asfalto-2: #126A49; --sobre-asfalto: #EAF6EF; --sobre-asfalto-suave: #AFD3BF;
+    --senal: #8DDDB0; --senal-tinta: #063321; --wa: #1FA855; --wa-suave: #DCF5E5; --burbuja: #FFFFFF; --burbuja-mia: #D9FDD3; --chat-fondo: #EFE7DC;`;
 const OSCURO = `
-    --fondo: #0B1118; --papel: #121B25; --tinta: #E8EDF3; --tinta-suave: #9AA8B8; --linea: #263445;
-    --asfalto: #0F1A27; --asfalto-2: #182739; --sobre-asfalto: #E9EEF4; --sobre-asfalto-suave: #9DAABB;
-    --senal: #FFC933; --senal-tinta: #1A1300; --wa: #3DD47A; --wa-suave: #123222; --burbuja: #1F2C38; --burbuja-mia: #144D37; --chat-fondo: #0E161E;`;
+    --fondo: #0A120E; --papel: #111C17; --tinta: #E6F0EA; --tinta-suave: #9AB3A6; --linea: #233B2F;
+    --asfalto: #0E3626; --asfalto-2: #164532; --sobre-asfalto: #E6F0EA; --sobre-asfalto-suave: #A0C4B2;
+    --senal: #74D69E; --senal-tinta: #04261A; --wa: #3DD47A; --wa-suave: #123222; --burbuja: #1F2C38; --burbuja-mia: #144D37; --chat-fondo: #0E161E;`;
 
 const CSS = `
   :root {${CLARO}
@@ -50,7 +53,7 @@ const CSS = `
   .cab { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--fondo) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--linea); }
   .cab .ancho { display: flex; align-items: center; gap: 16px; min-height: 66px; }
   .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 800 19px/1 var(--display); font-stretch: 125%; letter-spacing: -.01em; }
-  .logo .sello { width: 34px; height: 34px; border-radius: 9px; background: var(--asfalto); color: var(--senal); display: grid; place-items: center; font-size: 17px; box-shadow: inset 0 -4px 0 var(--senal); }
+  .logo .sello { width: 34px; height: 34px; object-fit: contain; flex: none; }
   .cab nav { display: flex; gap: 22px; margin-left: 22px; font-size: 14.5px; }
   .cab nav a { text-decoration: none; color: var(--tinta-suave); min-height: 44px; display: inline-flex; align-items: center; }
   .cab nav a:hover { color: var(--tinta); }
@@ -235,14 +238,14 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
     : '<a class="btn senal" href="/registro">Crear mi cuenta</a><a class="btn borde" href="/login">Ya tengo cuenta</a>';
 
   return `<!doctype html>
-<html lang="es-PE"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="es-PE"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">${ICONOS_HEAD}
 <title>${NOMBRE_SISTEMA} · Entregas coordinadas por WhatsApp</title>
 <meta name="description" content="${NOMBRE_SISTEMA} pide la ubicación de cada pedido por WhatsApp, confirma con el cliente y manda al motorizado con la hora de llegada. Con WhatsApp normal o con la API oficial de Meta.">
 ${FUENTES_MARCA}
 <style>${CSS}</style></head>
 <body>
 <header class="cab"><div class="ancho">
-  <a class="logo" href="/"><span class="sello">${INICIAL_SISTEMA}</span>${NOMBRE_SISTEMA}</a>
+  <a class="logo" href="/"><img class="sello" src="${RUTA_LOGO}" alt="" width="34" height="34">${NOMBRE_SISTEMA}</a>
   <nav aria-label="Secciones"><a href="#recorrido">Cómo funciona</a><a href="#whatsapp">WhatsApp normal y API</a><a href="#numero">Cuidado del número</a></nav>
   <div class="derecha">${opts.conSesion ? '<a class="btn" href="/panel#inicio">Ir al panel</a>' : '<a class="btn borde" href="/login">Entrar</a><a class="btn" href="/registro">Crear cuenta</a>'}</div>
 </div></header>

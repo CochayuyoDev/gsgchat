@@ -29,6 +29,7 @@ import { syncTemplates } from '../templates/registry.js';
 import { pushTemplates } from '../templates/push.js';
 import { registerAutomationRoutes } from './automation-routes.js';
 import { registerChatRoutes } from './chat-routes.js';
+import { registerPrivacidadRoutes } from './privacidad-routes.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { registerLeadsRoutes } from './leads-routes.js';
 import { registerRutasRoutes } from './rutas-routes.js';
@@ -184,6 +185,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   await registerAutomationRoutes(app, { repos, sender });
   const gsg = deps.gsg ?? crearPuertoGsg(config);
   await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes, ia: deps.ia, lineas: deps.lineas });
+  // BAJA y «borren mis datos»: lo atiende el equipo (src/privacidad).
+  await registerPrivacidadRoutes(app, { repos, mediaDir: deps.mediaDir, sender });
   await registerLeadsRoutes(app, {
     repos,
     // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.
@@ -316,7 +319,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     const caidas = conexion.lineas.filter((l) => !l.conectada);
     const vivas = conexion.lineas.filter((l) => l.conectada);
     if (!conexion.configurado) avisos.push({ tipo: 'sin_configurar', nivel: 'bad', texto: 'WhatsApp sin conectar: no sale ni entra nada', href: '/setup' });
-    else if (!conexion.conectado) avisos.push({ tipo: 'desconectado', nivel: 'bad', texto: 'WhatsApp desconectado: vuelve a vincular el telefono', href: '/setup' });
+    else if (!conexion.conectado) avisos.push({ tipo: 'desconectado', nivel: 'bad', texto: 'WhatsApp desconectado: vuelve a vincular el teléfono', href: '/setup' });
     else if (caidas.length && vivas.length) {
       // Con alguna viva NO es «WhatsApp desconectado»: cada chat sale por su linea, y si esa cae, por otra viva.
       avisos.push({
@@ -326,12 +329,23 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
         href: '/setup',
       });
     }
-    if (estado.paused) avisos.push({ tipo: 'pausado', nivel: 'warn', texto: `Envios pausados${estado.pausedReason ? ': ' + estado.pausedReason : ''}`, href: '/panel#estado' });
+    if (estado.paused) avisos.push({ tipo: 'pausado', nivel: 'warn', texto: `Envíos pausados${estado.pausedReason ? ': ' + estado.pausedReason : ''}`, href: '/panel#estado' });
     const nivel = estado.nivel ?? 'verde';
-    if (nivel === 'rojo') avisos.push({ tipo: 'riesgo', nivel: 'bad', texto: 'El numero esta en rojo: todo pausado hasta que mejore', href: '/panel#salud' });
-    else if (nivel === 'naranja') avisos.push({ tipo: 'riesgo', nivel: 'warn', texto: 'El numero esta en naranja: solo sale lo imprescindible', href: '/panel#salud' });
-    else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El numero esta en amarillo: el marketing va mas lento', href: '/panel#salud' });
-    if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} conversacion${esperando === 1 ? '' : 'es'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
+    if (nivel === 'rojo') avisos.push({ tipo: 'riesgo', nivel: 'bad', texto: 'El número está en rojo: todo pausado hasta que mejore', href: '/panel#salud' });
+    else if (nivel === 'naranja') avisos.push({ tipo: 'riesgo', nivel: 'warn', texto: 'El número está en naranja: solo sale lo imprescindible', href: '/panel#salud' });
+    else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El número está en amarillo: el marketing va más lento', href: '/panel#salud' });
+    if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} ${esperando === 1 ? 'conversación' : 'conversaciones'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
+    // BAJA o «borren mis datos»: el sistema no lo hace solo, lo atiende una persona desde Chats.
+    const privacidad = await repos.privacidad?.contarPendientes().catch(() => 0) ?? 0;
+    if (privacidad > 0) {
+      avisos.push({
+        tipo: 'privacidad',
+        nivel: 'bad',
+        texto: `${privacidad} cliente${privacidad === 1 ? '' : 's'} pidi${privacidad === 1 ? 'ó' : 'eron'} la baja o borrar sus datos: atiéndelo${privacidad === 1 ? '' : 's'} en Chats`,
+        href: '/chat?filtro=privacidad',
+        n: privacidad,
+      });
+    }
     // Las entregas del dia: lo que necesita a alguien, GSG sin conectar, ningun motorizado.
     const modoGsg = (deps.ajustes?.modo() ?? 'gsg') === 'gsg';
     if (deps.entregas) {
@@ -953,6 +967,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     const body = z.object({ phone: phoneSchema }).parse(request.body);
     const contacto = await repos.contacts.upsertFromInbound(body.phone);
     await repos.contacts.setOptOut(body.phone);
+    // Si el cliente lo había pedido por WhatsApp, su solicitud queda atendida (antes que lo lento de abajo).
+    await repos.privacidad?.atender(contacto.phone, 'baja', request.usuario?.nombre || request.usuario?.usuario || null, 'baja').catch(() => 0);
     // Si se le estaba pidiendo la ubicacion, el reparto deja de insistirle y
     // GSG se entera (la baja la da el equipo, no el cliente escribiendo BAJA).
     await atenderRespuestaDeRuta({ repos, gsg: deps.gsg ?? crearPuertoEnEspera(), salud: deps.salud }, contacto, { baja: true }).catch(() => undefined);

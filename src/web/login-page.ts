@@ -25,7 +25,8 @@
  * mismo texto en dos pantallas.
  */
 
-import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
+import { NOMBRE_SISTEMA } from '../marca.js';
+import { ICONOS_HEAD, RUTA_LOGO } from './marca-routes.js';
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 
 /**
@@ -93,9 +94,9 @@ const CSS = `
   /* El panel de la izquierda es una franja de marca: oscura siempre, en modo
      claro y en oscuro. Por eso tiene sus propios tonos con nombre en vez de
      los del sistema, que se dan la vuelta con el tema. */
-  /* El lado de marca es el de la portada: asfalto con la cinta amarilla, en
-     los dos temas. Por eso lleva sus propios tonos con nombre. */
-  :root { --marca-fondo: #18273A; --marca-fondo-2: #22364E; --marca-texto: #E9EEF4; --marca-suave: #A9B6C6; --marca-senal: #FFC21A; --marca-tinta: #0D141C; --marca-wa: #3DD47A;
+  /* El lado de marca es el de la portada: el verde del logo con la cinta menta,
+     en los dos temas. Por eso lleva sus propios tonos con nombre. */
+  :root { --marca-fondo: #0B5A3C; --marca-fondo-2: #126A49; --marca-texto: #EAF6EF; --marca-suave: #AFD3BF; --marca-senal: #8DDDB0; --marca-tinta: #0F1B15; --marca-wa: #3DD47A;
     --display: "Archivo", "Arial Narrow", system-ui, sans-serif; --mono-marca: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--bg); color: var(--texto); font: var(--fs-cuerpo)/1.55 "Public Sans", var(--fuente); }
@@ -104,7 +105,6 @@ const CSS = `
   .marca-lado { position: relative; overflow: hidden; background: var(--marca-fondo); color: var(--marca-texto); padding: 40px 52px 56px; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; }
   .marca-lado::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 12px; background: repeating-linear-gradient(-45deg, var(--marca-senal) 0 14px, var(--marca-fondo) 14px 28px); }
   .marca-lado .logotipo { color: #fff; font: 800 19px/1 var(--display); font-stretch: 125%; }
-  .marca-lado .logotipo .sello { background: var(--marca-fondo-2); color: var(--marca-senal); box-shadow: inset 0 -4px 0 var(--marca-senal); }
   .marca-lado h2 { font: 800 clamp(30px, 3.4vw, 44px)/1.04 var(--display); font-stretch: 125%; letter-spacing: -.03em; margin: 0 0 16px; max-width: 520px; text-wrap: balance; }
   .marca-lado h2 span { color: var(--marca-senal); }
   .marca-lado p { color: var(--marca-suave); margin: 0; max-width: 460px; font-size: 16.5px; }
@@ -113,7 +113,7 @@ const CSS = `
   .marca-lado li::before { content: ""; width: 12px; height: 12px; margin-top: 5px; border-radius: 3px; background: var(--marca-senal); transform: rotate(45deg); }
 
   /* La etiqueta del pedido, en chico: la misma pieza que en la portada */
-  .mini-etiqueta { max-width: 360px; background: #fff; color: var(--marca-tinta); border: 2px solid var(--marca-tinta); border-radius: 6px; box-shadow: 8px 8px 0 #0B1520; transform: rotate(-1.5deg); font-size: 13px; }
+  .mini-etiqueta { max-width: 360px; background: #fff; color: var(--marca-tinta); border: 2px solid var(--marca-tinta); border-radius: 6px; box-shadow: 8px 8px 0 #073D28; transform: rotate(-1.5deg); font-size: 13px; }
   .mini-etiqueta .cab { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--marca-tinta); color: #fff; font: 600 11px/1.2 var(--mono-marca); letter-spacing: .05em; }
   .mini-etiqueta .cab span:last-child { color: var(--marca-senal); }
   .mini-etiqueta .cuerpo { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 12px 12px; align-items: end; }
@@ -127,13 +127,12 @@ const CSS = `
 
   /* --- logotipo, en las dos columnas --- */
   .logotipo { display: flex; align-items: center; gap: var(--esp-2); text-decoration: none; color: inherit; font-weight: 800; }
-  .logotipo .sello { width: 36px; height: 36px; flex: none; border-radius: 10px; background: var(--primario); color: var(--primario-texto); display: grid; place-items: center; font-weight: 700; }
+  .logotipo .sello { width: 36px; height: 36px; flex: none; object-fit: contain; }
 
   /* --- columna del formulario --- */
   .centro { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--esp-3); padding: var(--esp-5) var(--esp-4); }
   .caja { width: 100%; max-width: 420px; background: var(--superficie); border: 1px solid var(--borde); border-radius: 16px; padding: var(--esp-5) var(--esp-5) var(--esp-4); box-shadow: var(--sombra-2); border-top: 5px solid var(--marca-senal); }
   .caja > .logotipo { color: var(--texto); margin-bottom: var(--esp-4); }
-  .caja > .logotipo .sello { background: var(--marca-fondo); color: var(--marca-senal); box-shadow: inset 0 -4px 0 var(--marca-senal); }
   .caja > .logotipo small { display: block; font-weight: 400; font-size: var(--fs-small); color: var(--texto-suave); }
   h1 { font: 800 26px/1.15 var(--display); font-stretch: 125%; margin: 0 0 4px; letter-spacing: -.02em; }
   /* En el celular la marca va arriba, en una franja corta. */
@@ -196,7 +195,7 @@ const CSS = `
     .marca-movil p { margin: 10px 0 0; font: 800 21px/1.12 var(--display); font-stretch: 125%; letter-spacing: -.02em; }
     .marca-movil p span { color: var(--marca-senal); }
     .marca-movil .logotipo { color: #fff; font: 800 17px/1 var(--display); font-stretch: 125%; }
-    .marca-movil .logotipo .sello { width: 30px; height: 30px; background: var(--marca-fondo-2); color: var(--marca-senal); box-shadow: inset 0 -3px 0 var(--marca-senal); }
+    .marca-movil .logotipo .sello { width: 30px; height: 30px; }
     .centro { justify-content: flex-start; padding-top: var(--esp-4); }
     .caja > .logotipo { display: none; }
   }
@@ -486,16 +485,16 @@ export function loginPage(opts: {
 `;
 
   return `<!doctype html>
-<html lang="es"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="es"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">${ICONOS_HEAD}
 <meta name="description" content="Acceso al sistema de ${negocio}.">
 <title>Entrar - ${negocio} · ${NOMBRE_SISTEMA}</title>${FUENTES_MARCA}<style>${CSS}</style></head>
 <body>
 <header class="marca-movil">
-  <a class="logotipo" href="/"><span class="sello">${INICIAL_SISTEMA}</span>${NOMBRE_SISTEMA}</a>
+  <a class="logotipo" href="/"><img class="sello" src="${RUTA_LOGO}" alt="" width="36" height="36">${NOMBRE_SISTEMA}</a>
   <p>${PROMESA_PLATAFORMA.titular} <span>${PROMESA_PLATAFORMA.remate}</span>.</p>
 </header>
 <aside class="marca-lado">
-  <a class="logotipo" href="/"><span class="sello">${INICIAL_SISTEMA}</span>${NOMBRE_SISTEMA}</a>
+  <a class="logotipo" href="/"><img class="sello" src="${RUTA_LOGO}" alt="" width="36" height="36">${NOMBRE_SISTEMA}</a>
   <div>
     <h2>${PROMESA_PLATAFORMA.titular} <span>${PROMESA_PLATAFORMA.remate}</span>.</h2>
     <p>${PROMESA_PLATAFORMA.bajada}</p>
@@ -508,7 +507,7 @@ export function loginPage(opts: {
 </aside>
 <main class="centro">
 <div class="caja">
-  <div class="logotipo"><span class="sello">${INICIAL_SISTEMA}</span><span>${negocio}<small>${NOMBRE_SISTEMA} · entregas coordinadas por WhatsApp</small></span></div>
+  <div class="logotipo"><img class="sello" src="${RUTA_LOGO}" alt="" width="36" height="36"><span>${negocio}<small>${NOMBRE_SISTEMA} · entregas coordinadas por WhatsApp</small></span></div>
   <div class="pestanas" role="tablist" aria-label="${opts.primeraCuenta ? 'Entrar o crear la primera cuenta' : 'Entrar o crear mi tienda'}">
     <button type="button" id="tab-entrar" role="tab" aria-controls="panel-entrar">Entrar</button>
     <button type="button" id="tab-registro" role="tab" aria-controls="panel-registro">${opts.primeraCuenta ? 'Primera cuenta' : 'Crear mi tienda'}</button>

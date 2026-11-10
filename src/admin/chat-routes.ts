@@ -653,14 +653,29 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         incluirApartados: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
         /** Solo los de esa etiqueta (codigo del catalogo, sin_clasificar o sin_etiquetar). */
         etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').optional(),
+        /** Solo los que pidieron la baja o borrar sus datos y nadie lo atendió todavía. */
+        privacidad: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
       })
       .parse(request.query ?? {});
     const alcance = alcanceChat(request.usuario);
+    // Quien pidió la baja o borrar sus datos (pendiente): su chat lleva el estado en la lista.
+    const pendientesPrivacidad = await repos.privacidad?.pendientes(500).catch(() => []) ?? [];
+    const privacidadDe = new Map<string, string>();
+    for (const s of pendientesPrivacidad) if (!privacidadDe.has(s.phone) || s.tipo === 'borrar_datos') privacidadDe.set(s.phone, s.tipo);
     const comun = {
       unread: await repos.messages.unreadTotal(undefined, alcance),
       scopeId: request.usuario?.chatSesion?.sid ?? 'api',
       vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+      privacidadPendientes: privacidadDe.size,
     };
+    if (query.privacidad) {
+      const filtradas = (await conversacionesConEtiqueta(query, alcance))
+        .filter((c) => privacidadDe.has(c.phone))
+        .map((c) => ({ ...c, privacidad: privacidadDe.get(c.phone) ?? null }));
+      const pagina = filtradas.slice(query.offset, query.offset + query.limit);
+      const hay = filtradas.length > query.offset + query.limit;
+      return responderLectura(request, reply, { items: pagina, hasMore: hay, siguienteOffset: hay ? query.offset + query.limit : null, total: filtradas.length, ...comun });
+    }
     if (query.etiqueta) {
       // Se filtra en el servidor sobre TODA la bandeja, no sobre la pagina cargada.
       const filtradas = (await conversacionesConEtiqueta(query, alcance)).filter((c) => pasaEtiqueta(c.etiqueta, query.etiqueta!));
@@ -676,7 +691,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const porId = new Map((await lineasActivas()).map((l) => [l.id, l]));
     const conLinea = pagina.map((c) => {
       const m = c.lastMessage;
-      const base = { ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) };
+      const base = { ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone), privacidad: privacidadDe.get(c.phone) ?? null };
       if (!m?.lineaId) return { ...base, linea: null };
       const viva = porId.get(m.lineaId);
       return { ...base, linea: { id: m.lineaId, etiqueta: viva?.etiqueta ?? m.lineaEtiqueta ?? '', numero: viva?.telefono || m.lineaNumero || '' } };
@@ -741,7 +756,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       entrega = null;
     }
     const guardadas = 0;
+    const privacidad = contact.tipo === 'grupo' ? [] : await repos.privacidad?.pendientesDe(contact.phone).catch(() => []) ?? [];
     return {
+      privacidad: privacidad.map((s) => ({ id: s.id, tipo: s.tipo, texto: s.texto, como: s.como, createdAt: s.createdAt })),
       contacto: { id: contact.id, phone: contact.phone, name: contact.name, tipo: contact.tipo ?? 'persona', optInAt: contact.optInAt, optOutAt: contact.optOutAt, lastInboundAt: contact.lastInboundAt, botPausadoAt: contact.botPausadoAt ?? null, iaCerradaAt: contact.iaCerradaAt ?? null },
       ubicacion: ubicacion ? { lat: ubicacion.lat, lng: ubicacion.lng, mapa: `https://www.google.com/maps/search/?api=1&query=${ubicacion.lat},${ubicacion.lng}` } : null,
       entrega,

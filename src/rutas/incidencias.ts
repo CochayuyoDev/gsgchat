@@ -22,6 +22,8 @@ export type CodigoIncidencia =
   | 'respondio_sin_ubicacion'
   | 'ubicacion_fuera_de_zona'
   | 'rechaza_contacto'
+  | 'pide_baja'
+  | 'pide_borrar_datos'
   | 'ya_en_curso'
   | 'envio_bloqueado'
   | 'error_envio'
@@ -139,6 +141,26 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     titulo: 'Pidió que no le escriban',
     explicacion: 'El cliente se dio de baja. Volver a escribirle es lo que hace que reporten el número.',
     queHacer: 'Coordinar la entrega por teléfono. Este número no recibe más mensajes.',
+    requiereHumano: true,
+    reintentable: false,
+    reportable: true,
+  },
+  // Lo pidio el cliente por WhatsApp y lo atiende una persona (regla del dueño,
+  // 09/11): el sistema no lo da de baja ni borra nada solo. Ver src/privacidad.
+  pide_baja: {
+    codigo: 'pide_baja',
+    titulo: 'Pidió la baja',
+    explicacion: 'El cliente escribió que no quiere recibir más mensajes. El bot se paró en su chat y no se le insiste.',
+    queHacer: 'Darlo de baja desde su chat (Chats → «Dar de baja») y coordinar la entrega por teléfono.',
+    requiereHumano: true,
+    reintentable: false,
+    reportable: true,
+  },
+  pide_borrar_datos: {
+    codigo: 'pide_borrar_datos',
+    titulo: 'Pidió borrar sus datos',
+    explicacion: 'El cliente pidió que se eliminen sus datos. El bot se paró en su chat y no se le insiste.',
+    queHacer: 'Cuando su pedido termine, eliminar sus datos desde su chat (Chats → «Eliminar datos del cliente»).',
     requiereHumano: true,
     reintentable: false,
     reportable: true,

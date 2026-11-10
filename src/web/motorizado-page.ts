@@ -20,6 +20,7 @@
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 import { escapeHtml } from './login-page.js';
 import { estadosVisualesJs } from './estados-visuales.js';
+import { ICONOS_HEAD } from './marca-routes.js';
 
 export function motorizadoPage(opts: { token: string; nombreNegocio: string }): string {
   const negocio = opts.nombreNegocio || 'GSGchat';
@@ -219,6 +220,7 @@ ${TEMA_SCRIPT}
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#0a7f55">
+${ICONOS_HEAD}
 <title>Mis pedidos de hoy · ${escapeHtml(negocio)}</title>
 <style>
 ${TOKENS_CSS}

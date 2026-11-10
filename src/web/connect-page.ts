@@ -64,7 +64,7 @@ const MODOS: Record<Modo, InfoModo> = {
     paso2: 'Este camino no pide ningún dato: la vinculación es el propio código QR.',
     paso3:
       'Pulsa el botón y sale el código. Escanéalo desde el teléfono (WhatsApp → Dispositivos vinculados). El teléfono tiene que quedarse con internet.',
-    boton: 'Mostrar el código QR',
+    boton: 'Conectar y mostrar el QR',
   },
   coexistence: {
     titulo: 'Sí, uso WhatsApp Business en mi teléfono',
@@ -237,9 +237,9 @@ const CSS = `
   .btn.facebook:hover { color: #fff; filter: brightness(1.06); }
 
   /* Avisos y resultados. */
-  .nota { background: var(--superficie-2); border-left: 3px solid var(--primario); border-radius: 0 var(--radio-sm) var(--radio-sm) 0; padding: 12px 14px; margin-top: var(--esp-3); font-size: 13.5px; color: var(--texto-suave); }
+  .nota { background: var(--superficie-2); border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-3); font-size: 13.5px; color: var(--texto-suave); }
   .nota b { color: var(--texto); }
-  .nota.riesgo { border-left-color: var(--ambar); }
+  .nota.riesgo { border-color: color-mix(in srgb, var(--ambar) 35%, var(--borde)); background: var(--ambar-suave); }
   .paso-resultado { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--borde); }
   .paso-resultado:last-child { border-bottom: 0; }
   .paso-resultado b { display: block; font-size: 14px; }
@@ -359,7 +359,10 @@ const CSS = `
   #gsg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--esp-5); row-gap: var(--esp-4); align-items: start; }
   #gsg > * { grid-column: 1 / -1; }
   #gsg > #gsg-consulta, #gsg > #gsg-envios-caja { grid-column: auto; }
+  /* Plegada, «Lo que enviamos a GSG» es una sola línea: va debajo, no al lado de una caja alta. */
+  #gsg:has(> #gsg-envios-caja:not([open])) > #gsg-consulta, #gsg > #gsg-envios-caja:not([open]) { grid-column: 1 / -1; }
 }
+#gsg-consulta .ep-form { max-width: 560px; }
 @media (max-width: 820px) { .con-resumen { grid-template-columns: minmax(0, 1fr); } }
 .con-card { padding: var(--esp-5); display: flex; flex-direction: column; gap: var(--esp-3); min-width: 0; }
 @media (max-width: 640px) { .con-card { padding: var(--esp-4); } }
@@ -718,7 +721,7 @@ ${vistaWa ? `<details class="con-avanzado" id="con-avanzado">
         <span aria-hidden="true">f</span> <span id="fb-label">Conectar con Facebook</span>
       </button>
       <button class="btn primario hidden" id="connect" type="button">Conectar</button>
-      <button class="btn primario hidden" id="qr-connect" type="button">Mostrar el código QR</button>
+      <button class="btn primario hidden" id="qr-connect" type="button">Conectar y mostrar el QR</button>
       <span id="fb-state" class="chip hidden" role="status"></span>
     </div>
 
