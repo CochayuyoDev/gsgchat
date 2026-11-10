@@ -33,7 +33,10 @@ let registro: ReturnType<typeof crearRegistroClientes>;
 const probadas: Array<{ token: string; phoneNumberId: string }> = [];
 const meta = { falla: null as string | null };
 
-const CRED_API = { token: 'EAAG-token', phoneNumberId: '1098765', businessAccountId: '2233', appSecret: 'secreto-de-la-otra-app', verifyToken: 'palabra-api' };
+const TOKEN = 'EAAGtokenDePrueba' + 'A'.repeat(80);
+const TOKEN_NUEVO = 'EAAGtokenNuevo' + 'B'.repeat(80);
+const SECRETO = '0123456789abcdef0123456789abcdef';
+const CRED_API = { token: TOKEN, phoneNumberId: '109876543210987', businessAccountId: '223344556677889', appSecret: SECRETO, verifyToken: 'palabra-api' };
 
 beforeAll(async () => {
   b = await baseDePrueba();
@@ -87,6 +90,36 @@ describe('linea de WhatsApp API', () => {
     expect(json(r).error).toContain('App secret');
   });
 
+  it('si un dato está mal puesto dice cuál es y cómo se corrige, sin preguntarle a Meta', async () => {
+    const antes = probadas.length;
+    const casos: Array<[Record<string, string>, string, string]> = [
+      [{ phoneNumberId: '+51 921 032 763' }, 'phoneNumberId', 'número de teléfono, no su ID'],
+      [{ phoneNumberId: '921032763' }, 'phoneNumberId', 'número de teléfono, no su ID'],
+      [{ token: 'abc123' }, 'token', 'EAA'],
+      [{ appSecret: TOKEN }, 'appSecret', 'pegaste un token'],
+      [{ appSecret: '1234567890123456' }, 'appSecret', 'identificador de la app'],
+      [{ appSecret: 'zz' + SECRETO }, 'appSecret', '32'],
+      [{ businessAccountId: '109876543210987' }, 'businessAccountId', 'mismo en los dos'],
+      [{ verifyToken: 'corto' }, 'verifyToken', '8 caracteres'],
+    ];
+    for (const [cambio, campo, texto] of casos) {
+      const r = await app.inject({ method: 'POST', url: '/admin/lineas', payload: { etiqueta: 'api-mal-puesta', proveedor: 'cloud', credenciales: { ...CRED_API, ...cambio } } });
+      expect(r.statusCode, JSON.stringify(cambio)).toBe(400);
+      expect(json(r)).toMatchObject({ codigo: 'formato', campo });
+      expect(json(r).error).toContain(texto);
+    }
+    expect(probadas.length).toBe(antes);
+    expect((await lineas.listar()).some((l) => l.etiqueta === 'api-mal-puesta')).toBe(false);
+  });
+
+  it('si Meta no encuentra el número, el error marca el Phone number ID', async () => {
+    meta.falla = 'Unsupported get request. Object with ID does not exist (100)';
+    const r = await app.inject({ method: 'POST', url: '/admin/lineas', payload: { etiqueta: 'api-sin-numero', proveedor: 'cloud', credenciales: CRED_API } });
+    meta.falla = null;
+    expect(r.statusCode).toBe(400);
+    expect(json(r)).toMatchObject({ codigo: 'meta', campo: 'phoneNumberId' });
+  });
+
   it('si Meta no acepta los datos, no se da de alta y se explica en palabras', async () => {
     meta.falla = 'Meta 401: Invalid OAuth access token (190)';
     const r = await app.inject({ method: 'POST', url: '/admin/lineas', payload: { etiqueta: 'api-mala', proveedor: 'cloud', credenciales: CRED_API } });
@@ -101,10 +134,10 @@ describe('linea de WhatsApp API', () => {
     expect(r.statusCode).toBe(200);
     const l = json(r).linea;
     expect(l).toMatchObject({ etiqueta: 'wsp-api', proveedor: 'cloud', tipo: 'api', enUso: true, numero: '51933444555' });
-    expect(l.api).toMatchObject({ phoneNumberId: '1098765', businessAccountId: '2233', conToken: true, conAppSecret: true, conVerifyToken: true, faltan: [] });
-    expect(JSON.stringify(l)).not.toContain('EAAG-token');
-    expect(JSON.stringify(l)).not.toContain('secreto-de-la-otra-app');
-    expect(probadas.at(-1)).toEqual({ token: 'EAAG-token', phoneNumberId: '1098765' });
+    expect(l.api).toMatchObject({ phoneNumberId: '109876543210987', businessAccountId: '223344556677889', conToken: true, conAppSecret: true, conVerifyToken: true, faltan: [] });
+    expect(JSON.stringify(l)).not.toContain(TOKEN);
+    expect(JSON.stringify(l)).not.toContain(SECRETO);
+    expect(probadas.at(-1)).toEqual({ token: TOKEN, phoneNumberId: '109876543210987' });
     // Su transporte es el cliente de Meta (no un QR).
     const t = await registro.transporte(l.id);
     expect(t?.sesion).toBeNull();
@@ -138,11 +171,11 @@ describe('linea de WhatsApp API', () => {
 
   it('cambiar los datos de la API conserva lo que se deja vacio y vuelve a comprobar con Meta', async () => {
     const api = (await lineas.listar()).find((l) => l.proveedor === 'cloud')!;
-    const r = await app.inject({ method: 'PATCH', url: `/admin/lineas/${api.id}/credenciales`, payload: { token: 'EAAG-nuevo', appSecret: '' } });
+    const r = await app.inject({ method: 'PATCH', url: `/admin/lineas/${api.id}/credenciales`, payload: { token: TOKEN_NUEVO, appSecret: '' } });
     expect(r.statusCode).toBe(200);
-    expect(probadas.at(-1)).toEqual({ token: 'EAAG-nuevo', phoneNumberId: '1098765' });
+    expect(probadas.at(-1)).toEqual({ token: TOKEN_NUEVO, phoneNumberId: '109876543210987' });
     const cred = await lineas.credenciales(api.id);
-    expect(cred).toMatchObject({ token: 'EAAG-nuevo', appSecret: 'secreto-de-la-otra-app', verifyToken: 'palabra-api' });
+    expect(cred).toMatchObject({ token: TOKEN_NUEVO, appSecret: SECRETO, verifyToken: 'palabra-api' });
     // Una linea de QR no tiene datos de la API.
     const qr = json(await app.inject({ method: 'POST', url: '/admin/lineas', payload: { etiqueta: 'wsp-qr' } })).linea;
     expect((await app.inject({ method: 'PATCH', url: `/admin/lineas/${qr.id}/credenciales`, payload: { token: 'x' } })).statusCode).toBe(400);
@@ -198,7 +231,7 @@ describe('webhook de Meta con varias lineas de la API', () => {
   it('reune los secretos de /setup y de cada linea de la API, sin vacios', async () => {
     const { settings } = await montarWebhook();
     const s = await secretosDeMeta(settings, lineas);
-    expect(s.appSecrets).toContain('secreto-de-la-otra-app');
+    expect(s.appSecrets).toContain(SECRETO);
     expect(s.verifyTokens).toContain('palabra-api');
     expect(s.appSecrets.every(Boolean)).toBe(true);
   });
@@ -211,7 +244,7 @@ describe('webhook de Meta con varias lineas de la API', () => {
     expect((await w.inject({ method: 'GET', url: '/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=otra&hub.challenge=777' })).statusCode).toBe(403);
 
     const cuerpo = JSON.stringify({ object: 'whatsapp_business_account', entry: [] });
-    const firmado = await w.inject({ method: 'POST', url: '/webhooks/whatsapp', payload: cuerpo, headers: { 'content-type': 'application/json', 'x-hub-signature-256': signPayload(Buffer.from(cuerpo), 'secreto-de-la-otra-app') } });
+    const firmado = await w.inject({ method: 'POST', url: '/webhooks/whatsapp', payload: cuerpo, headers: { 'content-type': 'application/json', 'x-hub-signature-256': signPayload(Buffer.from(cuerpo), SECRETO) } });
     expect(firmado.statusCode).toBe(200);
     const falso = await w.inject({ method: 'POST', url: '/webhooks/whatsapp', payload: cuerpo, headers: { 'content-type': 'application/json', 'x-hub-signature-256': signPayload(Buffer.from(cuerpo), 'no-es') } });
     expect(falso.statusCode).toBe(401);

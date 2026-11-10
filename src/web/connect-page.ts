@@ -269,6 +269,16 @@ const CSS = `
   .lineas-api-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--esp-2); }
   .lineas-api-campos label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 0; }
   .lineas-api-campos input { width: 100%; box-sizing: border-box; }
+.lineas-api-campos input[aria-invalid="true"] { border-color: var(--rojo); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rojo) 18%, transparent); }
+.api-error { color: var(--rojo); font-weight: 600; font-size: 12.5px; line-height: 1.45; }
+.check-principal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: var(--esp-3, 12px) 0 0; font-weight: 600; font-size: 14px; }
+.check-principal input { width: auto; }
+.check-principal .ayuda { font-weight: 400; margin: 0; }
+.api-ejemplo { margin: var(--esp-3, 12px) 0 var(--esp-2, 8px); }
+.api-ejemplo summary { cursor: pointer; font-weight: 600; color: var(--primario); }
+.api-ejemplo table { font-size: 13px; margin-top: 8px; }
+.api-ejemplo td { vertical-align: top; }
+.api-ejemplo code { overflow-wrap: anywhere; }
   .webhook-url { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
   .linea-fila.en-pausa { opacity: .78; }
   .ayuda.separada { margin-top: var(--esp-2); }
@@ -529,12 +539,26 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
     <div id="linea-api" hidden>
       <p class="ayuda">Los datos salen de <b>developers.facebook.com</b> → tu app → WhatsApp → Configuración de la API. El token debe ser el <b>permanente</b> (de un usuario del sistema), no el de 24 h.</p>
       <div class="lineas-api-campos">
-        <label>Token de acceso <input id="api-token" type="password" autocomplete="off" maxlength="1000"></label>
-        <label>Phone number ID <input id="api-pnid" inputmode="numeric" maxlength="100"></label>
-        <label>WhatsApp Business Account ID <input id="api-waba" inputmode="numeric" maxlength="100"></label>
-        <label>App secret (clave secreta de la app) <input id="api-secret" type="password" autocomplete="off" maxlength="300"></label>
-        <label>Verify token (una palabra que tú inventas) <input id="api-verify" maxlength="300" autocomplete="off"></label>
+        <label class="api-campo">Token de acceso <input id="api-token" data-campo="token" type="password" autocomplete="off" maxlength="1000" placeholder="EAAG… (muy largo, unos 200 caracteres)" aria-describedby="api-token-error"><span class="api-error" id="api-token-error" hidden></span></label>
+        <label class="api-campo">Phone number ID <input id="api-pnid" data-campo="phoneNumberId" inputmode="numeric" maxlength="100" placeholder="Ej. 123456789012345 (no el número de teléfono)" aria-describedby="api-pnid-error"><span class="api-error" id="api-pnid-error" hidden></span></label>
+        <label class="api-campo">WhatsApp Business Account ID <input id="api-waba" data-campo="businessAccountId" inputmode="numeric" maxlength="100" placeholder="Ej. 1144600514634989" aria-describedby="api-waba-error"><span class="api-error" id="api-waba-error" hidden></span></label>
+        <label class="api-campo">App secret (clave secreta de la app) <input id="api-secret" data-campo="appSecret" type="password" autocomplete="off" maxlength="300" placeholder="32 letras y números" aria-describedby="api-secret-error"><span class="api-error" id="api-secret-error" hidden></span></label>
+        <label class="api-campo">Verify token (una palabra que tú inventas) <input id="api-verify" data-campo="verifyToken" maxlength="300" autocomplete="off" placeholder="Ej. gsgwhatsapp2026" aria-describedby="api-verify-error"><span class="api-error" id="api-verify-error" hidden></span></label>
       </div>
+      <label class="check-principal"><input type="checkbox" id="api-principal"> Usarla como línea principal <span class="ayuda">(los mensajes salen primero por esta; después se puede cambiar con «Hacer principal»)</span></label>
+      <details class="api-ejemplo">
+        <summary>Ver un ejemplo de cómo se llena y de dónde sale cada dato</summary>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Campo</th><th>Ejemplo (inventado)</th><th>Dónde está en Meta</th></tr></thead>
+          <tbody>
+            <tr><td>Token de acceso</td><td><code>EAAGm0PX4ZCpsBO7…</code> (unos 200 caracteres)</td><td>Business Manager → Configuración del negocio → Usuarios del sistema → Generar token (permisos <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>, caducidad «Nunca»)</td></tr>
+            <tr><td>Phone number ID</td><td><code>123456789012345</code></td><td>developers.facebook.com → tu app → WhatsApp → Configuración de la API → elige tu número en «De» → «Identificador del número de teléfono». <b>No</b> es el número <code>+51 9…</code></td></tr>
+            <tr><td>WhatsApp Business Account ID</td><td><code>1144600514634989</code></td><td>La misma pantalla, debajo: «Identificador de la cuenta de WhatsApp Business»</td></tr>
+            <tr><td>App secret</td><td><code>3f9a1c0b7e2d4a6f8b1c3e5d7a9f0b2c</code> (32 caracteres)</td><td>Configuración de la app → Básica → «Clave secreta de la app» → Mostrar. <b>No</b> es el identificador de la app (solo cifras)</td></tr>
+            <tr><td>Verify token</td><td><code>gsgwhatsapp2026</code></td><td>Lo inventas tú (8 caracteres o más, sin espacios). Se pega igual en Meta → WhatsApp → Configuración → Webhook</td></tr>
+          </tbody>
+        </table></div>
+      </details>
       <p class="ayuda" id="linea-api-webhook"></p>
       <p class="ayuda">Para que Meta apruebe la app te pide tres direcciones públicas (Configuración de la app → Básica): la <a class="link" href="/privacidad" target="_blank" rel="noopener">política de privacidad</a>, los <a class="link" href="/terminos" target="_blank" rel="noopener">términos y condiciones</a> y las <a class="link" href="/eliminacion-de-datos" target="_blank" rel="noopener">instrucciones para eliminar datos</a>. En <a class="link" href="/legal" target="_blank" rel="noopener">Información legal</a> están listas para copiar.</p>
     </div>
@@ -800,7 +824,7 @@ async function api(path, options) {
     throw new Error('Tu sesión terminó: vuelve a entrar.');
   }
   var data = await res.json().catch(function () { return {}; });
-  if (!res.ok) throw new Error(data.error || errorHttp(res.status));
+  if (!res.ok) { var fallo = new Error(data.error || errorHttp(res.status)); fallo.datos = data; throw fallo; }
   return data;
 }
 
@@ -1980,25 +2004,75 @@ async function cargarReparto() {
     lineasVistas = '';
     await cargarLineas();
   });
+  /* Los campos de la API: cada uno sabe marcar su error debajo de el. */
+  var CAMPO_API = { token: 'api-token', phoneNumberId: 'api-pnid', businessAccountId: 'api-waba', appSecret: 'api-secret', verifyToken: 'api-verify' };
+  function limpiarErroresApi() {
+    Object.keys(CAMPO_API).forEach(function (k) {
+      var input = $(CAMPO_API[k]), caja = $(CAMPO_API[k] + '-error');
+      if (input) input.removeAttribute('aria-invalid');
+      if (caja) { caja.hidden = true; caja.textContent = ''; }
+    });
+  }
+  function marcarErrorApi(campo, texto) {
+    var id = CAMPO_API[campo]; if (!id || !$(id)) return false;
+    $(id).setAttribute('aria-invalid', 'true');
+    var caja = $(id + '-error'); caja.textContent = texto; caja.hidden = false;
+    $(id).focus();
+    return true;
+  }
+  /* Lo mismo que revisa el servidor, para avisar sin esperar a Meta. */
+  function revisarApi(c) {
+    if (!c.token) return ['token', 'Falta el token de acceso.'];
+    if (!/^EAA/.test(c.token) || c.token.length < 60 || /\s/.test(c.token)) return ['token', 'No parece un token de Meta: empieza con «EAA» y es muy largo (unos 200 caracteres), sin espacios.'];
+    if (!c.phoneNumberId) return ['phoneNumberId', 'Falta el Phone number ID.'];
+    if (!/^\d{10,20}$/.test(c.phoneNumberId)) {
+      var tel = /^\+/.test(c.phoneNumberId) || /^(51)?9\d{8}$/.test(c.phoneNumberId.replace(/[\s()-]/g, ''));
+      return ['phoneNumberId', tel ? 'Eso es el número de teléfono, no su ID. En Meta → WhatsApp → Configuración de la API, elige el número en «De» y copia el «Identificador del número de teléfono» (solo cifras, ej. 123456789012345).' : 'Son solo cifras (entre 10 y 20), sin espacios ni signos. Ej. 123456789012345.'];
+    }
+    if (!c.businessAccountId) return ['businessAccountId', 'Falta el WhatsApp Business Account ID.'];
+    if (!/^\d{10,20}$/.test(c.businessAccountId)) return ['businessAccountId', 'Son solo cifras (entre 10 y 20), sin espacios. Es el «Identificador de la cuenta de WhatsApp Business».'];
+    if (c.phoneNumberId === c.businessAccountId) return ['businessAccountId', 'Es distinto del Phone number ID: pusiste el mismo en los dos.'];
+    if (!c.appSecret) return ['appSecret', 'Falta la clave secreta de la app.'];
+    if (!/^[a-f0-9]{32}$/i.test(c.appSecret)) return ['appSecret', /^EAA/.test(c.appSecret) ? 'Ahí pegaste un token. La clave secreta tiene 32 letras y números: Configuración de la app → Básica → Clave secreta de la app → Mostrar.' : 'La clave secreta tiene exactamente 32 letras y números; la que pusiste tiene ' + c.appSecret.length + '. Está en Configuración de la app → Básica → Mostrar.'];
+    if (c.verifyToken && !/^[\x21-\x7e]{8,200}$/.test(c.verifyToken)) return ['verifyToken', 'Al menos 8 caracteres, sin espacios ni tildes. Ej. gsgwhatsapp2026.'];
+    return null;
+  }
+  Object.keys(CAMPO_API).forEach(function (k) {
+    var input = $(CAMPO_API[k]);
+    if (input) input.addEventListener('input', function () { input.removeAttribute('aria-invalid'); var caja = $(CAMPO_API[k] + '-error'); if (caja) caja.hidden = true; });
+  });
   $('linea-agregar').onclick = async function () {
     var nombre = val('linea-nueva');
-    if (!nombre) { lineasMsg('Ponle un nombre a la línea, por ejemplo wsp-ali.', 'rojo'); return; }
+    if (!nombre) { lineasMsg('Ponle un nombre a la línea, por ejemplo wsp-ali.', 'rojo'); $('linea-nueva').focus(); return; }
     var proveedor = tipoNuevo();
     var cuerpo = { etiqueta: nombre, proveedor: proveedor };
+    limpiarErroresApi();
     if (proveedor === 'cloud') {
       cuerpo.credenciales = { token: val('api-token'), phoneNumberId: val('api-pnid'), businessAccountId: val('api-waba'), appSecret: val('api-secret'), verifyToken: val('api-verify') };
+      var mal = revisarApi(cuerpo.credenciales);
+      if (mal) { marcarErrorApi(mal[0], mal[1]); lineasMsg('Hay un dato mal puesto: está marcado en rojo arriba.', 'rojo'); return; }
       lineasMsg('Comprobando los datos con Meta…');
     }
+    var comoPrincipal = proveedor === 'cloud' && $('api-principal') && $('api-principal').checked;
     try {
-      await api('/admin/lineas', { method: 'POST', body: cuerpo });
+      var creada = await api('/admin/lineas', { method: 'POST', body: cuerpo });
       setVal('linea-nueva', '');
       ['api-token', 'api-pnid', 'api-waba', 'api-secret', 'api-verify'].forEach(function (c) { setVal(c, ''); });
+      var principalOk = false, principalError = '';
+      if (comoPrincipal && creada && creada.linea && creada.linea.id) {
+        try { await api('/admin/lineas/' + encodeURIComponent(creada.linea.id) + '/principal', { method: 'POST', body: {} }); principalOk = true; $('api-principal').checked = false; }
+        catch (e) { principalError = e.message; }
+      }
       lineasMsg(proveedor === 'cloud'
-        ? 'Línea de la API agregada y comprobada con Meta. Falta un paso: en Meta pega la dirección del webhook y el verify token (abajo de los campos) y suscríbete a «messages».'
-        : 'Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.');
+        ? 'Línea de la API agregada y comprobada con Meta' + (principalOk ? ', y ya es la principal' : '') + '. Falta un paso: en Meta pega la dirección del webhook y el verify token (abajo de los campos) y suscríbete a «messages».' + (principalError ? ' No se pudo hacer principal: ' + principalError : '')
+        : 'Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.', principalError ? 'rojo' : '');
       lineasVistas = '';
       await cargarLineas();
-    } catch (error) { lineasMsg(error.message, 'rojo'); }
+    } catch (error) {
+      var campo = error.datos && error.datos.campo;
+      if (campo && marcarErrorApi(campo, error.message)) lineasMsg('Hay un dato mal puesto: está marcado en rojo arriba.', 'rojo');
+      else lineasMsg(error.message, 'rojo');
+    }
   };
   cargarLineas();
   setInterval(cargarLineas, 4000);

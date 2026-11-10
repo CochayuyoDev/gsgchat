@@ -152,6 +152,15 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
     nombreNegocio: opts.nombreNegocio, demo: opts.demo,
     css: `.courier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.courier-card{padding:24px;border:1px solid var(--borde);border-radius:var(--radio);background:var(--superficie);box-shadow:var(--sombra);min-width:0}.courier-card>label{display:block;margin:14px 0 6px}.courier-card h2{margin-top:0}.courier-card input,.courier-card textarea{width:100%;box-sizing:border-box}.courier-card textarea{min-height:300px;padding:14px;font:13px/1.6 var(--mono)}.clave-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.clave-field label{display:block;margin-bottom:8px;font-weight:600}.clave-field select,.clave-field input{width:100%}.clave-permisos{margin:20px 0;padding:18px;border:1px solid var(--borde);border-radius:12px}.clave-permisos-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.clave-permiso{display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--superficie-2);border-radius:8px;font-size:13px}.courier-card .clave-permiso input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.clave-secret-panel{background:var(--superficie-2);padding:20px;border:1px solid var(--borde);border-radius:12px;margin-bottom:18px}.courier-secret{display:block;padding:12px;background:var(--superficie);border-radius:8px}.courier-wide{grid-column:1/-1}.courier-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.courier-scroll{overflow-x:auto;border:1px solid var(--borde);border-radius:var(--radio-sm);margin:10px 0}.courier-scroll:empty{display:none}.courier-scroll:has(>p:only-child){border:0}.courier-card .na-apis{border:1px solid var(--borde);border-radius:var(--radio-sm);border-collapse:separate;border-spacing:0;overflow:hidden}.courier-card pre{white-space:pre-wrap;overflow-wrap:anywhere}.courier-secret{overflow-wrap:anywhere}.courier-card small{display:block;margin-top:8px}.api-num{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:.78em;font-weight:700;vertical-align:middle;white-space:nowrap}.postman{margin:12px 0;padding:14px;border:1px dashed var(--borde);border-radius:12px}.postman h3{margin-top:0}.postman ol{margin:6px 0 8px;padding-left:20px}.postman li{margin:4px 0}.postman-url{overflow-wrap:anywhere}.api-json{padding:12px;border-radius:10px;background:var(--superficie-2);font:13px/1.5 monospace}.courier-status{padding:11px 14px;border-radius:var(--radio-sm);background:var(--superficie-2);border:1px solid var(--borde);margin:14px 0;font-size:13.5px}#np-flujo-form{display:grid;gap:6px}.np-check{display:flex;gap:8px;align-items:center}.courier-card .np-check input{width:auto}#np-flujo-resultado{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}@media(max-width:800px){.courier-grid,.clave-form-grid,.clave-permisos-grid{grid-template-columns:1fr}}@media(max-width:640px){.courier-card{padding:16px}.courier-card .na-apis{display:block;overflow-x:auto}.courier-card .na-apis td:last-child{min-width:170px}.courier-card .na-apis code{white-space:nowrap}}
 .na-pestanas .api-num{margin-right:0;font-size:12px}
+.na-pestanas{flex-wrap:wrap;overflow:visible;row-gap:2px}
+.na-pestanas a{padding:9px 12px 11px}
+.meta-aviso{margin:2px 0 10px;padding:9px 12px;border-radius:var(--radio-sm);font-size:13.5px;font-weight:600;border:1px solid var(--borde);background:var(--superficie-2)}
+.meta-aviso.ok{color:var(--primario);border-color:color-mix(in srgb,var(--primario) 40%,transparent);background:var(--primario-suave)}
+.meta-aviso.mal{color:#b42318;border-color:#f3b7b0;background:#fef3f2}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .meta-aviso.mal{color:#fda29b;border-color:#7a271a;background:transparent}}
+:root[data-theme="dark"] .meta-aviso.mal{color:#fda29b;border-color:#7a271a;background:transparent}
+.meta-secret-estado{margin:6px 0 0;font-size:13.5px;color:var(--texto-suave)}
+.meta-secret-estado.guardada{color:var(--primario);font-weight:600}
 .courier-grid{grid-template-columns:minmax(0,1fr);max-width:1100px}
 .courier-grid>[data-na][hidden]{display:none}
 .na-apis{margin:14px 0}.na-apis code{overflow-wrap:anywhere}
@@ -166,7 +175,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       <a href="#t-claves" data-na="claves">Claves</a>
       <a href="#t-validar" data-na="validar">Probar y validar</a>
       <a href="#t-llamadas" data-na="llamadas">Últimas llamadas</a>
-      <a href="#t-meta" data-na="meta">Webhook de WhatsApp API</a>
+      <a href="#t-meta" data-na="meta">Webhook de Meta</a>
     </nav>
     <div class="courier-grid">
       <section class="courier-card courier-wide" data-na="resumen"><h2>GSG llama → GSGchat recibe → el sistema procesa</h2>
@@ -271,15 +280,18 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <label for="meta-url">URL de devolución de llamada</label>
         <input id="meta-url" readonly>
         <div class="courier-actions"><button class="btn" type="button" id="meta-copiar-url">Copiar URL</button></div>
+        <p class="meta-aviso" id="meta-aviso-url" role="status" hidden></p>
         <label for="meta-token">Token de verificación (verify token)</label>
         <input id="meta-token" autocomplete="off" spellcheck="false" maxlength="200" placeholder="Pulsa «Generar uno» o escribe uno de al menos 8 caracteres">
         <div class="courier-actions"><button class="btn" type="button" id="meta-copiar-token">Copiar token</button><button class="btn" type="button" id="meta-generar">Generar uno</button><button class="btn primario" type="button" id="meta-guardar-token">Guardar token</button></div>
+        <p class="meta-aviso" id="meta-aviso-token" role="status" hidden></p>
         <h3>2. Clave secreta de la app (App secret)</h3>
         <p class="muted">Con ella se comprueba que cada aviso viene de Meta y no de otro. Está en Configuración de la app → Básica → Clave secreta de la app. Se guarda cifrada y no se vuelve a mostrar.</p>
         <label for="meta-secret">App secret</label>
         <input id="meta-secret" type="password" autocomplete="off" spellcheck="false" maxlength="300">
-        <p class="muted" id="meta-secret-estado"></p>
+        <p class="meta-secret-estado" id="meta-secret-estado"></p>
         <div class="courier-actions"><button class="btn primario" type="button" id="meta-guardar-secret">Guardar clave secreta</button><button class="btn peligro" type="button" id="meta-quitar-secret" hidden>Quitar</button></div>
+        <p class="meta-aviso" id="meta-aviso-secret" role="status" hidden></p>
         <h3>3. Campos que hay que suscribir</h3>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Para qué</th><th></th></tr></thead><tbody id="meta-campos"></tbody></table></div>
         <h3>4. Comprobar</h3>
@@ -498,13 +510,27 @@ ${MENSAJE_ERROR_HTTP_JS}
   var RESULTADO_META = { verificado: ['verde', 'Meta verificó'], verificacion_fallida: ['rojo', 'Verificación rechazada'], recibido: ['verde', 'Aviso recibido'], firma_invalida: ['rojo', 'Firma inválida'], sin_secreto: ['ambar', 'Sin clave secreta'] };
   function fechaMeta(iso) { return iso ? new Date(iso).toLocaleString('es-PE') : ''; }
   function metaMsg(t, rojo) { var el = $('meta-estado'); el.textContent = t || ''; el.style.color = rojo ? '#b42318' : ''; }
+  /* La respuesta de cada boton sale justo debajo de el (url, token, secret). */
+  var avisoTimers = {};
+  function metaAviso(cual, t, mal) {
+    var el = $('meta-aviso-' + cual); if (!el) return;
+    t = String(t || '').replace(/^HTTP \d+ · /, '');
+    el.textContent = t; el.className = 'meta-aviso ' + (mal ? 'mal' : 'ok'); el.hidden = !t;
+    clearTimeout(avisoTimers[cual]);
+    if (t && !mal) avisoTimers[cual] = setTimeout(function () { el.hidden = true; }, 8000);
+  }
+  async function conBoton(boton, texto, fn) {
+    var antes = boton.textContent; boton.disabled = true; boton.textContent = texto;
+    try { return await fn(); } finally { boton.disabled = false; boton.textContent = antes; }
+  }
   function pintarMeta(d) {
     $('meta-url').value = d.url;
     if (document.activeElement !== $('meta-token')) $('meta-token').value = d.verifyToken || '';
     var https = $('meta-https');
     https.hidden = d.publicoHttps;
     if (!d.publicoHttps) https.textContent = 'Esta instalación no tiene una dirección https pública (' + d.url + '). Meta solo llama a direcciones https: en producción la URL será la del dominio.';
-    $('meta-secret-estado').textContent = d.conAppSecret ? 'Guardada (termina en …' + d.appSecretFinal + '). Escribe otra solo si cambió.' : (d.setup.conAppSecret ? 'Aquí no hay una guardada, pero se usa la de Conexión (/setup), que ya tiene la de Meta.' : 'Todavía no hay ninguna guardada: sin ella se rechazan los avisos.');
+    $('meta-secret-estado').textContent = d.conAppSecret ? '✓ Clave guardada (termina en …' + d.appSecretFinal + '). Escribe otra solo si cambió.' : (d.setup.conAppSecret ? 'Aquí no hay una guardada, pero se usa la de Conexión (/setup), que ya tiene la de Meta.' : 'Todavía no hay ninguna guardada: sin ella se rechazan los avisos.');
+    $('meta-secret-estado').className = 'meta-secret-estado' + (d.conAppSecret || d.setup.conAppSecret ? ' guardada' : '');
     $('meta-quitar-secret').hidden = !d.conAppSecret;
     $('meta-campos').innerHTML = d.campos.map(function (c) { return '<tr><td><code>' + esc(c.campo) + '</code></td><td>' + esc(c.para) + '</td><td>' + (c.obligatorio ? '<span class="chip tono-azul sin-punto">Necesario</span>' : '<span class="chip tono-gris sin-punto">Recomendado</span>') + '</td></tr>'; }).join('');
     var chip = $('meta-chip'), e = d.estado || {};
@@ -520,23 +546,39 @@ ${MENSAJE_ERROR_HTTP_JS}
   }
   async function cargarMeta() { if (!$('webhook-meta')) return; try { pintarMeta(await api('/admin/webhook-meta')); } catch (e) { metaMsg(e.message, true); } }
   if ($('webhook-meta')) {
-    $('meta-copiar-url').onclick = function () { copiar($('meta-url').value); metaMsg('URL copiada.'); };
-    $('meta-copiar-token').onclick = function () { if (!$('meta-token').value) { metaMsg('Primero genera o escribe un token.', true); return; } copiar($('meta-token').value); metaMsg('Token copiado.'); };
+    $('meta-copiar-url').onclick = function () { copiar($('meta-url').value); metaAviso('url', 'URL copiada. Pégala en Meta como «URL de devolución de llamada».'); };
+    $('meta-copiar-token').onclick = function () { if (!$('meta-token').value) { metaAviso('token', 'Primero genera o escribe un token.', true); return; } copiar($('meta-token').value); metaAviso('token', 'Token copiado. Pégalo en Meta como «Token de verificación».'); };
     $('meta-generar').onclick = async function () {
       if ($('meta-token').value && !window.confirm('¿Cambiar el verify token? Habrá que pegar el nuevo en Meta y volver a verificar.')) return;
-      try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta/generar-token', 'POST', {})); metaMsg('Token nuevo guardado. Cópialo y pégalo en Meta como «Token de verificación».'); } catch (e) { metaMsg(e.message, true); }
+      var b = this;
+      await conBoton(b, 'Generando…', async function () {
+        try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta/generar-token', 'POST', {})); metaAviso('token', 'Token nuevo generado y guardado. Cópialo y pégalo en Meta como «Token de verificación».'); } catch (e) { metaAviso('token', e.message, true); }
+      });
     };
     $('meta-guardar-token').onclick = async function () {
-      try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta', 'POST', { verifyToken: $('meta-token').value.trim() })); metaMsg('Token guardado.'); } catch (e) { metaMsg(e.message, true); }
+      var b = this;
+      await conBoton(b, 'Guardando…', async function () {
+        try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta', 'POST', { verifyToken: $('meta-token').value.trim() })); metaAviso('token', 'Token guardado.'); } catch (e) { metaAviso('token', e.message, true); }
+      });
     };
     $('meta-guardar-secret').onclick = async function () {
       var v = $('meta-secret').value.trim();
-      if (!v) { metaMsg('Escribe la clave secreta de la app.', true); return; }
-      try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta', 'POST', { appSecret: v })); $('meta-secret').value = ''; metaMsg('Clave secreta guardada.'); } catch (e) { metaMsg(e.message, true); }
+      if (!v) { metaAviso('secret', 'Pega primero la clave secreta de la app en el campo de arriba.', true); $('meta-secret').focus(); return; }
+      var b = this;
+      await conBoton(b, 'Guardando…', async function () {
+        try {
+          var d = await api('/admin/webhook-meta', 'POST', { appSecret: v });
+          $('meta-pasos').innerHTML = ''; pintarMeta(d); $('meta-secret').value = '';
+          metaAviso('secret', 'Clave secreta guardada (termina en …' + (d.appSecretFinal || '') + '). Ya se pueden comprobar los avisos de Meta.');
+        } catch (e) { metaAviso('secret', e.message, true); }
+      });
     };
     $('meta-quitar-secret').onclick = async function () {
       if (!window.confirm('¿Quitar la clave secreta? Se rechazarán los avisos de Meta hasta que pongas otra (salvo que Conexión tenga una).')) return;
-      try { pintarMeta(await api('/admin/webhook-meta', 'POST', { quitarAppSecret: true })); metaMsg('Clave secreta quitada.'); } catch (e) { metaMsg(e.message, true); }
+      var b = this;
+      await conBoton(b, 'Quitando…', async function () {
+        try { pintarMeta(await api('/admin/webhook-meta', 'POST', { quitarAppSecret: true })); metaAviso('secret', 'Clave secreta quitada.'); } catch (e) { metaAviso('secret', e.message, true); }
+      });
     };
     $('meta-probar').onclick = async function () {
       metaMsg('Probando…');
