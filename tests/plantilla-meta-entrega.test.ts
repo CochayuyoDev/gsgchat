@@ -129,6 +129,41 @@ describe('el primer mensaje con la principal por QR y una línea de WhatsApp API
     expect(preguntado).toBe(false);
   });
 
+  it('el recordatorio sin plantilla propia aprobada en Meta sale con la plantilla del pedido (antes pedía una que Meta no tenía: #132001)', async () => {
+    const repos = createFakeRepos();
+    await loteListo(repos);
+    // Lo que deja la sincronización: la del pedido aprobada; las del catálogo, desactivadas (no están en Meta).
+    await repos.templates.upsert(approvedTemplate({ name: 'solicitud_ubicacion_entrega', language: 'es_PE', category: 'UTILITY', variables: 8, quality: 'GREEN' }));
+    await repos.templates.upsert({ ...approvedTemplate({ name: 'recordatorio_ubicacion', language: 'es', category: 'UTILITY', variables: 2, quality: 'GREEN' }), status: 'DISABLED' });
+    const { sender, enviados } = senderFalso();
+    let ahora = HORA_BUENA;
+    const motor = crearMotor({
+      repos, sender, gsg: crearPuertoEnEspera(), opciones, ahora: () => ahora, azar: () => 0,
+      usarPlantilla: () => false,
+      plantillaMeta: async () => true,
+      plantillaSolicitud: async () => ({ name: 'solicitud_ubicacion_entrega', language: 'es_PE', variables: VARS }),
+    });
+    await motor.tick();
+    ahora = new Date(HORA_BUENA.getTime() + 3 * 60 * 60 * 1000);
+    await motor.tick();
+    expect(enviados.map((e) => e.templateName)).toEqual(['solicitud_ubicacion_entrega', 'solicitud_ubicacion_entrega']);
+  });
+
+  it('un rechazo de PLANTILLA de Meta (#132001) no gasta un intento: al cliente no le llegó nada', async () => {
+    const repos = createFakeRepos();
+    await loteListo(repos);
+    const sender: Sender = { async send() { return { ok: false, error: '(#132001) Template name does not exist in the translation', retryable: false, deliveryId: 1 } as SendOutcome; } };
+    const motor = crearMotor({
+      repos, sender, gsg: crearPuertoEnEspera(), opciones, ahora: () => HORA_BUENA, azar: () => 0,
+      usarPlantilla: () => true,
+      plantillaSolicitud: async () => ({ name: 'solicitud_ubicacion_entrega', language: 'es_PE', variables: VARS }),
+    });
+    await motor.tick();
+    const [s] = await repos.rutas.listarSolicitudes({ limit: 10, offset: 0 });
+    expect(s).toMatchObject({ intentos: 0, incidencia: 'envio_bloqueado' });
+    expect(s!.incidenciaDetalle).toContain('no le llegó al cliente');
+  });
+
   it('sin plantilla aprobada (o apagada) todo sigue como antes: texto con botón', async () => {
     const repos = createFakeRepos();
     await loteListo(repos);

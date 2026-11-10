@@ -255,6 +255,9 @@ const CSS = `${REPARTO_CSS}
 #aj-plantilla-meta .pm-fila { display: grid; gap: 4px; max-width: 420px; }
 #aj-plantilla-meta .pm-fila label { font-size: 13px; font-weight: 600; }
 #aj-plantilla-meta .pm-fila input { font-family: var(--mono, ui-monospace, monospace); }
+#aj-plantilla-meta .pm-fila + .pm-fila { margin-top: 10px; }
+#aj-plantilla-meta .pm-nota { font-size: 12.5px; }
+.aj-con-meta { margin: 0 0 10px; padding: 9px 12px; border-radius: var(--radio-sm, 8px); border: 1px solid var(--borde); background: var(--superficie-2); font-size: 13.5px; }
 #aj-plantilla-meta .pm-acciones { margin: 10px 0 0; gap: 8px; justify-content: flex-start; }
 #aj-plantilla-meta .pm-acciones .btn { flex: 0 0 auto; width: auto; }
 #aj-plantilla-meta .pm-aviso { margin: 10px 0 0; padding: 9px 12px; border-radius: var(--radio-sm, 8px); font-size: 13.5px; font-weight: 600; border: 1px solid var(--borde); }
@@ -385,6 +388,11 @@ export function rutasPage(opts: RutasOpts): string {
           <label for="pm-nombre">Nombre de la plantilla en Meta</label>
           <input id="pm-nombre" maxlength="512" spellcheck="false" autocomplete="off" placeholder="solicitud_ubicacion_entrega">
         </div>
+        <div class="pm-fila">
+          <label for="pm-recordatorio">Plantilla de los recordatorios</label>
+          <select id="pm-recordatorio"><option value="">La misma del primer mensaje (con los datos del pedido)</option></select>
+          <span class="muted pm-nota">Solo salen las aprobadas por Meta. Si creas en Meta una de recordatorio ({{1}} nombre, {{2}} pedido, {{3}} negocio), elígela aquí.</span>
+        </div>
         <div class="fila pm-acciones">
           <button type="button" class="btn primario sm" id="pm-guardar">Guardar</button>
           <button type="button" class="btn sm" id="pm-traer">Traer el estado desde Meta</button>
@@ -403,7 +411,7 @@ export function rutasPage(opts: RutasOpts): string {
         <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
         <div id="aj-pasos"></div>
-        <div class="aj-editor-inicial" id="aj-editor-inicial"><div class="aj-ei-cab"><h4>Primer mensaje que recibe el cliente</h4><span id="aj-estado-texto-inicial" class="chip" role="status">Cargando…</span></div><p class="muted">Es lo que le llega al cliente cuando GSG manda su pedido. Cámbialo como quieras: a la derecha ves cómo le llega.</p><div class="aj-ei-cols"><div><label for="aj-texto-inicial">Texto</label><textarea id="aj-texto-inicial" rows="13" maxlength="2000" spellcheck="true"></textarea><p class="aj-ei-ayuda">Toca un dato para ponerlo donde está el cursor. Si a un pedido le falta un dato, esa línea no sale.</p><div class="aj-ei-datos" id="aj-datos-inicial"></div></div><div><span class="muted">Así le llega</span><div class="previa aj-ei-previa" id="aj-previa-inicial"></div></div></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar el primer mensaje</button><button type="button" class="btn sm" id="aj-fabrica-texto-inicial">Volver al texto de fábrica</button></div></div><div class="aj-editor-inicial" id="aj-editor-otros"><div class="aj-ei-cab"><h4>Los demás mensajes del sistema</h4><span id="aj-estado-otros" class="chip" role="status">Cargando…</span></div><p class="muted">Los otros mensajes fijos del bot: el mensaje final («Ubicación registrada») y los del cambio de ubicación. El mensaje inicial y los recordatorios se editan arriba. No incluye al motorizado, al asistente ni a la IA. Las variables van entre llaves. Un texto igual al de fábrica no se guarda como propio; vaciarlo lo devuelve al de fábrica.</p><div id="aj-otros-lista"></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-otros">Guardar los mensajes</button></div></div>
+        <div class="aj-editor-inicial" id="aj-editor-inicial"><p class="aj-con-meta" id="aj-con-meta" hidden>Con la <b>plantilla aprobada por Meta</b> activa, por WhatsApp API el primer mensaje sale con esa plantilla. Este texto se usa solo si el cliente te escribió en las últimas 24 h o si el mensaje sale por una línea de QR.</p><div class="aj-ei-cab"><h4>Primer mensaje que recibe el cliente</h4><span id="aj-estado-texto-inicial" class="chip" role="status">Cargando…</span></div><p class="muted">Es lo que le llega al cliente cuando GSG manda su pedido. Cámbialo como quieras: a la derecha ves cómo le llega.</p><div class="aj-ei-cols"><div><label for="aj-texto-inicial">Texto</label><textarea id="aj-texto-inicial" rows="13" maxlength="2000" spellcheck="true"></textarea><p class="aj-ei-ayuda">Toca un dato para ponerlo donde está el cursor. Si a un pedido le falta un dato, esa línea no sale.</p><div class="aj-ei-datos" id="aj-datos-inicial"></div></div><div><span class="muted">Así le llega</span><div class="previa aj-ei-previa" id="aj-previa-inicial"></div></div></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar el primer mensaje</button><button type="button" class="btn sm" id="aj-fabrica-texto-inicial">Volver al texto de fábrica</button></div></div><div class="aj-editor-inicial" id="aj-editor-otros"><div class="aj-ei-cab"><h4>Los demás mensajes del sistema</h4><span id="aj-estado-otros" class="chip" role="status">Cargando…</span></div><p class="muted">Los otros mensajes fijos del bot: el mensaje final («Ubicación registrada») y los del cambio de ubicación. El mensaje inicial y los recordatorios se editan arriba. No incluye al motorizado, al asistente ni a la IA. Las variables van entre llaves. Un texto igual al de fábrica no se guarda como propio; vaciarlo lo devuelve al de fábrica.</p><div id="aj-otros-lista"></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-otros">Guardar los mensajes</button></div></div>
       </section>
 
       <section class="aj-seccion">
@@ -1906,11 +1914,41 @@ function pintarPlantillaMeta(d) {
   previa.textContent = t && t.cuerpo
     ? rellenarPlantilla(t.cuerpo, d.datos)
     : 'Cuando Meta apruebe la plantilla y la traigas, aquí se ve cómo le llega al cliente.';
+  var nota = document.getElementById('aj-con-meta');
+  if (nota) nota.hidden = !(d.usar && t && t.estado === 'APPROVED');
   if (t && t.variables && t.variables !== d.datos.length) avisoPlantilla('La plantilla de Meta tiene ' + t.variables + ' datos y el sistema llena ' + d.datos.length + ' (nombre, producto, empresa, código, método de pago, monto, dirección y horario, en ese orden). Revísala en Meta.', true);
 }
+/* La plantilla de los recordatorios: solo las aprobadas por Meta (las del catálogo que la cuenta no tiene salen desactivadas). */
+var plantillasRutas = { solicitud: [], recordatorio: [], insistencia: [] };
+async function cargarRecordatorioMeta() {
+  try {
+    var r = await Promise.all([api('/admin/templates'), api('/admin/rutas/ajustes')]);
+    var aprobadas = (r[0] || []).filter(function (t) { return t.status === 'APPROVED'; });
+    plantillasRutas = (r[1] && r[1].ajustes && r[1].ajustes.plantillas) || plantillasRutas;
+    var elegida = (plantillasRutas.recordatorio || [])[0] || '';
+    var nombre = document.getElementById('pm-nombre').value.trim();
+    var sel = document.getElementById('pm-recordatorio');
+    sel.innerHTML = '<option value="">La misma del primer mensaje (con los datos del pedido)</option>' + aprobadas
+      .filter(function (t) { return t.name !== nombre; })
+      .map(function (t) { return '<option value="' + esc(t.name) + '">' + esc(t.name) + ' (' + esc(t.language) + ', ' + t.variables + ' datos)</option>'; }).join('');
+    sel.value = elegida === nombre ? '' : elegida;
+    if (sel.value !== (elegida === nombre ? '' : elegida)) sel.value = '';
+  } catch (e) { /* sin plantillas no hay nada que elegir: queda la del pedido */ }
+}
 async function cargarPlantillaMeta() {
-  try { pintarPlantillaMeta(await api('/admin/entregas/plantilla-meta')); }
+  try { pintarPlantillaMeta(await api('/admin/entregas/plantilla-meta')); await cargarRecordatorioMeta(); }
   catch (e) { avisoPlantilla(e.message, true); }
+}
+async function guardarRecordatorioMeta() {
+  var v = document.getElementById('pm-recordatorio').value;
+  var lista = v ? [v] : [];
+  await api('/admin/rutas/ajustes', { method: 'POST', body: { plantillas: { solicitud: plantillasRutas.solicitud || [], recordatorio: lista, insistencia: lista } } });
+  plantillasRutas.recordatorio = lista; plantillasRutas.insistencia = lista;
+  /* El «Guardar» general reenvía las plantillas que tiene en memoria: que no deshaga esta elección. */
+  if (typeof ajustesCache !== 'undefined' && ajustesCache && ajustesCache.ajustes && ajustesCache.ajustes.plantillas) {
+    ajustesCache.ajustes.plantillas.recordatorio = lista;
+    ajustesCache.ajustes.plantillas.insistencia = lista;
+  }
 }
 async function conBotonPm(boton, texto, fn) {
   var antes = boton.textContent; boton.disabled = true; boton.textContent = texto;
@@ -1921,7 +1959,9 @@ document.getElementById('pm-guardar').onclick = function () {
   conBotonPm(boton, 'Guardando…', async function () {
     try {
       var d = await api('/admin/entregas/plantilla-meta', { method: 'POST', body: { usar: document.getElementById('pm-usar').checked, nombre: document.getElementById('pm-nombre').value.trim() } });
+      await guardarRecordatorioMeta();
       pintarPlantillaMeta(d);
+      await cargarRecordatorioMeta();
       avisoPlantilla(!d.usar ? 'Guardado: el primer mensaje no usará la plantilla de Meta.' : d.plantilla && d.plantilla.estado === 'APPROVED' ? 'Guardado: el primer mensaje por WhatsApp API sale con esta plantilla.' : 'Guardado. Falta que Meta la apruebe: cuando esté aprobada, pulsa «Traer el estado desde Meta».');
     } catch (e) { avisoPlantilla(e.message, true); }
   });
@@ -1932,6 +1972,7 @@ document.getElementById('pm-traer').onclick = function () {
     try {
       var d = await api('/admin/entregas/plantilla-meta/traer', { method: 'POST', body: {} });
       pintarPlantillaMeta(d);
+      await cargarRecordatorioMeta();
       var t = d.plantilla;
       avisoPlantilla(t ? (t.estado === 'APPROVED' ? 'Listo: Meta la tiene aprobada. Se trajeron ' + d.traidas + ' plantillas.' : 'Meta la tiene como «' + (ESTADO_PLANTILLA[t.estado] || [0, t.estado])[1] + '». Hasta que esté aprobada, no se usa.') : 'Meta no tiene ninguna plantilla llamada «' + d.nombre + '». Revisa que el nombre sea exactamente el de Meta.', !t || t.estado !== 'APPROVED');
     } catch (e) { avisoPlantilla(e.message, true); }

@@ -232,7 +232,12 @@ export async function processChange(
       for (const recibido of value.messages ?? []) {
         const message = linea ? { ...recibido, linea } : recibido;
         if (!entradaAdmitida(message)) continue;
-        if (!(await perteneceAlChatActual(repos, deps.settings, message))) continue;
+        // Lo de Meta (sin `provider`: WAHA y el QR lo traen puesto) no depende del corte del QR.
+        const deMeta = !recibido.provider || recibido.provider === 'meta';
+        if (!(await perteneceAlChatActual(repos, deps.settings, message, { sinCorte: deMeta }))) {
+          console.warn('[webhook] mensaje entrante no admitido: el sistema no le escribió antes a ese número', { de: String(message.from ?? '').slice(-4), tipo: message.type, linea: linea?.etiqueta ?? null });
+          continue;
+        }
         // La segunda entrega de un mensaje (el telefono reenvio un "ver una
         // vez") lleva el mismo id a proposito: no es un duplicado, es el
         // fichero que faltaba.

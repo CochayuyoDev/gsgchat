@@ -1681,7 +1681,7 @@ async function abrirFicha() {
     var marcas = [];
     if (c.optOutAt) marcas.push('<span class="pill bad">Dado de baja</span>');
     else if (current.windowOpen) marcas.push('<span class="pill ok">Puede recibir mensajes</span>');
-    else marcas.push('<span class="pill warn" title="Pasaron más de 24 horas desde su último mensaje: solo se le puede escribir con una plantilla aprobada.">Fuera de las 24 h</span>');
+    /* Fuera de las 24 h ya no se avisa: se escribe libre siempre (decisión del dueño, 10/11). */
     if (c.botPausadoAt || current.botPausadoAt) marcas.push('<span class="pill warn">Bot callado</span>');
     if (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada')) marcas.push('<span class="pill warn">Para una persona</span>');
     var html = '<div><h4>Este chat</h4><div class="fila">' + marcas.join('') + '<button class="sm" type="button" id="ficha-baja">' + (c.optOutAt ? 'Dar de alta' : 'Dar de baja') + '</button></div></div>' +

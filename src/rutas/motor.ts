@@ -624,9 +624,12 @@ export function crearMotor(deps: MotorDeps): Motor {
       return { accion: 'nada', solicitudId: solicitud.id, motivo: 'el primer mensaje de ese pedido ya está en curso o espera a una persona' };
     }
     // La plantilla con los datos del pedido: siempre en la solicitud; en un
-    // recordatorio, solo si ese paso no tiene una plantilla propia aprobada.
-    const conDatosDelPedido = conPlantilla && (paso === 'solicitud' || (plantillaDeMeta && !(await hayAprobadaDelPaso(paso))));
-    const agrupada = conDatosDelPedido ? await deps.plantillaSolicitud?.(solicitud) : null;
+    // recordatorio, solo si ese paso no tiene una plantilla propia aprobada en
+    // Meta (si no, el recordatorio pediría una que Meta no tiene: #132001).
+    // También si en «Plantillas aprobadas por Meta» se eligió esa misma para los recordatorios.
+    const delPedido = conPlantilla ? await deps.plantillaSolicitud?.(solicitud) : null;
+    const conDatosDelPedido = Boolean(delPedido) && (paso === 'solicitud' || ajustes.plantillas[paso].includes(delPedido!.name) || !(await hayAprobadaDelPaso(paso)));
+    const agrupada = conDatosDelPedido ? delPedido : null;
     const elegida = conPlantilla ? (agrupada ? { name: agrupada.name, language: agrupada.language ?? 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
     // La primera solicitud de una entrega de GSG: la plantilla con los datos del envio.
     const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud) : null;
@@ -770,6 +773,23 @@ export function crearMotor(deps: MotorDeps): Motor {
         ultimoEnvio = momento.getTime();
         pausaActual = sortearPausa();
       }
+      return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
+    }
+
+    // Un error de PLANTILLA de Meta (#132000-#132999: no existe con ese idioma,
+    // datos de más o de menos, pausada) no es del cliente: no le llegó nada.
+    // No gasta un intento (antes el pedido acababa en «no contestó a 4
+    // mensajes» habiendo recibido uno, 10/11); queda dicho qué arreglar y se
+    // vuelve a probar en 15 minutos (por si se trae o aprueba la plantilla).
+    if (/#?132\d{3}\b/.test(salida.error)) {
+      const espera = 15 * 60_000;
+      esperar(solicitud, 'plantilla_meta', salida.error, espera);
+      await repos.rutas.actualizarSolicitud(solicitud.id, {
+        proximoIntentoAt: new Date(momento.getTime() + espera),
+        incidencia: 'envio_bloqueado',
+        incidenciaDetalle: `Meta rechazó la plantilla (no le llegó al cliente): ${salida.error}`.slice(0, 300),
+      });
+      await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `Meta rechazó la plantilla; no cuenta como intento: ${salida.error}`);
       return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
     }
 

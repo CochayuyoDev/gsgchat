@@ -38,6 +38,11 @@ export interface SendIntent {
    * de Meta lo frena si sale por una línea de la API (Meta no lo entregaría).
    */
   respetarVentana?: boolean;
+  /**
+   * Escrito por una persona en Chats (decisión del dueño, 10/11): sale aunque
+   * la ventana de 24 h esté cerrada. Meta puede no entregarlo; es su riesgo.
+   */
+  ignorarVentana?: boolean;
 }
 
 export interface GateSnapshot {
@@ -185,7 +190,7 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
   //    Solo lo escrito por una persona en Chats (`respetarVentana`) se frena
   //    aunque sea a mano; los demás envíos «a mano» del sistema (avisos al
   //    supervisor, a la tienda...) siguen como siempre.
-  if ((!manual || intent.respetarVentana) && ventanaAplica && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
+  if (!intent.ignorarVentana && (!manual || intent.respetarVentana) && ventanaAplica && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
     return {
       allow: false,
       code: 'window_closed',
