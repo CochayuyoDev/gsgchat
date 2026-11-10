@@ -22,10 +22,16 @@ export function normalizarTexto(texto: string): string {
     .trim();
 }
 
+/*
+ * Dos clases de reglas. Las FUERTES valen siempre («BAJA», «denme de baja»,
+ * «eliminación de datos»). Las SUAVES solo cuando el mensaje no habla del
+ * pedido ni corrige un dato: «borra mi número anterior, el nuevo es…» o
+ * «Retiro en tienda, mis datos son…» no son un pedido de privacidad. En esos
+ * casos decide la IA (si está activa), que es quien mira el sentido.
+ */
+
 /** Borrar sus datos: va antes que la baja (quien pide borrar tambien deja de recibir). */
-const REGLAS_BORRAR: RegExp[] = [
-  /\b(borr|elimin|suprim|quit|retir)\w*\b.{0,30}\b(mis|todos mis|mi|toda mi)\b.{0,12}\b(datos|informacion|info|registro|registros|data)\b/,
-  /\b(borr|elimin|suprim)\w*\b.{0,20}\b(mi|mis)\b.{0,10}\b(numero|telefono|celular|contacto|cuenta|historial|chat|conversacion)\b/,
+const BORRAR_FUERTES: RegExp[] = [
   /\b(borr|elimin|suprim)\w*(me|nme|enme)\b.{0,20}\b(sistema|base|registro|lista)\b/,
   /\bno (quiero|deseo) que (tengan|guarden|conserven|usen)\b.{0,15}\b(mis datos|mi informacion|mi numero)\b/,
   /\b(derecho|solicitud) (de|a la) (cancelacion|supresion|eliminacion)\b/,
@@ -34,17 +40,29 @@ const REGLAS_BORRAR: RegExp[] = [
   /\b(arco)\b.{0,20}\b(derecho|derechos|datos)\b/,
 ];
 
-const REGLAS_BAJA: RegExp[] = [
-  /^(baja|stop|unsubscribe|darme de baja|dame de baja|denme de baja)$/,
+const BORRAR_SUAVES: RegExp[] = [
+  /\b(borr|elimin|suprim)\w*\b.{0,30}\b(mis|todos mis|mi|toda mi)\b.{0,12}\b(datos|informacion|info|registro|registros|data)\b/,
+  /\b(borr|elimin|suprim)\w*\b.{0,20}\b(mi|mis)\b.{0,10}\b(numero|telefono|celular|contacto|cuenta|historial|chat|conversacion)\b/,
+];
+
+const BAJA_FUERTES: RegExp[] = [
+  /^(baja|stop|unsubscribe|darme de baja|dame de baja|denme de baja)( por favor| porfa| gracias| ya)*$/,
   /\b(dar|darme|dame|denme|deme|den)\b.{0,6}\bde baja\b/,
-  /\bno (me|nos) (escriban|escribas|escriba|manden|mandes|mande|envien|envies|envie|contacten|molesten|molestes)\b.{0,15}\b(mas mensajes|mas whatsapp|nunca mas|mas por aqui|mas)$/,
   // «No me escriban» solo, sin nada detrás: «no me manden al motorizado antes de las 3» no es una baja.
   /^(por favor |porfa )?(ya )?no (me|nos) (escriban|escribas|manden|mandes|envien|envies|contacten|molesten|molestes)( por favor| porfa| gracias| ok)*$/,
   /\b(dejen|deja|deje) de (escribir|mandar|enviar|molestar|contactar)\w*\b/,
+];
+
+const BAJA_SUAVES: RegExp[] = [
+  /\bno (me|nos) (escriban|escribas|escriba|manden|mandes|mande|envien|envies|envie|contacten|molesten|molestes)\b.{0,15}\b(mas mensajes|mas whatsapp|nunca mas|mas por aqui|mas)$/,
   /\bno (quiero|deseo) (recibir )?(mas )?(mensajes|mensaje|notificaciones|whatsapp|publicidad|promociones)\b/,
   /\b(sacar|saquen|saca|quitar|quiten|quita|borrar|borren)\w*\b.{0,10}\b(de|de la|de su|de sus|de esta)\b.{0,6}\b(lista|listas|difusion|base)\b/,
   /\b(spam|acoso)\b/,
 ];
+
+/** El mensaje habla del pedido o corrige un dato: las reglas suaves no deciden. */
+const HABLA_DEL_PEDIDO =
+  /\b(anterior|viej[oa]s?|nuev[oa]s?|correct[oa]s?|incorrect[oa]s?|equivocad[oa]s?|cambi\w*|corrij\w*|actualiz\w*|motorizado|repartidor|pedido|pedidos|paquete|entrega|direccion|ubicacion|tienda|retiro|llame|llamen|llamada|son)\b/;
 
 /** Palabras que hacen dudar: sin una regla clara, la IA decide si es eso. */
 const PISTAS = /\b(baja|bloque\w*|mensaj\w*|escrib\w*|molest\w*|spam|datos|informacion|borr\w*|elimin\w*|lista|contact\w*|denuncia\w*|reporta\w*|indecopi|privacidad)\b/;
@@ -53,8 +71,11 @@ const PISTAS = /\b(baja|bloque\w*|mensaj\w*|escrib\w*|molest\w*|spam|datos|infor
 export function privacidadPorReglas(texto: string): TipoPrivacidad | null {
   const t = normalizarTexto(texto);
   if (!t || t.length > 600) return null;
-  if (REGLAS_BORRAR.some((r) => r.test(t))) return 'borrar_datos';
-  if (REGLAS_BAJA.some((r) => r.test(t))) return 'baja';
+  const suaves = !HABLA_DEL_PEDIDO.test(t);
+  if (BORRAR_FUERTES.some((r) => r.test(t))) return 'borrar_datos';
+  if (suaves && BORRAR_SUAVES.some((r) => r.test(t))) return 'borrar_datos';
+  if (BAJA_FUERTES.some((r) => r.test(t))) return 'baja';
+  if (suaves && BAJA_SUAVES.some((r) => r.test(t))) return 'baja';
   return null;
 }
 
@@ -71,6 +92,8 @@ export function promptClasificadorPrivacidad(): string {
     'BAJA: pide que no le escriban mas, que lo saquen de la lista, que dejen de mandarle mensajes, o se queja de que le escriben (spam).',
     'BORRAR: pide que borren o eliminen sus datos, su numero, su informacion o su historial, o invoca sus derechos sobre sus datos personales.',
     'OTRA: cualquier otra cosa. Cancelar o reprogramar un pedido, decir que no esta en casa, preguntar por su pedido, quejarse del servicio o del motorizado, o mandar su direccion NO es BAJA ni BORRAR.',
+    'Dar sus datos para el pedido, o corregirlos («borra mi numero anterior, el nuevo es...», «elimina la direccion vieja») tampoco es BORRAR: es OTRA.',
+    'Pedir que no le escriba el motorizado o que mejor lo llamen es OTRA, no BAJA.',
     'Si pide las dos cosas, responde BORRAR. Si dudas, responde OTRA.',
   ].join('\n');
 }

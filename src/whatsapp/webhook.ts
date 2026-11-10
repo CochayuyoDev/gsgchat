@@ -422,6 +422,47 @@ export async function processChange(
       return;
     }
 
+    // Alertas de Meta sobre la cuenta o el numero (limites, pagos, politicas).
+    // Quedan en Que todo funcione; las que no estan resueltas, como aviso.
+    case 'account_alerts': {
+      const a = value.alert_info ?? {};
+      const tipo = (a.alert_type ?? '').toUpperCase() || 'ALERTA';
+      const detalle = [a.alert_severity, a.alert_status, a.alert_description, value.entity_type].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', tipo, `account_alerts: ${detalle || tipo}`.slice(0, 500)).catch(() => undefined);
+      return;
+    }
+
+    // Meta reviso la cuenta de WhatsApp Business (APPROVED / REJECTED / PENDING).
+    case 'account_review_update': {
+      const decision = (value.decision ?? '').toUpperCase() || 'SIN_DECISION';
+      await deps.salud?.registrarEvento('cuenta', `REVISION_${decision}`, `account_review_update: ${decision}`).catch(() => undefined);
+      return;
+    }
+
+    // El nombre visible del numero: aprobado, rechazado (con el motivo) o pendiente.
+    case 'phone_number_name_update': {
+      const decision = (value.decision ?? '').toUpperCase() || 'SIN_DECISION';
+      const detalle = [value.display_phone_number, value.requested_verified_name, value.rejection_reason].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', `NOMBRE_${decision}`, `phone_number_name_update: ${decision}${detalle ? ` (${detalle})` : ''}`.slice(0, 500)).catch(() => undefined);
+      return;
+    }
+
+    // Cambios de seguridad del numero (PIN de dos pasos cambiado o pedido de cambio).
+    case 'security': {
+      const evento = (value.event ?? '').toUpperCase() || 'SEGURIDAD';
+      const detalle = [value.display_phone_number, evento].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', 'SEGURIDAD', `security: ${detalle}`).catch(() => undefined);
+      return;
+    }
+
+    // El resto de campos que se pueden suscribir en Meta (calls, flows,
+    // history, smb_message_echoes, smb_app_state_sync, standby, grupos,
+    // pagos, tracking_events, automatic_events, business_status_update,
+    // account_settings_update, message_template_components_update,
+    // template_correct_category_detection, business_username_updates,
+    // messaging_handovers, partner_solutions...) se reciben, se contesta 200
+    // y quedan en el registro del webhook, pero no cambian nada: el flujo de
+    // mensajes, entregas y bot sigue igual.
     default:
       return;
   }

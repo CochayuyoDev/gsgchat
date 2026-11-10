@@ -515,7 +515,7 @@ export function loginPage(opts: {
   <div id="panel-entrar" role="tabpanel" aria-labelledby="tab-entrar">${FORM_ENTRAR}</div>
   <div id="panel-registro" role="tabpanel" aria-labelledby="tab-registro">${opts.primeraCuenta ? FORM_PRIMERA : FORM_TIENDA}</div>
 </div>
-<p class="pie"><a href="/privacidad">Privacidad</a> · <a href="/terminos">Términos y condiciones</a> · <a href="/eliminacion-de-datos">Eliminar mis datos</a></p>
+<p class="pie"><a href="/privacidad">Privacidad</a> · <a href="/terminos">Términos y condiciones</a> · <a href="/eliminacion-de-datos">Eliminar mis datos</a> · <a href="/libro-de-reclamaciones">Libro de Reclamaciones</a></p>
 </main>
 <script>${script}</script>
 </body></html>`;

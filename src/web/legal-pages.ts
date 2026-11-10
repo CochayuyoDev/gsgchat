@@ -38,8 +38,25 @@ export interface DatosLegales {
 /** Cuando cambie el texto de estas paginas, se cambia esta fecha. */
 export const ULTIMA_ACTUALIZACION = '09/11/2026';
 
-export function datosLegalesDelEntorno(env: NodeJS.ProcessEnv = process.env): DatosLegales {
-  const v = (k: string) => (env[k] ?? '').trim();
+/**
+ * Los datos publicos de GSG, tal como los publica GSG en
+ * business.gsgcorp.pe (terminos v2 vigentes desde 06/10/2026 y politica de
+ * privacidad, seccion 6). Sirven si el entorno no trae LEGAL_*; lo que venga
+ * del entorno manda.
+ */
+export const DATOS_LEGALES_GSG: Readonly<Record<string, string>> = {
+  LEGAL_RAZON_SOCIAL: 'GESTIÓN DE SERVICIOS GENERALES M & A S.A.C.',
+  LEGAL_RUC: '20605545158',
+  LEGAL_DIRECCION: 'Pj. J Mza. K Lote 4, A.H. Las Vegas, Los Olivos, Lima',
+  LEGAL_CORREO: 'asuntos-legales@gsgcorppe.com',
+  LEGAL_TELEFONO: '+51 926 260 767',
+};
+
+export function datosLegalesDelEntorno(
+  env: NodeJS.ProcessEnv = process.env,
+  porDefecto: Readonly<Record<string, string>> = DATOS_LEGALES_GSG,
+): DatosLegales {
+  const v = (k: string) => (env[k] ?? '').trim() || (porDefecto[k] ?? '').trim();
   return {
     nombreComercial: v('LEGAL_NOMBRE_COMERCIAL') || NOMBRE_SISTEMA,
     razonSocial: v('LEGAL_RAZON_SOCIAL'),
@@ -82,7 +99,7 @@ function contacto(d: DatosLegales): string {
   return canales.length ? canales.join(' o ') : 'por el mismo chat de WhatsApp por el que te escribimos';
 }
 
-function pagina(titulo: string, d: DatosLegales, cuerpo: string, actual: string): string {
+export function pagina(titulo: string, d: DatosLegales, cuerpo: string, actual: string, extraHead = ''): string {
   const enlace = (href: string, texto: string) => `<a href="${href}"${href === actual ? ' aria-current="page"' : ''}>${texto}</a>`;
   return `<!doctype html>
 <html lang="es-PE">
@@ -117,6 +134,7 @@ ${ICONOS_HEAD}
   code { font-family: ui-monospace, Consolas, monospace; font-size: 14px; overflow-wrap: anywhere; }
   footer { color: var(--suave); font-size: 13px; padding-top: 16px; padding-bottom: 32px; }
 </style>
+${extraHead}
 </head>
 <body>
 <header>
@@ -125,6 +143,7 @@ ${ICONOS_HEAD}
     ${enlace('/privacidad', 'Privacidad')}
     ${enlace('/terminos', 'Términos y condiciones')}
     ${enlace('/eliminacion-de-datos', 'Eliminar mis datos')}
+    ${enlace('/libro-de-reclamaciones', 'Libro de Reclamaciones')}
   </nav>
 </header>
 <main>

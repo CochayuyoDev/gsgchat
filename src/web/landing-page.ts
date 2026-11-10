@@ -325,7 +325,7 @@ ${FUENTES_MARCA}
 
 <footer class="pie"><div class="ancho">
   <span>${negocio === NOMBRE_SISTEMA ? NOMBRE_SISTEMA : `${negocio} · ${NOMBRE_SISTEMA}`}</span>
-  <span><a href="/privacidad">Privacidad</a> · <a href="/terminos">Términos y condiciones</a> · <a href="/eliminacion-de-datos">Eliminar mis datos</a></span>
+  <span><a href="/privacidad">Privacidad</a> · <a href="/terminos">Términos y condiciones</a> · <a href="/eliminacion-de-datos">Eliminar mis datos</a> · <a href="/libro-de-reclamaciones">Libro de Reclamaciones</a></span>
   <span>${opts.conSesion ? '<a href="/panel#inicio">Panel</a> · <a href="/manual">Manual de uso</a>' : '¿Tienes cuenta? <a href="/login">Entra aquí</a>'}</span>
 </div></footer>
 </body></html>`;

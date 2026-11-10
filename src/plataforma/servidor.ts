@@ -32,6 +32,8 @@ import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
 import { NOMBRE_SISTEMA } from '../marca.js';
 import { datosLegalesDelEntorno, eliminacionPage, legalIndicePage, privacidadPage, terminosPage } from '../web/legal-pages.js';
+import { diaLima, hojaReclamo, libroReclamacionesPage, reclamosRecibidosPage, venceEl } from '../web/libro-reclamaciones-page.js';
+import { reclamoSchema } from './reclamos.js';
 import { enTienda } from './contexto.js';
 import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
@@ -44,7 +46,7 @@ import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, rechazoSinCl
 export const COOKIE_TIENDA = 'gsg_tienda';
 
 /** Las paginas legales que pide Meta: publicas, sin sesion y sin tienda. */
-const RUTAS_LEGALES = ['/legal', '/privacidad', '/terminos', '/eliminacion-de-datos'];
+const RUTAS_LEGALES = ['/legal', '/privacidad', '/terminos', '/eliminacion-de-datos', '/libro-de-reclamaciones', '/reclamos-recibidos', '/admin/reclamos', '/admin/reclamos/responder'];
 const PREFIJO = '/tienda/';
 
 /** Rutas que atiende la plataforma y no una tienda. */
@@ -355,6 +357,51 @@ async function rutasDeLaPlataforma(plataforma: Plataforma, segura: boolean, logg
   web.get('/privacidad', legal((d) => privacidadPage(d)));
   web.get('/terminos', legal((d) => terminosPage(d)));
   web.get('/eliminacion-de-datos', legal((d) => eliminacionPage(d)));
+
+  // Libro de Reclamaciones: el formulario es publico; leer y responder, solo el superadministrador.
+  web.get('/libro-de-reclamaciones', async (_request, reply) =>
+    reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').send(libroReclamacionesPage(datosLegalesDelEntorno())));
+  const envios = new Map<string, number[]>();
+  web.post('/libro-de-reclamaciones', async (request, reply) => {
+    if (!plataforma.reclamos) return reply.code(503).send({ error: 'El Libro de Reclamaciones no está disponible en este momento. Escríbenos al correo del pie de página.' });
+    const t0 = Date.now();
+    const lista = (envios.get(ip(request)) ?? []).filter((t) => t > t0 - 10 * 60_000);
+    if (lista.length >= 5) return reply.code(429).send({ error: 'Se enviaron varios reclamos seguidos desde esta conexión. Espera unos minutos y vuelve a intentarlo.' });
+    const leido = reclamoSchema.safeParse(request.body ?? {});
+    if (!leido.success) {
+      const issue = leido.error.issues[0];
+      return reply.code(400).send({ error: issue?.message ?? 'Revisa los datos del formulario.', campo: issue?.path?.[0] ?? null });
+    }
+    lista.push(t0);
+    envios.set(ip(request), lista);
+    const reclamo = await plataforma.reclamos.registrar(leido.data, ip(request));
+    return { ok: true, codigo: reclamo.codigo, hoja: hojaReclamo(reclamo, datosLegalesDelEntorno()) };
+  });
+  web.get('/reclamos-recibidos', async (_request, reply) =>
+    reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').send(reclamosRecibidosPage(datosLegalesDelEntorno())));
+  web.get('/admin/reclamos', async (request, reply) => {
+    if (!(await comprobarSuper(request, reply))) return;
+    if (!plataforma.reclamos) return { reclamos: [] };
+    const d = datosLegalesDelEntorno();
+    const reclamos = await plataforma.reclamos.listar();
+    return {
+      reclamos: reclamos.map((r) => ({
+        codigo: r.codigo, nombre: r.nombre, correo: r.correo, tipo: r.tipo, estado: r.estado, respuesta: r.respuesta,
+        creado: r.createdAt.toISOString(), vence: diaLima(venceEl(r.createdAt)), hoja: hojaReclamo(r, d),
+      })),
+    };
+  });
+  web.post('/admin/reclamos/responder', async (request, reply) => {
+    if (!(await comprobarSuper(request, reply))) return;
+    const body = (request.body ?? {}) as { codigo?: unknown; respuesta?: unknown };
+    const codigo = typeof body.codigo === 'string' ? body.codigo.trim() : '';
+    const respuesta = typeof body.respuesta === 'string' ? body.respuesta.trim().slice(0, 5000) : '';
+    if (!codigo || respuesta.length < 5) return reply.code(400).send({ error: 'Escribe la respuesta antes de guardarla.' });
+    if (!plataforma.reclamos) return reply.code(503).send({ error: 'El Libro de Reclamaciones no está disponible.' });
+    const r = await plataforma.reclamos.responder(codigo, respuesta, 'superadministrador');
+    if (!r) return reply.code(404).send({ error: 'No existe una hoja con ese número.' });
+    return { ok: true };
+  });
 
   // El favicon y el logo: los piden la portada, el login y el panel de cada tienda.
   registerMarcaRoutes(web);

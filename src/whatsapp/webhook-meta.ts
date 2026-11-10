@@ -33,6 +33,13 @@ export const CAMPOS_WEBHOOK_META = [
   { campo: 'phone_number_quality_update', para: 'Calidad del número y cambios de límite.', obligatorio: true },
   { campo: 'account_update', para: 'Restricciones o bloqueo de la cuenta (recomendado).', obligatorio: false },
   { campo: 'message_template_quality_update', para: 'Calidad de cada plantilla (recomendado).', obligatorio: false },
+  { campo: 'template_category_update', para: 'Meta cambió la categoría de una plantilla (recomendado).', obligatorio: false },
+  { campo: 'business_capability_update', para: 'Límite de conversaciones por día (recomendado).', obligatorio: false },
+  { campo: 'user_preferences', para: 'El cliente pidió no recibir marketing desde WhatsApp (recomendado).', obligatorio: false },
+  { campo: 'account_alerts', para: 'Alertas de Meta sobre la cuenta o el número (recomendado).', obligatorio: false },
+  { campo: 'account_review_update', para: 'Resultado de la revisión de la cuenta (recomendado).', obligatorio: false },
+  { campo: 'phone_number_name_update', para: 'Aprobación o rechazo del nombre visible del número (recomendado).', obligatorio: false },
+  { campo: 'security', para: 'Cambios en el PIN de verificación en dos pasos (recomendado).', obligatorio: false },
 ] as const;
 
 export type ResultadoEvento =

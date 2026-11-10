@@ -35,6 +35,14 @@ describe('reconocer el pedido del cliente', () => {
     }
   });
 
+  it('dar o corregir sus datos para el pedido no es pedir que los borren (eso lo decide la IA)', () => {
+    for (const t of ['Retiro en tienda, mis datos son Juan Pérez', 'quiten mi dirección vieja, mis datos nuevos: Av. Lima 123', 'borra mi número anterior, el nuevo es 987654321', 'elimina mi dirección anterior, la correcta es Jr. Puno 45', 'no quiero mensajes del motorizado, que me llame', 'saquen el pedido de la base de Ate', 'corrijan mis datos, mi nombre es Ana', 'Le dieron de baja a mi tarjeta, pago en efectivo']) {
+      expect(privacidadPorReglas(t), t).toBeNull();
+    }
+    expect(privacidadPorReglas('Baja por favor')).toBe('baja');
+    expect(privacidadPorReglas('borren mi número de su base')).toBe('borrar_datos');
+  });
+
   it('la IA solo se consulta si hay una pista, y solo clasifica', async () => {
     expect(hayPistaDePrivacidad('ok')).toBe(false);
     expect(hayPistaDePrivacidad('ya no quiero que me lleguen sus mensajes')).toBe(true);

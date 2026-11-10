@@ -41,12 +41,22 @@ describe('paginas legales', () => {
   });
 
   it('sin datos del responsable no inventa nada ni deja huecos', () => {
-    const d = datosLegalesDelEntorno({} as NodeJS.ProcessEnv);
+    const d = datosLegalesDelEntorno({} as NodeJS.ProcessEnv, {});
     expect(faltanDatosLegales(d)).toEqual(['la razón social', 'el RUC', 'la dirección', 'el correo de contacto']);
     for (const html of [privacidadPage(d), terminosPage(d), eliminacionPage(d), legalIndicePage(d, 'https://x.test')]) {
       expect(html).not.toMatch(/undefined|null|RUC\s*[,.<]|mailto:"/);
       expect(html).toContain('por el mismo chat de WhatsApp');
     }
+  });
+
+  it('sin LEGAL_* en el entorno salen los datos públicos de GSG, y el entorno manda', () => {
+    const d = datosLegalesDelEntorno({ LEGAL_RUC: '' } as NodeJS.ProcessEnv);
+    expect(faltanDatosLegales(d)).toEqual([]);
+    expect(d.ruc).toBe('20605545158');
+    const html = privacidadPage(d);
+    expect(html).toContain('GESTIÓN DE SERVICIOS GENERALES M &amp; A S.A.C.');
+    expect(html).toContain('asuntos-legales@gsgcorppe.com');
+    expect(datosLegalesDelEntorno({ LEGAL_CORREO: 'otro@ejemplo.pe' } as NodeJS.ProcessEnv).correo).toBe('otro@ejemplo.pe');
   });
 
   it('escapa lo que viene del entorno', () => {
