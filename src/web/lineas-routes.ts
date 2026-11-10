@@ -63,13 +63,67 @@ function faltanDeApi(c: CredencialesLinea): string[] {
   ].filter((x): x is string => Boolean(x));
 }
 
-/** Un error de Meta en palabras de la pantalla. */
-function explicarFalloMeta(error: unknown): string {
+/**
+ * Lo que esta mal puesto ANTES de preguntarle a Meta: el campo y como
+ * corregirlo. Los errores tipicos: el numero de telefono en vez de su ID, el
+ * token de 24 h o el ID de la app en vez de la clave secreta.
+ */
+export function revisarCredencialesApi(c: CredencialesLinea): { campo: string; error: string } | null {
+  const token = (c.token ?? '').trim();
+  const pnid = (c.phoneNumberId ?? '').trim();
+  const waba = (c.businessAccountId ?? '').trim();
+  const secreto = (c.appSecret ?? '').trim();
+  const verify = (c.verifyToken ?? '').trim();
+  if (token && (!/^EAA/.test(token) || token.length < 60 || /\s/.test(token))) {
+    return { campo: 'token', error: 'El token de acceso no tiene la forma de uno de Meta: empieza con «EAA» y es muy largo (unos 200 caracteres), sin espacios. Cópialo entero desde Business Manager → Usuarios del sistema → Generar token.' };
+  }
+  if (pnid && !/^\d{10,20}$/.test(pnid)) {
+    const pareceTelefono = /^\+/.test(pnid) || /^(51)?9\d{8}$/.test(pnid.replace(/[\s()-]/g, ''));
+    return {
+      campo: 'phoneNumberId',
+      error: pareceTelefono
+        ? 'Eso es el número de teléfono, no su ID. En Meta → WhatsApp → Configuración de la API, elige el número en «De» y copia el «Identificador del número de teléfono» (solo cifras, por ejemplo 123456789012345).'
+        : 'El Phone number ID son solo cifras (entre 10 y 20), sin espacios ni signos. Por ejemplo: 123456789012345.',
+    };
+  }
+  if (waba && !/^\d{10,20}$/.test(waba)) {
+    return { campo: 'businessAccountId', error: 'El WhatsApp Business Account ID son solo cifras (entre 10 y 20), sin espacios. Está en Meta → WhatsApp → Configuración de la API, como «Identificador de la cuenta de WhatsApp Business».' };
+  }
+  if (pnid && waba && pnid === waba) {
+    return { campo: 'businessAccountId', error: 'El Phone number ID y el WhatsApp Business Account ID son distintos: pusiste el mismo en los dos. Revisa cuál es cuál en Meta → WhatsApp → Configuración de la API.' };
+  }
+  if (secreto && !/^[a-f0-9]{32}$/i.test(secreto)) {
+    return {
+      campo: 'appSecret',
+      error: /^EAA/.test(secreto)
+        ? 'Ahí pegaste un token de acceso. La clave secreta de la app tiene 32 letras y números: Meta → Configuración de la app → Básica → Clave secreta de la app → Mostrar.'
+        : /^\d+$/.test(secreto)
+          ? 'Eso parece el identificador de la app (solo cifras), no su clave secreta. La clave tiene 32 letras y números: Configuración de la app → Básica → Clave secreta de la app → Mostrar.'
+          : `La clave secreta de la app tiene exactamente 32 letras y números (de la a a la f y del 0 al 9); la que pusiste tiene ${secreto.length}. Está en Configuración de la app → Básica → Clave secreta de la app → Mostrar.`,
+    };
+  }
+  if (verify && !/^[\x21-\x7e]{8,200}$/.test(verify)) {
+    return { campo: 'verifyToken', error: 'El verify token es una palabra que tú inventas: al menos 8 caracteres, sin espacios ni tildes. Por ejemplo: gsgwhatsapp2026.' };
+  }
+  return null;
+}
+
+/** El primer dato que falta, para marcarlo en la pantalla. */
+function primerFaltante(c: CredencialesLinea): string | null {
+  if (!c.token) return 'token';
+  if (!c.phoneNumberId) return 'phoneNumberId';
+  if (!c.businessAccountId) return 'businessAccountId';
+  if (!c.appSecret) return 'appSecret';
+  return null;
+}
+
+/** Un error de Meta en palabras de la pantalla, con el campo que hay que revisar. */
+function explicarFalloMeta(error: unknown): { error: string; campo: string | null } {
   const texto = error instanceof Error ? error.message : String(error);
-  if (/401|190|token|OAuth/i.test(texto)) return 'Meta no aceptó el token: revisa que sea el token permanente y que no haya caducado.';
-  if (/100|does not exist|Unsupported get request|nonexisting/i.test(texto)) return 'Meta no encuentra ese número: revisa el Phone number ID.';
-  if (/fetch failed|ENOTFOUND|ECONN|timeout/i.test(texto)) return 'No se pudo hablar con Meta (sin internet o Meta no responde). Prueba otra vez en un rato.';
-  return `Meta contestó con un error: ${texto.slice(0, 200)}`;
+  if (/401|190|token|OAuth/i.test(texto)) return { error: 'Meta no aceptó el token: revisa que sea el token permanente (de un usuario del sistema) y que no haya caducado.', campo: 'token' };
+  if (/100|does not exist|Unsupported get request|nonexisting/i.test(texto)) return { error: 'Meta no encuentra ese número: revisa el Phone number ID (el «Identificador del número de teléfono», no el número) y que el token tenga permiso sobre esa cuenta.', campo: 'phoneNumberId' };
+  if (/fetch failed|ENOTFOUND|ECONN|timeout/i.test(texto)) return { error: 'No se pudo hablar con Meta (sin internet o Meta no responde). Prueba otra vez en un rato.', campo: null };
+  return { error: `Meta contestó con un error: ${texto.slice(0, 200)}`, campo: null };
 }
 
 const cambiarSchema = z.object({
@@ -190,17 +244,20 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
       if (linea.proveedor !== 'cloud') return reply.code(400).send({ error: 'Solo las líneas de WhatsApp API tienen datos que cambiar.', codigo: 'proveedor' });
       const juntas = { ...(await lineas.credenciales(linea.id)), ...Object.fromEntries(Object.entries(body).filter(([, v]) => v)) } as CredencialesLinea;
       const faltan = faltanDeApi(juntas);
-      if (faltan.length) return reply.code(400).send({ error: `Falta ${faltan.join(', ')}.`, codigo: 'faltan' });
+      if (faltan.length) return reply.code(400).send({ error: `Falta ${faltan.join(', ')}.`, codigo: 'faltan', campo: primerFaltante(juntas) });
+      const malPuesto = revisarCredencialesApi(juntas);
+      if (malPuesto) return reply.code(400).send({ error: malPuesto.error, codigo: 'formato', campo: malPuesto.campo });
       let numero = '';
       if (deps.probarApi) {
         try {
           numero = (await deps.probarApi({ token: juntas.token!, phoneNumberId: juntas.phoneNumberId!, businessAccountId: juntas.businessAccountId! })).numero;
         } catch (error) {
-          return reply.code(400).send({ error: explicarFalloMeta(error), codigo: 'meta' });
+          return reply.code(400).send({ ...explicarFalloMeta(error), codigo: 'meta' });
         }
       }
       await lineas.fijarCredenciales(linea.id, body);
-      if (numero) await lineas.sincronizar(linea.id, { telefono: numero });
+      // Meta contesto: la linea queda conectada ya (sin esperar a la siguiente vuelta del registro).
+      if (deps.probarApi) await lineas.sincronizar(linea.id, { estado: 'conectado', ...(numero ? { telefono: numero } : {}) });
       // El cliente guardado se armo con los datos viejos.
       registro.olvidar(linea.id);
       return { ok: true, linea: await vista((await lineas.obtener(linea.id))!) };
@@ -234,16 +291,23 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
         // «conectada» en la pantalla sin poder mandar nada.
         const cred = body.credenciales ?? {};
         const faltan = faltanDeApi(cred);
-        if (faltan.length) return reply.code(400).send({ error: `Falta ${faltan.join(', ')}.`, codigo: 'faltan' });
+        if (faltan.length) return reply.code(400).send({ error: `Falta ${faltan.join(', ')}.`, codigo: 'faltan', campo: primerFaltante(cred) });
+        const malPuesto = revisarCredencialesApi(cred);
+        if (malPuesto) return reply.code(400).send({ error: malPuesto.error, codigo: 'formato', campo: malPuesto.campo });
         if (deps.probarApi) {
           try {
             telefono = (await deps.probarApi({ token: cred.token!, phoneNumberId: cred.phoneNumberId!, businessAccountId: cred.businessAccountId! })).numero || telefono;
           } catch (error) {
-            return reply.code(400).send({ error: explicarFalloMeta(error), codigo: 'meta' });
+            return reply.code(400).send({ ...explicarFalloMeta(error), codigo: 'meta' });
           }
         }
       }
       const linea = await lineas.crear({ etiqueta: body.etiqueta, proveedor: body.proveedor, telefono, credenciales: body.credenciales });
+      // Una linea de la API que Meta acepto ya esta conectada.
+      if (body.proveedor === 'cloud' && deps.probarApi) {
+        await lineas.sincronizar(linea.id, { estado: 'conectado' });
+        return { ok: true, linea: await vista((await lineas.obtener(linea.id)) ?? linea) };
+      }
       return { ok: true, linea: await vista(linea) };
     } catch (error) {
       return responderError(error, reply);

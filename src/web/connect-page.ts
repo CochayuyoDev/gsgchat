@@ -269,6 +269,21 @@ const CSS = `
   .lineas-api-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--esp-2); }
   .lineas-api-campos label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 0; }
   .lineas-api-campos input { width: 100%; box-sizing: border-box; }
+.lineas-api-campos input[aria-invalid="true"] { border-color: var(--rojo); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rojo) 18%, transparent); }
+.api-error { color: var(--rojo); font-weight: 600; font-size: 12.5px; line-height: 1.45; }
+.linea-aviso { margin: 8px 0 0; padding: 9px 12px; border-radius: var(--radio-sm, 8px); font-size: 13.5px; font-weight: 600; border: 1px solid var(--borde); }
+.linea-aviso.ok { color: var(--primario); border-color: color-mix(in srgb, var(--primario) 40%, transparent); background: color-mix(in srgb, var(--primario) 10%, transparent); }
+.linea-aviso.mal { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); background: var(--rojo-suave); }
+.check-principal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: var(--esp-3, 12px) 0 0; font-weight: 600; font-size: 14px; }
+.check-principal input { width: auto; }
+.check-principal .ayuda { font-weight: 400; margin: 0; }
+.api-ejemplo { margin: var(--esp-3, 12px) 0 var(--esp-2, 8px); }
+.api-ejemplo summary { cursor: pointer; font-weight: 600; color: var(--primario); }
+.api-ejemplo-lista { margin: 8px 0; padding-left: 20px; font-size: 13.5px; line-height: 1.55; }
+.api-ejemplo-lista li { margin: 4px 0; }
+.api-ejemplo code { overflow-wrap: anywhere; }
+.con-mas { margin: 0 0 var(--esp-3, 12px); }
+.con-mas summary { cursor: pointer; font-weight: 600; color: var(--primario); font-size: 14px; }
   .webhook-url { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
   .linea-fila.en-pausa { opacity: .78; }
   .ayuda.separada { margin-top: var(--esp-2); }
@@ -509,8 +524,10 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
 </section>
 <section class="tarjeta con-card" id="card-lineas">
   <div class="con-cab"><span class="con-ico" aria-hidden="true">📱</span><div class="con-tit"><h2>Líneas de WhatsApp</h2><span id="lineas-chip" class="chip tono-gris">Revisando…</span></div></div>
-  <p class="con-frase">Hasta 8 números por tienda, todos en la misma bandeja y un solo hilo por cliente. La etiqueta (por ejemplo <b>wsp-ali</b>) aparece en cada chat y cada mensaje para saber qué celular revisar. Si una línea se cae, las demás siguen.</p>
-  <p class="con-frase">Cada cliente nuevo entra por una línea conectada elegida al azar y se queda con ella: siempre se le escribe desde el mismo número. Solo cambia si su línea lleva más de 2 minutos desconectada o WhatsApp la bloquea (pasa a otra conectada y se queda en ella), si quitas o deshabilitas la línea, si él escribe a otro de tus números o si tú eliges otra en el chat.</p>
+  <p class="con-frase">Hasta 8 números en la misma bandeja. Si una línea se cae, las demás siguen.</p>
+  <details class="con-mas"><summary>¿Cómo se reparten los clientes?</summary>
+    <p class="ayuda">Cada cliente nuevo entra por una línea conectada y se queda con ella: siempre se le escribe desde el mismo número. Solo cambia si su línea lleva más de 2 minutos caída o WhatsApp la bloquea, si quitas o deshabilitas la línea, si él escribe a otro de tus números o si tú eliges otra en el chat. La etiqueta (por ejemplo <b>wsp-ali</b>) aparece en cada chat para saber qué celular revisar.</p>
+  </details>
   <div id="lineas-modo" class="bloque" hidden>
     <h3>¿Qué WhatsApp se usa?</h3>
     <div class="acciones" id="lineas-modo-botones" role="radiogroup" aria-label="Qué líneas se usan"></div>
@@ -527,16 +544,27 @@ ${vistaWa ? `<section class="tarjeta con-card" id="card-wa">
       <input id="linea-nueva" class="corto" maxlength="80" placeholder="Nombre de la línea (ej. wsp-kevin)" aria-label="Nombre de la nueva línea">
     </div>
     <div id="linea-api" hidden>
-      <p class="ayuda">Los datos salen de <b>developers.facebook.com</b> → tu app → WhatsApp → Configuración de la API. El token debe ser el <b>permanente</b> (de un usuario del sistema), no el de 24 h.</p>
+      <p class="ayuda">Los datos salen de <b>developers.facebook.com</b> → tu app → WhatsApp → Configuración de la API.</p>
       <div class="lineas-api-campos">
-        <label>Token de acceso <input id="api-token" type="password" autocomplete="off" maxlength="1000"></label>
-        <label>Phone number ID <input id="api-pnid" inputmode="numeric" maxlength="100"></label>
-        <label>WhatsApp Business Account ID <input id="api-waba" inputmode="numeric" maxlength="100"></label>
-        <label>App secret (clave secreta de la app) <input id="api-secret" type="password" autocomplete="off" maxlength="300"></label>
-        <label>Verify token (una palabra que tú inventas) <input id="api-verify" maxlength="300" autocomplete="off"></label>
+        <label class="api-campo">Token de acceso <input id="api-token" data-campo="token" type="password" autocomplete="off" maxlength="1000" placeholder="EAAG… (muy largo, unos 200 caracteres)" aria-describedby="api-token-error"><span class="api-error" id="api-token-error" hidden></span></label>
+        <label class="api-campo">Phone number ID <input id="api-pnid" data-campo="phoneNumberId" inputmode="numeric" maxlength="100" placeholder="Ej. 123456789012345 (no el número de teléfono)" aria-describedby="api-pnid-error"><span class="api-error" id="api-pnid-error" hidden></span></label>
+        <label class="api-campo">WhatsApp Business Account ID <input id="api-waba" data-campo="businessAccountId" inputmode="numeric" maxlength="100" placeholder="Ej. 1144600514634989" aria-describedby="api-waba-error"><span class="api-error" id="api-waba-error" hidden></span></label>
+        <label class="api-campo">App secret (clave secreta de la app) <input id="api-secret" data-campo="appSecret" type="password" autocomplete="off" maxlength="300" placeholder="32 letras y números" aria-describedby="api-secret-error"><span class="api-error" id="api-secret-error" hidden></span></label>
+        <label class="api-campo">Verify token (una palabra que tú inventas) <input id="api-verify" data-campo="verifyToken" maxlength="300" autocomplete="off" placeholder="Ej. gsgwhatsapp2026" aria-describedby="api-verify-error"><span class="api-error" id="api-verify-error" hidden></span></label>
       </div>
+      <label class="check-principal"><input type="checkbox" id="api-principal"> Usarla como línea principal</label>
+      <details class="api-ejemplo">
+        <summary>Ver ejemplo y dónde sale cada dato</summary>
+        <ul class="api-ejemplo-lista">
+          <li><b>Token de acceso:</b> <code>EAAGm0PX4ZCpsBO7…</code> (muy largo). El <b>permanente</b>: Business Manager → Usuarios del sistema → Generar token.</li>
+          <li><b>Phone number ID:</b> <code>123456789012345</code>. En Configuración de la API, debajo del número: «Identificador del número de teléfono». <b>No</b> es el <code>+51 9…</code></li>
+          <li><b>WhatsApp Business Account ID:</b> <code>1144600514634989</code>. La misma pantalla, «Identificador de la cuenta de WhatsApp Business».</li>
+          <li><b>App secret:</b> <code>3f9a1c0b7e2d4a6f8b1c3e5d7a9f0b2c</code> (32 caracteres). Configuración de la app → Básica → Clave secreta → Mostrar.</li>
+          <li><b>Verify token:</b> <code>gsgwhatsapp2026</code>. Lo inventas tú y lo pegas igual en el webhook de Meta.</li>
+        </ul>
+        <p class="ayuda">Meta también pide las <a class="link" href="/legal" target="_blank" rel="noopener">páginas legales</a> (privacidad, términos y eliminación de datos).</p>
+      </details>
       <p class="ayuda" id="linea-api-webhook"></p>
-      <p class="ayuda">Para que Meta apruebe la app te pide tres direcciones públicas (Configuración de la app → Básica): la <a class="link" href="/privacidad" target="_blank" rel="noopener">política de privacidad</a>, los <a class="link" href="/terminos" target="_blank" rel="noopener">términos y condiciones</a> y las <a class="link" href="/eliminacion-de-datos" target="_blank" rel="noopener">instrucciones para eliminar datos</a>. En <a class="link" href="/legal" target="_blank" rel="noopener">Información legal</a> están listas para copiar.</p>
     </div>
     <div class="acciones">
       <button class="btn primario" id="linea-agregar" type="button">Agregar línea</button>
@@ -800,7 +828,7 @@ async function api(path, options) {
     throw new Error('Tu sesión terminó: vuelve a entrar.');
   }
   var data = await res.json().catch(function () { return {}; });
-  if (!res.ok) throw new Error(data.error || errorHttp(res.status));
+  if (!res.ok) { var fallo = new Error(data.error || errorHttp(res.status)); fallo.datos = data; throw fallo; }
   return data;
 }
 
@@ -1800,6 +1828,23 @@ function lineasMsg(t, tono) {
   el.textContent = t || '';
   el.style.color = tono === 'rojo' ? '#b42318' : '';
 }
+/* La respuesta de cada accion sale dentro de su linea, junto a sus botones (y sobrevive al repintado). */
+var avisosLinea = {};
+var formsAbiertos = {};
+var avisoTimers = {};
+function avisoLinea(id, texto, mal) {
+  avisosLinea[id] = texto ? { t: texto, mal: Boolean(mal) } : null;
+  var fila = document.querySelector('[data-linea="' + id + '"]');
+  if (fila) {
+    var el = fila.querySelector('.linea-aviso');
+    if (!el) { el = document.createElement('p'); el.setAttribute('role', 'status'); fila.appendChild(el); }
+    el.textContent = texto || '';
+    el.className = 'linea-aviso ' + (mal ? 'mal' : 'ok');
+    el.hidden = !texto;
+  }
+  clearTimeout(avisoTimers[id]);
+  if (texto && !mal) avisoTimers[id] = setTimeout(function () { avisoLinea(id, ''); }, 15000);
+}
 var puedeElegirPrincipal = false;
 function filaLinea(l) {
   var tono = TONO_LINEA[l.estado] || 'gris';
@@ -1821,7 +1866,7 @@ function filaLinea(l) {
   if (l.api && !setup) {
     botones += '<button class="btn" type="button" data-acc="datos-api" data-id="' + esc(l.id) + '">Cambiar datos de la API</button>';
     datosApi = (l.api.faltan && l.api.faltan.length ? '<p class="ayuda" style="color:#b42318">Le falta ' + esc(l.api.faltan.join(', ')) + ': pulsa «Cambiar datos de la API».</p>' : '') +
-      '<div class="lineas-api-campos" data-form-api="' + esc(l.id) + '" hidden>' +
+      '<div class="lineas-api-campos" data-form-api="' + esc(l.id) + '"' + (formsAbiertos[l.id] ? '' : ' hidden') + '>' +
         '<label>Token de acceso <input type="password" autocomplete="off" data-api="token" placeholder="' + (l.api.conToken ? 'guardado: déjalo vacío para no cambiarlo' : '') + '"></label>' +
         '<label>Phone number ID <input inputmode="numeric" data-api="phoneNumberId" value="' + esc(l.api.phoneNumberId || '') + '"></label>' +
         '<label>WhatsApp Business Account ID <input inputmode="numeric" data-api="businessAccountId" value="' + esc(l.api.businessAccountId || '') + '"></label>' +
@@ -1848,6 +1893,7 @@ function filaLinea(l) {
     '<p class="ayuda">' + (l.numero ? 'Número: +' + esc(l.numero) : (esApi ? 'Número: se completa al comprobar los datos con Meta' : 'Número: se completa al conectar')) + ' · ' + (l.proveedor === 'local' ? 'QR / sesión vinculada' : l.proveedor === 'cloud' ? 'API oficial de Meta' : 'WAHA') + (setup ? ' · se conecta con la tarjeta de WhatsApp de arriba' : '') + (l.principal && !setup ? ' · elegida como principal: si la línea de un cliente se cae, sus mensajes pasan primero por esta' : '') + (pausa ? ' · sigue conectada: no recibe clientes nuevos y solo contesta los chats que siguen abiertos' : '') + '</p>' +
     qr + codigo + datosApi +
     (botones ? '<div class="acciones">' + botones + '</div>' : '') +
+    (avisosLinea[l.id] ? '<p class="linea-aviso ' + (avisosLinea[l.id].mal ? 'mal' : 'ok') + '" role="status">' + esc(avisosLinea[l.id].t) + '</p>' : '') +
   '</div>';
 }
 var modoLineas = '';
@@ -1896,40 +1942,59 @@ async function cargarLineas() {
   } catch (error) { lineasMsg(error.message, 'rojo'); }
 }
 async function accionLinea(acc, id, valor) {
+  var boton = document.querySelector('[data-acc="' + acc + '"][data-id="' + id + '"]');
+  var textoBoton = boton ? boton.textContent : '';
   try {
     if (acc === 'renombrar') {
       var campo = document.querySelector('[data-nombre="' + id + '"]');
       await api('/admin/lineas/' + id, { method: 'PATCH', body: { etiqueta: campo ? campo.value : '' } });
-      lineasMsg('Nombre guardado. Los mensajes viejos conservan el que tenían.');
+      avisoLinea(id, 'Nombre guardado. Los mensajes viejos conservan el que tenían.');
     } else if (acc === 'conectar') {
       await api('/admin/lineas/' + id + '/conectar', { method: 'POST' });
-      lineasMsg('Escanea el QR con el teléfono de esta línea. Si caduca, sale otro solo.');
+      avisoLinea(id, 'Escanea el QR con el teléfono de esta línea. Si caduca, sale otro solo.');
     } else if (acc === 'desconectar') {
       await api('/admin/lineas/' + id + '/desconectar', { method: 'POST' });
-      lineasMsg('Línea desvinculada. Las demás siguen conectadas.');
+      avisoLinea(id, 'Línea desvinculada. Las demás siguen conectadas.');
     } else if (acc === 'habilitar') {
       await api('/admin/lineas/' + id, { method: 'PATCH', body: { habilitada: valor === '1' } });
-      lineasMsg(valor === '1' ? 'Línea habilitada.' : 'Línea deshabilitada: no se enviará nada por ella.');
+      avisoLinea(id, valor === '1' ? 'Línea habilitada.' : 'Línea deshabilitada: no se enviará nada por ella.');
     } else if (acc === 'principal') {
       await api('/admin/lineas/' + id + '/principal', { method: 'POST' });
-      lineasMsg('Listo: esta es ahora la línea principal. Cada cliente sigue con su número; si el suyo se cae, sus mensajes pasan primero por esta.');
+      avisoLinea(id, 'Listo: esta es ahora la línea principal. Cada cliente sigue con su número; si el suyo se cae, sus mensajes pasan primero por esta.');
     } else if (acc === 'quitar') {
       await api('/admin/lineas/' + id, { method: 'DELETE' });
       lineasMsg('Línea quitada. Sus mensajes quedan en los chats con su etiqueta.');
     } else if (acc === 'datos-api') {
       var form = document.querySelector('[data-form-api="' + id + '"]');
-      if (form) form.hidden = !form.hidden;
+      formsAbiertos[id] = !formsAbiertos[id];
+      if (form) form.hidden = !formsAbiertos[id];
       return;
     } else if (acc === 'guardar-api') {
       var cuerpo = {};
-      document.querySelectorAll('[data-form-api="' + id + '"] [data-api]').forEach(function (i) { if (i.value.trim()) cuerpo[i.getAttribute('data-api')] = i.value.trim(); });
-      lineasMsg('Comprobando con Meta…');
-      await api('/admin/lineas/' + id + '/credenciales', { method: 'PATCH', body: cuerpo });
-      lineasMsg('Datos guardados y comprobados con Meta.');
+      document.querySelectorAll('[data-form-api="' + id + '"] [data-api]').forEach(function (i) { i.removeAttribute('aria-invalid'); if (i.value.trim()) cuerpo[i.getAttribute('data-api')] = i.value.trim(); });
+      if (boton) { boton.disabled = true; boton.textContent = 'Comprobando con Meta…'; }
+      avisoLinea(id, 'Comprobando los datos con Meta…');
+      var r = await api('/admin/lineas/' + id + '/credenciales', { method: 'PATCH', body: cuerpo });
+      formsAbiertos[id] = false;
+      var numero = r && r.linea && r.linea.numero ? ' Número: +' + r.linea.numero + '.' : '';
+      avisoLinea(id, 'Listo: Meta aceptó los datos y quedaron guardados.' + numero);
     }
     lineasVistas = '';
     await cargarLineas();
-  } catch (error) { lineasMsg(error.message, 'rojo'); }
+  } catch (error) {
+    if (acc === 'quitar') { lineasMsg(error.message, 'rojo'); return; }
+    avisoLinea(id, error.message, true);
+    var campoMal = error.datos && error.datos.campo;
+    var input = campoMal ? document.querySelector('[data-form-api="' + id + '"] [data-api="' + campoMal + '"]') : null;
+    if (input) {
+      formsAbiertos[id] = true;
+      input.closest('[data-form-api]').hidden = false;
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+    }
+  } finally {
+    if (boton && boton.isConnected) { boton.disabled = false; boton.textContent = textoBoton; }
+  }
 }
 var MOTIVO_CAMBIO = { cliente_escribio: 'el cliente escribió por esa línea', persona: 'lo eligió una persona', linea_no_disponible: 'su línea se quitó o se deshabilitó', linea_caida: 'su línea se desconectó o fue bloqueada' };
 async function cargarReparto() {
@@ -1980,25 +2045,75 @@ async function cargarReparto() {
     lineasVistas = '';
     await cargarLineas();
   });
+  /* Los campos de la API: cada uno sabe marcar su error debajo de el. */
+  var CAMPO_API = { token: 'api-token', phoneNumberId: 'api-pnid', businessAccountId: 'api-waba', appSecret: 'api-secret', verifyToken: 'api-verify' };
+  function limpiarErroresApi() {
+    Object.keys(CAMPO_API).forEach(function (k) {
+      var input = $(CAMPO_API[k]), caja = $(CAMPO_API[k] + '-error');
+      if (input) input.removeAttribute('aria-invalid');
+      if (caja) { caja.hidden = true; caja.textContent = ''; }
+    });
+  }
+  function marcarErrorApi(campo, texto) {
+    var id = CAMPO_API[campo]; if (!id || !$(id)) return false;
+    $(id).setAttribute('aria-invalid', 'true');
+    var caja = $(id + '-error'); caja.textContent = texto; caja.hidden = false;
+    $(id).focus();
+    return true;
+  }
+  /* Lo mismo que revisa el servidor, para avisar sin esperar a Meta. */
+  function revisarApi(c) {
+    if (!c.token) return ['token', 'Falta el token de acceso.'];
+    if (!/^EAA/.test(c.token) || c.token.length < 60 || /\s/.test(c.token)) return ['token', 'No parece un token de Meta: empieza con «EAA» y es muy largo (unos 200 caracteres), sin espacios.'];
+    if (!c.phoneNumberId) return ['phoneNumberId', 'Falta el Phone number ID.'];
+    if (!/^\d{10,20}$/.test(c.phoneNumberId)) {
+      var tel = /^\+/.test(c.phoneNumberId) || /^(51)?9\d{8}$/.test(c.phoneNumberId.replace(/[\s()-]/g, ''));
+      return ['phoneNumberId', tel ? 'Eso es el número de teléfono, no su ID. En Meta → WhatsApp → Configuración de la API, elige el número en «De» y copia el «Identificador del número de teléfono» (solo cifras, ej. 123456789012345).' : 'Son solo cifras (entre 10 y 20), sin espacios ni signos. Ej. 123456789012345.'];
+    }
+    if (!c.businessAccountId) return ['businessAccountId', 'Falta el WhatsApp Business Account ID.'];
+    if (!/^\d{10,20}$/.test(c.businessAccountId)) return ['businessAccountId', 'Son solo cifras (entre 10 y 20), sin espacios. Es el «Identificador de la cuenta de WhatsApp Business».'];
+    if (c.phoneNumberId === c.businessAccountId) return ['businessAccountId', 'Es distinto del Phone number ID: pusiste el mismo en los dos.'];
+    if (!c.appSecret) return ['appSecret', 'Falta la clave secreta de la app.'];
+    if (!/^[a-f0-9]{32}$/i.test(c.appSecret)) return ['appSecret', /^EAA/.test(c.appSecret) ? 'Ahí pegaste un token. La clave secreta tiene 32 letras y números: Configuración de la app → Básica → Clave secreta de la app → Mostrar.' : 'La clave secreta tiene exactamente 32 letras y números; la que pusiste tiene ' + c.appSecret.length + '. Está en Configuración de la app → Básica → Mostrar.'];
+    if (c.verifyToken && !/^[\x21-\x7e]{8,200}$/.test(c.verifyToken)) return ['verifyToken', 'Al menos 8 caracteres, sin espacios ni tildes. Ej. gsgwhatsapp2026.'];
+    return null;
+  }
+  Object.keys(CAMPO_API).forEach(function (k) {
+    var input = $(CAMPO_API[k]);
+    if (input) input.addEventListener('input', function () { input.removeAttribute('aria-invalid'); var caja = $(CAMPO_API[k] + '-error'); if (caja) caja.hidden = true; });
+  });
   $('linea-agregar').onclick = async function () {
     var nombre = val('linea-nueva');
-    if (!nombre) { lineasMsg('Ponle un nombre a la línea, por ejemplo wsp-ali.', 'rojo'); return; }
+    if (!nombre) { lineasMsg('Ponle un nombre a la línea, por ejemplo wsp-ali.', 'rojo'); $('linea-nueva').focus(); return; }
     var proveedor = tipoNuevo();
     var cuerpo = { etiqueta: nombre, proveedor: proveedor };
+    limpiarErroresApi();
     if (proveedor === 'cloud') {
       cuerpo.credenciales = { token: val('api-token'), phoneNumberId: val('api-pnid'), businessAccountId: val('api-waba'), appSecret: val('api-secret'), verifyToken: val('api-verify') };
+      var mal = revisarApi(cuerpo.credenciales);
+      if (mal) { marcarErrorApi(mal[0], mal[1]); lineasMsg('Hay un dato mal puesto: está marcado en rojo arriba.', 'rojo'); return; }
       lineasMsg('Comprobando los datos con Meta…');
     }
+    var comoPrincipal = proveedor === 'cloud' && $('api-principal') && $('api-principal').checked;
     try {
-      await api('/admin/lineas', { method: 'POST', body: cuerpo });
+      var creada = await api('/admin/lineas', { method: 'POST', body: cuerpo });
       setVal('linea-nueva', '');
       ['api-token', 'api-pnid', 'api-waba', 'api-secret', 'api-verify'].forEach(function (c) { setVal(c, ''); });
+      var principalOk = false, principalError = '';
+      if (comoPrincipal && creada && creada.linea && creada.linea.id) {
+        try { await api('/admin/lineas/' + encodeURIComponent(creada.linea.id) + '/principal', { method: 'POST', body: {} }); principalOk = true; $('api-principal').checked = false; }
+        catch (e) { principalError = e.message; }
+      }
       lineasMsg(proveedor === 'cloud'
-        ? 'Línea de la API agregada y comprobada con Meta. Falta un paso: en Meta pega la dirección del webhook y el verify token (abajo de los campos) y suscríbete a «messages».'
-        : 'Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.');
+        ? 'Línea de la API agregada y comprobada con Meta' + (principalOk ? ', y ya es la principal' : '') + '. Falta un paso: en Meta pega la dirección del webhook y el verify token (abajo de los campos) y suscríbete a «messages».' + (principalError ? ' No se pudo hacer principal: ' + principalError : '')
+        : 'Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.', principalError ? 'rojo' : '');
       lineasVistas = '';
       await cargarLineas();
-    } catch (error) { lineasMsg(error.message, 'rojo'); }
+    } catch (error) {
+      var campo = error.datos && error.datos.campo;
+      if (campo && marcarErrorApi(campo, error.message)) lineasMsg('Hay un dato mal puesto: está marcado en rojo arriba.', 'rojo');
+      else lineasMsg(error.message, 'rojo');
+    }
   };
   cargarLineas();
   setInterval(cargarLineas, 4000);

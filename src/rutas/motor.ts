@@ -169,7 +169,14 @@ export interface MotorDeps {
    * Los recordatorios siguen con sus textos cortos de siempre.
    */
   textoSolicitud?: (solicitud: Solicitud) => Promise<string | null>;
-  plantillaSolicitud?: (solicitud: Solicitud) => Promise<{ name: string; variables: string[] } | null>;
+  plantillaSolicitud?: (solicitud: Solicitud) => Promise<{ name: string; language?: string; variables: string[] } | null>;
+  /**
+   * Con la conexión principal de QR y una línea de WhatsApp API en uso: si
+   * hay plantilla aprobada por Meta en los ajustes (Pedidos GSG → Ajustes de
+   * chat). Entonces, fuera de la ventana de 24 h, se manda plantilla aunque
+   * `usarPlantilla` diga que no (si no, Meta rechazaría el texto libre).
+   */
+  plantillaMeta?: () => Promise<boolean>;
   /**
    * El seguimiento del primer mensaje de los pedidos (src/entregas/primer-mensaje.ts):
    * el reparto avisa antes y despues de mandar el primer mensaje de una
@@ -468,6 +475,12 @@ export function crearMotor(deps: MotorDeps): Motor {
     return { name: primera.name, language: primera.language, variables: primera.variables };
   }
 
+  /** Si el paso tiene alguna plantilla propia (elegida o del catálogo) ya aprobada por Meta. */
+  async function hayAprobadaDelPaso(paso: PasoUbicacion): Promise<boolean> {
+    const nombres = ajustes.plantillas[paso].length ? ajustes.plantillas[paso] : PLANTILLAS[paso].variantes;
+    return (await repos.templates.list().catch(() => [])).some((t) => nombres.includes(t.name) && t.status === 'APPROVED');
+  }
+
   /** La tienda y el producto del pedido de GSG de esa solicitud ({tienda}, {producto}); sin pedido, null. */
   async function datosDelPedido(solicitud: Solicitud): Promise<{ tienda: string | null; producto: string | null }> {
     if (!solicitud.phone || !repos.entregas) return { tienda: null, producto: null };
@@ -600,7 +613,8 @@ export function crearMotor(deps: MotorDeps): Motor {
     // pida plantilla: es servicio (con franquicia) y no utilidad (sin ella).
     const contacto = await repos.contacts.getByPhone(phone).catch(() => null);
     const ventanaAbierta = Boolean(contacto?.lastInboundAt && ahora().getTime() - contacto.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
-    const conPlantilla = deps.usarPlantilla() && !ventanaAbierta;
+    const plantillaDeMeta = !ventanaAbierta && !deps.usarPlantilla() && deps.plantillaMeta ? await deps.plantillaMeta().catch(() => false) : false;
+    const conPlantilla = (deps.usarPlantilla() || plantillaDeMeta) && !ventanaAbierta;
     // El primer mensaje de un pedido: queda «enviando» en la base antes de
     // salir. Si otro intento ya esta en marcha (otro proceso, un reintento
     // manual) o el pedido espera a una persona, no se manda.
@@ -609,8 +623,11 @@ export function crearMotor(deps: MotorDeps): Motor {
       await repos.rutas.actualizarSolicitud(solicitud.id, { proximoIntentoAt: new Date(ahora().getTime() + 2 * 60_000) });
       return { accion: 'nada', solicitudId: solicitud.id, motivo: 'el primer mensaje de ese pedido ya está en curso o espera a una persona' };
     }
-    const agrupada = conPlantilla && paso === 'solicitud' ? await deps.plantillaSolicitud?.(solicitud) : null;
-    const elegida = conPlantilla ? (agrupada ? { name: agrupada.name, language: 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
+    // La plantilla con los datos del pedido: siempre en la solicitud; en un
+    // recordatorio, solo si ese paso no tiene una plantilla propia aprobada.
+    const conDatosDelPedido = conPlantilla && (paso === 'solicitud' || (plantillaDeMeta && !(await hayAprobadaDelPaso(paso))));
+    const agrupada = conDatosDelPedido ? await deps.plantillaSolicitud?.(solicitud) : null;
+    const elegida = conPlantilla ? (agrupada ? { name: agrupada.name, language: agrupada.language ?? 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
     // La primera solicitud de una entrega de GSG: la plantilla con los datos del envio.
     const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud) : null;
     // La cadencia por cliente la fija el reparto (espera e intentos), no la

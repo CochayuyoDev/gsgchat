@@ -247,6 +247,26 @@ const CSS = `${REPARTO_CSS}
   .aj-tiempo-control select { max-width: 120px; }
   .aj-fin { margin: 13px 0 0; padding-top: 11px; border-top: 1px solid var(--borde); }
   .aj-seccion .aj-titulo { margin-top: 0; }
+#aj-plantilla-meta .pm-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+#aj-plantilla-meta .pm-cab .aj-titulo { margin: 0; }
+#aj-plantilla-meta .pm-intro { margin: 6px 0 10px; max-width: 75ch; }
+#aj-plantilla-meta .pm-usar { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 0 0 10px; }
+#aj-plantilla-meta .pm-usar input { width: auto; }
+#aj-plantilla-meta .pm-fila { display: grid; gap: 4px; max-width: 420px; }
+#aj-plantilla-meta .pm-fila label { font-size: 13px; font-weight: 600; }
+#aj-plantilla-meta .pm-fila input { font-family: var(--mono, ui-monospace, monospace); }
+#aj-plantilla-meta .pm-acciones { margin: 10px 0 0; gap: 8px; justify-content: flex-start; }
+#aj-plantilla-meta .pm-acciones .btn { flex: 0 0 auto; width: auto; }
+#aj-plantilla-meta .pm-aviso { margin: 10px 0 0; padding: 9px 12px; border-radius: var(--radio-sm, 8px); font-size: 13.5px; font-weight: 600; border: 1px solid var(--borde); }
+#aj-plantilla-meta .pm-aviso.ok { color: var(--primario); border-color: color-mix(in srgb, var(--primario) 40%, transparent); background: color-mix(in srgb, var(--primario) 10%, transparent); }
+#aj-plantilla-meta .pm-aviso.mal { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); background: var(--rojo-suave); }
+#aj-plantilla-meta .pm-datos { margin-top: 12px; }
+#aj-plantilla-meta .pm-datos summary { cursor: pointer; font-weight: 600; color: var(--primario); }
+#aj-plantilla-meta .pm-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 8px; }
+#aj-plantilla-meta .pm-lista { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 6px; font-size: 13.5px; }
+#aj-plantilla-meta .pm-lista code { font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--superficie-2); }
+#aj-plantilla-meta .previa { white-space: pre-wrap; }
+@media (max-width: 760px) { #aj-plantilla-meta .pm-cols { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 780px) { .aj-tiempo-grid { grid-template-columns: minmax(0, 1fr); } }
 
   /* De pie y con una mano: la tabla deja de ser tabla y cada cliente es una
@@ -355,6 +375,28 @@ export function rutasPage(opts: RutasOpts): string {
       <section class="aj-seccion">
         <h3 class="aj-titulo">Horario de escritura</h3>
         <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00. Fuera de ese horario, los mensajes esperan al día siguiente.</p>
+      </section>
+
+      <section class="aj-seccion" id="aj-plantilla-meta">
+        <div class="pm-cab"><h3 class="aj-titulo">Plantillas aprobadas por Meta</h3><span id="pm-chip" class="chip" role="status">Revisando…</span></div>
+        <p class="muted pm-intro">Con WhatsApp API, Meta solo deja escribirle primero a un cliente con una plantilla aprobada. El primer mensaje de cada pedido sale con esta plantilla y sus datos; si el cliente ya escribió en las últimas 24 h, sale el texto de siempre.</p>
+        <label class="pm-usar"><input type="checkbox" id="pm-usar"> Usar la plantilla aprobada por Meta en el primer mensaje</label>
+        <div class="pm-fila">
+          <label for="pm-nombre">Nombre de la plantilla en Meta</label>
+          <input id="pm-nombre" maxlength="512" spellcheck="false" autocomplete="off" placeholder="solicitud_ubicacion_entrega">
+        </div>
+        <div class="fila pm-acciones">
+          <button type="button" class="btn primario sm" id="pm-guardar">Guardar</button>
+          <button type="button" class="btn sm" id="pm-traer">Traer el estado desde Meta</button>
+        </div>
+        <p class="pm-aviso" id="pm-aviso" role="status" hidden></p>
+        <details class="pm-datos" open>
+          <summary>Los 8 datos que se llenan solos</summary>
+          <div class="pm-cols">
+            <ol class="pm-lista" id="pm-lista"></ol>
+            <div><span class="muted">Así le llega (ejemplo)</span><div class="previa" id="pm-previa"></div></div>
+          </div>
+        </details>
       </section>
 
       <section class="aj-seccion aj-seccion-inicial">
@@ -1679,10 +1721,10 @@ function actualizarEstadoCambios() {
 }
 function marcarAjustesSucios() { ajustesSucios = true; actualizarEstadoCambios(); }
 document.querySelector('.cuerpo.aj').addEventListener('input', function (event) {
-  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+  if (!event.target.closest('#aj-editor-inicial, #aj-plantilla-meta')) marcarAjustesSucios();
 });
 document.querySelector('.cuerpo.aj').addEventListener('change', function (event) {
-  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+  if (!event.target.closest('#aj-editor-inicial, #aj-plantilla-meta')) marcarAjustesSucios();
 });
 document.getElementById('aj-descartar').onclick = function () {
   if (!ajustesBase) return;
@@ -1837,6 +1879,65 @@ async function guardarCambioUbicacion(fabrica) {
 document.getElementById('aj-cu-guardar').onclick = function () { guardarCambioUbicacion(false); };
 document.getElementById('aj-cu-fabrica').onclick = function () { guardarCambioUbicacion(true); };
 cargarCambioUbicacion();
+
+/* --- Plantillas aprobadas por Meta (el primer mensaje con WhatsApp API) --- */
+var ESTADO_PLANTILLA = { APPROVED: ['verde', 'Aprobada por Meta'], PENDING: ['ambar', 'En revisión en Meta'], REJECTED: ['rojo', 'Rechazada por Meta'], PAUSED: ['ambar', 'Pausada por Meta'], DISABLED: ['rojo', 'Deshabilitada por Meta'] };
+function avisoPlantilla(texto, mal) {
+  var el = document.getElementById('pm-aviso');
+  el.textContent = String(texto || '').replace(/^HTTP \d+ · /, '');
+  el.className = 'pm-aviso ' + (mal ? 'mal' : 'ok');
+  el.hidden = !texto;
+}
+function rellenarPlantilla(cuerpo, datos) {
+  return String(cuerpo || '').replace(/\{\{(\d+)\}\}/g, function (m, n) { var d = datos[Number(n) - 1]; return d ? d.ejemplo : m; });
+}
+function pintarPlantillaMeta(d) {
+  document.getElementById('pm-usar').checked = Boolean(d.usar);
+  if (document.activeElement !== document.getElementById('pm-nombre')) document.getElementById('pm-nombre').value = d.nombre || '';
+  var chip = document.getElementById('pm-chip');
+  var t = d.plantilla;
+  var e = t ? (ESTADO_PLANTILLA[t.estado] || ['gris', t.estado]) : ['gris', 'No está en Meta todavía'];
+  chip.className = 'chip tono-' + e[0];
+  chip.textContent = !d.usar ? 'Apagada' : e[1];
+  document.getElementById('pm-lista').innerHTML = d.datos.map(function (x) {
+    return '<li><code>{{' + x.n + '}}</code> ' + esc(x.dato) + ' <span class="muted">· ej. ' + esc(x.ejemplo) + '</span></li>';
+  }).join('');
+  var previa = document.getElementById('pm-previa');
+  previa.textContent = t && t.cuerpo
+    ? rellenarPlantilla(t.cuerpo, d.datos)
+    : 'Cuando Meta apruebe la plantilla y la traigas, aquí se ve cómo le llega al cliente.';
+  if (t && t.variables && t.variables !== d.datos.length) avisoPlantilla('La plantilla de Meta tiene ' + t.variables + ' datos y el sistema llena ' + d.datos.length + ' (nombre, producto, empresa, código, método de pago, monto, dirección y horario, en ese orden). Revísala en Meta.', true);
+}
+async function cargarPlantillaMeta() {
+  try { pintarPlantillaMeta(await api('/admin/entregas/plantilla-meta')); }
+  catch (e) { avisoPlantilla(e.message, true); }
+}
+async function conBotonPm(boton, texto, fn) {
+  var antes = boton.textContent; boton.disabled = true; boton.textContent = texto;
+  try { await fn(); } finally { boton.disabled = false; boton.textContent = antes; }
+}
+document.getElementById('pm-guardar').onclick = function () {
+  var boton = this;
+  conBotonPm(boton, 'Guardando…', async function () {
+    try {
+      var d = await api('/admin/entregas/plantilla-meta', { method: 'POST', body: { usar: document.getElementById('pm-usar').checked, nombre: document.getElementById('pm-nombre').value.trim() } });
+      pintarPlantillaMeta(d);
+      avisoPlantilla(!d.usar ? 'Guardado: el primer mensaje no usará la plantilla de Meta.' : d.plantilla && d.plantilla.estado === 'APPROVED' ? 'Guardado: el primer mensaje por WhatsApp API sale con esta plantilla.' : 'Guardado. Falta que Meta la apruebe: cuando esté aprobada, pulsa «Traer el estado desde Meta».');
+    } catch (e) { avisoPlantilla(e.message, true); }
+  });
+};
+document.getElementById('pm-traer').onclick = function () {
+  var boton = this;
+  conBotonPm(boton, 'Preguntando a Meta…', async function () {
+    try {
+      var d = await api('/admin/entregas/plantilla-meta/traer', { method: 'POST', body: {} });
+      pintarPlantillaMeta(d);
+      var t = d.plantilla;
+      avisoPlantilla(t ? (t.estado === 'APPROVED' ? 'Listo: Meta la tiene aprobada. Se trajeron ' + d.traidas + ' plantillas.' : 'Meta la tiene como «' + (ESTADO_PLANTILLA[t.estado] || [0, t.estado])[1] + '». Hasta que esté aprobada, no se usa.') : 'Meta no tiene ninguna plantilla llamada «' + d.nombre + '». Revisa que el nombre sea exactamente el de Meta.', !t || t.estado !== 'APPROVED');
+    } catch (e) { avisoPlantilla(e.message, true); }
+  });
+};
+cargarPlantillaMeta();
 
 cargarOtrosTextos();
 
