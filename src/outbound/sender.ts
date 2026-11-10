@@ -22,6 +22,7 @@ import { inicioDelDia } from '../salud/monitor.js';
 import { dailyCapFor, type WarmupPolicy } from './throttle.js';
 import { crearLimitadorEnvios } from './limitador-envios.js';
 import { diaLima, MOTIVO_SIN_LINEAS, type MotivoSeleccion } from '../whatsapp/limite-diario.js';
+import type { TipoLinea } from '../whatsapp/modo-lineas.js';
 import { audioParaMeta } from '../whatsapp/audio-meta.js';
 import { esContactoWeb, nuevoIdMensajeWeb } from '../web-visitantes/canal.js';
 import {
@@ -262,6 +263,15 @@ export interface LineaDeEnvio {
   noDisponibleDesde?: Date | null;
   /** WhatsApp rechazo este numero: sus clientes pasan a otra linea sin esperar. */
   bloqueada?: boolean;
+  /** Normal (QR / WAHA) o API oficial. Ver src/whatsapp/modo-lineas.ts. */
+  tipo?: TipoLinea;
+  /**
+   * false = el modo de Conexion la deja fuera: no recibe clientes nuevos ni
+   * sirve de alternativa, y solo contesta a sus chats abiertos (menos de 24 h).
+   */
+  enUso?: boolean;
+  /** Por que no se usa, en palabras (solo con `enUso: false`). */
+  motivoPausa?: string;
 }
 
 export interface SenderDeps {
@@ -301,6 +311,11 @@ export interface SenderDeps {
    */
   salud?: Monitor;
   politica?: () => Politica;
+  /**
+   * La politica de la linea por la que sale el envio: la API oficial va con el
+   * perfil de Meta y el QR con el no oficial. Sin esto, `politica` para todas.
+   */
+  politicaDe?: (linea: LineaDeEnvio) => Politica | undefined;
   /** Modo prueba (SOLO_NUMEROS): a quien no este aqui no se le escribe. Vacio = a todos. */
   soloNumeros?: string[] | (() => string[]);
 }
@@ -345,24 +360,38 @@ export function createSender(deps: SenderDeps): Sender {
 
   const estaConectada = (linea: LineaDeEnvio) => linea.cliente.conectado?.() !== false;
 
+  /** Si el modo de Conexion deja la linea en uso (sin modo, todas). */
+  const enUso = (linea: LineaDeEnvio) => linea.enUso !== false;
+
   /** Una linea distinta de `excluir` que pueda enviar ahora mismo. */
   async function otraLineaViva(excluir: string | null): Promise<LineaDeEnvio | null> {
     const elegida = deps.elegirLinea ? await deps.elegirLinea(excluir) : null;
-    if (elegida) return elegida;
+    if (elegida && enUso(elegida)) return elegida;
     const principal = await deps.resolverLinea!(null);
-    return principal && principal.id !== excluir && estaConectada(principal) ? principal : null;
+    return principal && principal.id !== excluir && estaConectada(principal) && enUso(principal) ? principal : null;
   }
 
-  /** Las lineas a las que se puede pasar un envio, en orden estable. */
+  /** Las lineas a las que se puede pasar un envio, en orden estable (solo las que el modo deja en uso). */
   async function alternativas(excluir: string | null): Promise<LineaDeEnvio[]> {
-    if (deps.alternativas) return (await deps.alternativas(excluir)).filter((l) => l.id !== excluir);
+    if (deps.alternativas) return (await deps.alternativas(excluir)).filter((l) => l.id !== excluir && enUso(l));
     const salida: LineaDeEnvio[] = [];
     const elegida = deps.elegirLinea ? await deps.elegirLinea(excluir) : null;
-    if (elegida) salida.push(elegida);
+    if (elegida && enUso(elegida)) salida.push(elegida);
     const principal = await deps.resolverLinea!(null);
-    if (principal && principal.id !== excluir && estaConectada(principal) && !salida.some((l) => l.id === principal.id)) salida.push(principal);
+    if (principal && principal.id !== excluir && estaConectada(principal) && enUso(principal) && !salida.some((l) => l.id === principal.id)) salida.push(principal);
     return salida;
   }
+
+  /** El chat sigue abierto: el cliente escribio hace menos de 24 h. */
+  const chatAbierto = (contact: { lastInboundAt?: Date | null }, at: Date) =>
+    Boolean(contact.lastInboundAt && at.getTime() - contact.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
+
+  /**
+   * Un texto libre a quien no escribio en 24 h: por la API oficial Meta lo
+   * rechazaria (hace falta plantilla), por una linea normal sale.
+   */
+  const necesitaPlantillaEnApi = (job: SendJob, contact: { lastInboundAt?: Date | null }, at: Date) =>
+    job.kind !== 'template' && !chatAbierto(contact, at);
 
   interface Eleccion {
     linea: LineaDeEnvio | null;
@@ -375,6 +404,8 @@ export function createSender(deps: SenderDeps): Sender {
     sinLineas?: boolean;
     /** La linea elegida a mano llego a su maximo diario. */
     sinCupoPedida?: { limite: number; usados: number };
+    /** La linea elegida a mano esta en pausa por el modo y el chat ya se cerro. */
+    fueraDeModo?: boolean;
   }
 
   /**
@@ -393,7 +424,7 @@ export function createSender(deps: SenderDeps): Sender {
    * `confirmar` guarda la asignacion de un cliente nuevo justo antes de enviar,
    * para que lo que frena el modo prueba no cuente como cliente repartido.
    */
-  async function lineaDelTrabajo(job: SendJob, contact: { id: string; tipo?: string }, at: Date, clave: string): Promise<Eleccion> {
+  async function lineaDelTrabajo(job: SendJob, contact: { id: string; tipo?: string; lastInboundAt?: Date | null }, at: Date, clave: string): Promise<Eleccion> {
     if (!deps.resolverLinea) return { linea: { id: '', etiqueta: '', numero: '', cliente: wa, identidad: phoneId(), ventanaAplica: ventanaAplica() } };
     const resolver = deps.resolverLinea;
     const dia = diaLima(at);
@@ -408,6 +439,8 @@ export function createSender(deps: SenderDeps): Sender {
     if (job.whatsappNumberId && !job.lineaDelSistema) {
       const pedida = await resolver(job.whatsappNumberId);
       if (!pedida || !estaConectada(pedida)) return { linea: pedida, pedida: true };
+      // En pausa por el modo: solo para terminar un chat abierto, nunca para empezar otro.
+      if (!enUso(pedida) && !chatAbierto(contact, at) && contact.tipo !== 'grupo') return { linea: pedida, pedida: true, fueraDeModo: true };
       const r = await reservar(pedida, 'asignacion_original');
       return r.ok ? { linea: pedida, pedida: true, reserva: { motivo: 'asignacion_original' } } : { linea: pedida, pedida: true, sinCupoPedida: { limite: r.limite, usados: r.usados } };
     }
@@ -422,14 +455,23 @@ export function createSender(deps: SenderDeps): Sender {
 
     // La asignada primero (o, a un cliente nuevo, la que toque) y despues las alternativas.
     const original = propia ? await resolver(propia) : await otraLineaViva(null);
-    const candidatas: Array<{ linea: LineaDeEnvio; esOriginal: boolean }> = [];
+    let candidatas: Array<{ linea: LineaDeEnvio; esOriginal: boolean }> = [];
     if (original) candidatas.push({ linea: original, esOriginal: true });
     for (const l of await alternativas(original?.id ?? propia)) if (!candidatas.some((c) => c.linea.id === l.id)) candidatas.push({ linea: l, esOriginal: false });
+    // A un cliente nuevo que empieza con un texto libre (sin plantilla) no se le
+    // asigna una linea de la API si hay una normal: Meta lo rechazaria.
+    // La primera normal pasa a ser SU linea (no un alternativo temporal).
+    if (!propia && necesitaPlantillaEnApi(job, contact, at) && candidatas[0]?.linea.ventanaAplica && candidatas.some((c) => !c.linea.ventanaAplica)) {
+      const normales = candidatas.filter((c) => !c.linea.ventanaAplica).map((c, i) => ({ linea: c.linea, esOriginal: i === 0 }));
+      candidatas = [...normales, ...candidatas.filter((c) => c.linea.ventanaAplica).map((c) => ({ linea: c.linea, esOriginal: false }))];
+    }
 
     // Por que no se uso la original: no esta (deshabilitada, sin conexion) o llego a su maximo.
     let motivoSinOriginal: MotivoSeleccion = 'original_no_disponible';
     for (const { linea, esOriginal } of candidatas) {
       if (!estaConectada(linea)) continue;
+      // Su propia linea en pausa por el modo solo sigue para un chat abierto; las alternativas ya vienen filtradas.
+      if (!enUso(linea) && !(esOriginal && propia && chatAbierto(contact, at))) continue;
       const r = await reservar(linea, esOriginal ? 'asignacion_original' : motivoSinOriginal);
       if (!r.ok) {
         if (esOriginal) motivoSinOriginal = 'limite_alcanzado';
@@ -620,6 +662,21 @@ export function createSender(deps: SenderDeps): Sender {
         await repos.deliveries.markBlocked(deliveryId, `limite_diario: ${reason}`);
         return { ok: false, blocked: true, code: 'limite_diario', reason, deliveryId, whatsappNumberId: decidida.linea?.id || null };
       }
+      if (decidida.fueraDeModo) {
+        const reason = decidida.linea?.motivoPausa || `La línea «${decidida.linea?.etiqueta || 'elegida'}» está en pausa por el modo elegido en Conexión: elige otra línea o cambia el modo.`;
+        const deliveryId = await repos.deliveries.create({
+          contactId: contact.id,
+          campaignId: job.campaignId ?? null,
+          kind: job.kind,
+          templateName: job.templateName ?? null,
+          category: job.category,
+          variables: job.variables,
+          businessInitiated: false,
+          whatsappNumberId: decidida.linea?.id || null,
+        });
+        await repos.deliveries.markBlocked(deliveryId, `linea_fuera_de_modo: ${reason}`);
+        return { ok: false, blocked: true, code: 'linea_fuera_de_modo', reason, deliveryId, whatsappNumberId: decidida.linea?.id || null };
+      }
 
       let noSalio = false;
       const resto = async (): Promise<SendOutcome> => {
@@ -696,6 +753,26 @@ export function createSender(deps: SenderDeps): Sender {
           }
         }
       }
+      // Un cliente de la API que lleva mas de 24 h sin escribir y un texto libre:
+      // Meta lo rechazaria. Si hay una linea normal en uso, sale por ella, solo
+      // esta vez (su linea no cambia). La elegida a mano y los grupos no se tocan.
+      if (linea.ventanaAplica && linea.id && decidida.reserva && !decidida.pedida && contact.tipo !== 'grupo' && necesitaPlantillaEnApi(job, contact, at)) {
+        const motivoPrevio = decidida.reserva.motivo;
+        for (const normal of await alternativas(linea.id)) {
+          if (normal.ventanaAplica || !normal.id || !estaConectada(normal)) continue;
+          await repos.usoLineas.liberar(clave);
+          const r = await repos.usoLineas.reservar({ clave, lineaId: normal.id, dia: diaLima(at), motivo: 'ventana_cerrada', contactId: contact.id });
+          if (r.ok) {
+            linea = normal;
+            decidida.reserva.motivo = 'ventana_cerrada';
+            break;
+          }
+          // Sin cupo en esa normal: se recupera la reserva de la API y se prueba la siguiente.
+          const otraVez = await repos.usoLineas.reservar({ clave, lineaId: linea.id, dia: diaLima(at), motivo: motivoPrevio, contactId: contact.id });
+          if (!otraVez.ok) return { ok: false, blocked: true, code: 'sin_lineas_disponibles', reason: MOTIVO_SIN_LINEAS, retryAfterMs: 2 * 60_000, deliveryId: -1, whatsappNumberId: null };
+        }
+      }
+
       const lineaId = linea.id || null;
       const wa = linea.cliente;
       const phoneId = () => linea.identidad;
@@ -719,7 +796,7 @@ export function createSender(deps: SenderDeps): Sender {
 
       // Lo que aporta la capa de salud, solo cuando esta y solo para lo
       // automatico: responderle a un cliente no pasa por el marcapasos.
-      const politica = deps.politica?.();
+      const politica = deps.politicaDe?.(linea) ?? deps.politica?.();
       let ritmo: DecisionRitmo | undefined;
       let sentToContactToday: number | undefined;
       let lastSentToContactAt: Date | null | undefined;

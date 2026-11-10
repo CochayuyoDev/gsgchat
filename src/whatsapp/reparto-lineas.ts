@@ -13,6 +13,7 @@ import type { Politica } from '../salud/politica.js';
 import { dailyCapFor } from '../outbound/throttle.js';
 import type { Linea } from './lineas.js';
 import type { RegistroClientes } from './registro.js';
+import type { TipoLinea } from './modo-lineas.js';
 
 export interface CargaDeLinea {
   id: string;
@@ -29,6 +30,10 @@ export interface CargaDeLinea {
   cupoDiario: number;
   /** Pausada a mano por quien opera: no recibe clientes nuevos. */
   pausada: boolean;
+  /** Normal (QR / WAHA) o API oficial. */
+  tipo?: TipoLinea;
+  /** false = el modo de Conexion la deja fuera: no recibe clientes nuevos. */
+  enUso?: boolean;
 }
 
 /**
@@ -57,12 +62,17 @@ export function crearRepartoDeLineas(deps: {
   politica: () => Politica;
   /** Con que id lleva esa linea su cupo y su estado (ver `LineaDeEnvio.identidad`). */
   identidadDe: (linea: Linea) => string;
+  /**
+   * El tipo de cada linea y si el modo de Conexion la deja en uso (ver
+   * src/whatsapp/modo-lineas.ts). Sin esto todas cuentan, como antes.
+   */
+  usoDe?: () => Promise<(linea: Linea) => { tipo: TipoLinea; enUso: boolean }>;
 }): RepartoDeLineas {
   const { registro, repos, politica } = deps;
 
   async function cargas(at: Date = new Date()): Promise<CargaDeLinea[]> {
     const p = politica();
-    const [estados, porLinea] = await Promise.all([registro.estados(), repos.lineasContacto.carga(inicioDelDia(at, p.timezone))]);
+    const [estados, porLinea, usoDe] = await Promise.all([registro.estados(), repos.lineasContacto.carga(inicioDelDia(at, p.timezone)), deps.usoDe?.()]);
     return Promise.all(
       estados.map(async ({ linea, conectada }) => {
         const identidad = deps.identidadDe(linea);
@@ -80,6 +90,7 @@ export function crearRepartoDeLineas(deps: {
           cupoDiario: dailyCapFor(estado.warmupStartedOn, at, p.warmup),
           // Igual que en las guardas: con «solo ritmo» una pausa automatica no frena nada.
           pausada: estado.paused && !(p.soloRitmo && esPausaAutomatica(estado.pausedReason)),
+          ...(usoDe ? usoDe(linea) : {}),
         };
       }),
     );
@@ -88,7 +99,8 @@ export function crearRepartoDeLineas(deps: {
   return {
     cargas,
     async elegir(excluir) {
-      return elegirLineaAlAzar((await cargas()).filter((c) => c.conectada && c.id !== excluir));
+      // Un cliente nuevo solo entra por una linea que el modo deja en uso.
+      return elegirLineaAlAzar((await cargas()).filter((c) => c.conectada && c.enUso !== false && c.id !== excluir));
     },
     cambios: (opciones) => repos.lineasContacto.cambios(opciones),
   };

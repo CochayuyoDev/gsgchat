@@ -39,7 +39,9 @@ import { crearCalculadorGoogle } from '../entregas/seguimiento-gsg.js';
 import { crearSeguimientosRecibidosSql } from '../entregas/seguimiento-recibido.js';
 import { migrate } from '../db/migrate.js';
 import type { LocalSecrets } from '../settings/crypto.js';
-import { providerOf, createSettingsService } from '../settings/service.js';
+import { providerOf, createSettingsService, type Provider } from '../settings/service.js';
+import { admiteTipo, MODO_LINEAS_POR_DEFECTO, motivoFueraDeModo, tipoDeProveedor } from '../whatsapp/modo-lineas.js';
+import { crearServicioWebhookMeta } from '../whatsapp/webhook-meta.js';
 import { createDynamicWhatsAppClient } from '../whatsapp/dynamic.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
 import { crearSesionLocal, type SesionLocal } from '../whatsapp/local/session.js';
@@ -193,7 +195,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
 
       const ajustes = await crearServicioAjustes({ repo: repos.ajustesGenerales, config });
       contexto.modo = () => ajustes.modo();
-      const politica = () => ({ ...ajustes.politica(politicaDesdeConfig(config, providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial')), soloRitmo: true, autoPausa: false });
+      const politicaDePerfil = (perfil: 'cloud' | 'no_oficial') => ({ ...ajustes.politica(politicaDesdeConfig(config, perfil)), soloRitmo: true, autoPausa: false });
+      const politica = () => politicaDePerfil(providerOf(settings.current()) === 'cloud' ? 'cloud' : 'no_oficial');
 
       const sesion = crearSesionLocal();
       limpieza.push(() => sesion.detener());
@@ -242,6 +245,19 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
       };
       const identidadDeLinea = (linea: { principal: boolean; id: string }) => (linea.principal ? phoneNumberId() : `linea:${linea.id}`);
       /**
+       * Normal o API, y si el modo de Conexion la deja en uso. La principal es del
+       * tipo que diga /setup (su fila puede ir hasta 10 s por detras).
+       */
+      const tipoDeLinea = (linea: { principal: boolean; proveedor: Provider }) => tipoDeProveedor(linea.principal ? providerOf(settings.current()) : linea.proveedor);
+      const usoDeLineas = async () => {
+        const modo = (await lineas.modo?.().catch(() => null)) ?? MODO_LINEAS_POR_DEFECTO;
+        return (linea: { principal: boolean; proveedor: Provider; etiqueta: string }) => {
+          const tipo = tipoDeLinea(linea);
+          const enUso = admiteTipo(modo, tipo);
+          return { tipo, enUso, ...(enUso ? {} : { motivoPausa: motivoFueraDeModo(modo, linea.etiqueta) }) };
+        };
+      };
+      /**
        * Cada linea para el sender: su cliente y la identidad con la que se llevan
        * su cupo, su calentamiento y su estado (la principal conserva la de siempre).
        */
@@ -249,7 +265,9 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         const t = await registro.transporte(id);
         if (!t) return null;
         const { linea } = t;
+        const uso = (await usoDeLineas())(linea);
         return {
+          ...uso,
           id: linea.id,
           etiqueta: linea.etiqueta,
           numero: linea.telefono || (linea.principal ? sesion.getLocalState().phone : ''),
@@ -260,7 +278,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           bloqueada: Boolean(t.sesion?.getLocalState().bloqueado),
         };
       };
-      const repartoLineas = crearRepartoDeLineas({ registro, repos, politica, identidadDe: identidadDeLinea });
+      const repartoLineas = crearRepartoDeLineas({ registro, repos, politica, identidadDe: identidadDeLinea, usoDe: usoDeLineas });
       /** Para un cliente nuevo, o uno cuya linea ya no esta disponible: una de las conectadas, al azar. */
       const elegirLinea = async (excluir: string | null) => {
         const id = await repartoLineas.elegir(excluir);
@@ -278,7 +296,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           .filter((e) => e.conectada && e.linea.habilitada && e.linea.id !== excluir)
           .sort((a, b) => Number(b.linea.id === preferida) - Number(a.linea.id === preferida) || a.linea.posicion - b.linea.posicion || (a.linea.id < b.linea.id ? -1 : 1));
         const resueltas = await Promise.all(vivas.map((e) => resolverLinea(e.linea.id)));
-        return resueltas.filter((l): l is NonNullable<typeof l> => l !== null);
+        // Solo las que el modo deja en uso sirven de alternativa.
+        return resueltas.filter((l): l is NonNullable<typeof l> => l !== null && l.enUso !== false);
       };
       let avisarSupervisor: ((texto: string) => Promise<void>) | undefined;
       // La cola se crea mas abajo; el monitor solo la toca al pausar o reanudar.
@@ -308,6 +327,8 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
           serviceWindowApplies: () => providerOf(settings.current()) === 'cloud',
           salud,
           politica,
+          // Cada linea con el ritmo de su mundo: la API con el de Meta, el QR con el no oficial.
+          politicaDe: (linea) => (linea.tipo ? politicaDePerfil(linea.tipo === 'api' ? 'cloud' : 'no_oficial') : undefined),
           soloNumeros: () => ajustes.soloNumeros(),
         }),
         { entregas: () => entregasDeLaRegla, log: (m, d) => log(`[regla gsg] ${m}`, d) },
@@ -520,6 +541,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
         sesionLocal: sesion,
         lineas,
         registroClientes: registro,
+        webhookMeta: await crearServicioWebhookMeta(settingsRepo, o.secretos.settingsKey),
         repartoLineas,
         anotarNumeroVigente: numeroVigente.anotar,
         numeroDeSalud: phoneNumberId,

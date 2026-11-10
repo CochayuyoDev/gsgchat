@@ -131,6 +131,8 @@ export interface ArchivosGsgDeps {
   mediaDir?: string;
   /** Para bajar de Meta lo que llego por la API oficial (solo trae el id). */
   wa?: Pick<WhatsAppClient, 'downloadMedia' | 'downloadMediaToFile'>;
+  /** El cliente de la linea del mensaje: lo de otra linea de la API se baja con SU token. */
+  registroClientes?: { transporte(id?: string | null): Promise<{ cliente: WhatsAppClient } | null> };
 }
 
 /** `GET /archivos/:token`: el fichero de un mensaje, con el enlace firmado del historial. */
@@ -150,12 +152,14 @@ export async function registerArchivosGsg(app: FastifyInstance, deps: ArchivosGs
     // Lo guardado al recibirlo (QR o lo que se mando desde aqui) o una copia ya bajada de Meta.
     const copia = idDeMedia(`meta:${String(media.id)}`, extensionDe(mimeType, mensaje.kind as Parameters<typeof extensionDe>[1]));
     let enDisco = (await tamanoMedia(dir, String(media.id))) !== null ? String(media.id) : copia;
-    if ((await tamanoMedia(dir, enDisco)) === null && (deps.wa?.downloadMediaToFile || deps.wa?.downloadMedia)) {
+    const deLinea = mensaje.lineaId && deps.registroClientes ? (await deps.registroClientes.transporte(mensaje.lineaId).catch(() => null))?.cliente : undefined;
+    const wa = deLinea ?? deps.wa;
+    if ((await tamanoMedia(dir, enDisco)) === null && (wa?.downloadMediaToFile || wa?.downloadMedia)) {
       await conCupoDeDescarga(async () => {
-        if (deps.wa?.downloadMediaToFile) {
-          await deps.wa.downloadMediaToFile(String(media.id), path.join(dir, copia));
+        if (wa?.downloadMediaToFile) {
+          await wa.downloadMediaToFile(String(media.id), path.join(dir, copia));
         } else {
-          const bajado = await deps.wa!.downloadMedia!(String(media.id));
+          const bajado = await wa!.downloadMedia!(String(media.id));
           await writeFile(path.join(dir, copia), bajado.datos);
         }
       }).catch((error: unknown) => request.log.warn({ err: error }, 'no se pudo bajar el archivo de Meta'));

@@ -29,6 +29,9 @@ import type { Duplex } from 'node:stream';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { cookieDeCierre, leerCookies } from '../auth/sesion.js';
 import { loginPage } from '../web/login-page.js';
+import { landingPage } from '../web/landing-page.js';
+import { NOMBRE_SISTEMA } from '../marca.js';
+import { datosLegalesDelEntorno, eliminacionPage, legalIndicePage, privacidadPage, terminosPage } from '../web/legal-pages.js';
 import { enTienda } from './contexto.js';
 import { pareceSlug } from './entorno.js';
 import type { Plataforma } from './plataforma.js';
@@ -38,10 +41,13 @@ import { normalizarRuta } from '../util/ruta-normalizada.js';
 import { claveDeCabeceras, claveEnBearer, esRecepcionGsg, RECHAZOS, rechazoSinClave, tiendaDeClaveGsg, type RechazoRecepcion } from './recepcion-gsg.js';
 
 export const COOKIE_TIENDA = 'gsg_tienda';
+
+/** Las paginas legales que pide Meta: publicas, sin sesion y sin tienda. */
+const RUTAS_LEGALES = ['/legal', '/privacidad', '/terminos', '/eliminacion-de-datos'];
 const PREFIJO = '/tienda/';
 
 /** Rutas que atiende la plataforma y no una tienda. */
-const DE_LA_PLATAFORMA = new Set(['/', '/login', '/registro', '/registro/disponible', '/logout', '/login/primera-cuenta', '/admin/cuentas-plataforma']);
+const DE_LA_PLATAFORMA = new Set(['/', '/login', '/registro', '/registro/disponible', '/logout', '/login/primera-cuenta', '/admin/cuentas-plataforma', ...RUTAS_LEGALES]);
 
 export interface OpcionesServidor {
   plataforma: Plataforma;
@@ -260,7 +266,11 @@ async function rutasDeLaPlataforma(plataforma: Plataforma, segura: boolean, logg
       );
   };
 
-  web.get('/', async (request, reply) => reply.redirect((await conSesion(request)) ? '/panel' : '/login'));
+  // Con sesion, al panel; sin ella, la portada (que lleva a entrar o a crear la cuenta).
+  web.get('/', async (request, reply) => {
+    if (await conSesion(request)) return reply.redirect('/panel');
+    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').send(landingPage({ nombreNegocio: NOMBRE_SISTEMA, conSesion: false }));
+  });
   web.get('/login', (request, reply) => pagina(request, reply, 'entrar'));
   web.get('/registro', (request, reply) => pagina(request, reply, 'tienda'));
 
@@ -331,6 +341,19 @@ async function rutasDeLaPlataforma(plataforma: Plataforma, segura: boolean, logg
   );
 
   web.get('/health', async () => ({ ok: true, plataforma: true, tiendas: await plataforma.cuantas() }));
+
+  // Politica de privacidad, terminos y eliminacion de datos (lo que pide Meta).
+  // Los datos del responsable se leen en cada visita: cambiarlos no pide reiniciar.
+  const legal = (cuerpo: (d: ReturnType<typeof datosLegalesDelEntorno>, base: string) => string) =>
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const host = request.headers['x-forwarded-host'] ?? request.headers.host ?? 'localhost';
+      const proto = String(request.headers['x-forwarded-proto'] ?? request.protocol ?? 'http').split(',')[0];
+      return reply.type('text/html; charset=utf-8').header('cache-control', 'public, max-age=300').send(cuerpo(datosLegalesDelEntorno(), `${proto}://${host}`));
+    };
+  web.get('/legal', legal((d, base) => legalIndicePage(d, base)));
+  web.get('/privacidad', legal((d) => privacidadPage(d)));
+  web.get('/terminos', legal((d) => terminosPage(d)));
+  web.get('/eliminacion-de-datos', legal((d) => eliminacionPage(d)));
 
   // El catalogo de errores de la API (igual en todas las tiendas).
   registrarCatalogoErrores(web);

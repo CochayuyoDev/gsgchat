@@ -166,6 +166,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       <a href="#t-claves" data-na="claves">Claves</a>
       <a href="#t-validar" data-na="validar">Probar y validar</a>
       <a href="#t-llamadas" data-na="llamadas">Últimas llamadas</a>
+      <a href="#t-meta" data-na="meta">Webhook de WhatsApp API</a>
     </nav>
     <div class="courier-grid">
       <section class="courier-card courier-wide" data-na="resumen"><h2>GSG llama → GSGchat recibe → el sistema procesa</h2>
@@ -261,6 +262,34 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <label for="courier-json-2">Orden en JSON</label><textarea id="courier-json-2" spellcheck="false">${escapeHtml(JSON.stringify(EJEMPLO_FLUJO, null, 2))}</textarea>
         <div class="courier-actions"><button class="btn primario" id="courier-validar-2" type="button" ${opts.disponible ? '' : 'disabled'}>Validar sin cambiar nada</button><button class="btn" id="courier-ejemplo-2" type="button">Restaurar ejemplo</button></div>
         <pre id="courier-validacion-2" role="status" aria-live="polite"></pre>
+      </section>
+      <section class="courier-card courier-wide" id="webhook-meta" data-na="meta">
+        <div class="courier-cab"><div><h2>Webhook de WhatsApp Business API (Meta)</h2><p class="muted">Meta nos avisa aquí de cada mensaje que entra, de los estados de entrega, de las plantillas y de la calidad del número. Lo configura en el panel de Meta quien administra la app (GSG).</p></div><span id="meta-chip" class="chip tono-gris">Revisando…</span></div>
+        <p id="meta-https" class="courier-status" hidden></p>
+        <h3>1. Lo que se pega en Meta</h3>
+        <p class="muted">developers.facebook.com → tu app → WhatsApp → Configuración → Webhook → Editar.</p>
+        <label for="meta-url">URL de devolución de llamada</label>
+        <input id="meta-url" readonly>
+        <div class="courier-actions"><button class="btn" type="button" id="meta-copiar-url">Copiar URL</button></div>
+        <label for="meta-token">Token de verificación (verify token)</label>
+        <input id="meta-token" autocomplete="off" spellcheck="false" maxlength="200" placeholder="Pulsa «Generar uno» o escribe uno de al menos 8 caracteres">
+        <div class="courier-actions"><button class="btn" type="button" id="meta-copiar-token">Copiar token</button><button class="btn" type="button" id="meta-generar">Generar uno</button><button class="btn primario" type="button" id="meta-guardar-token">Guardar token</button></div>
+        <h3>2. Clave secreta de la app (App secret)</h3>
+        <p class="muted">Con ella se comprueba que cada aviso viene de Meta y no de otro. Está en Configuración de la app → Básica → Clave secreta de la app. Se guarda cifrada y no se vuelve a mostrar.</p>
+        <label for="meta-secret">App secret</label>
+        <input id="meta-secret" type="password" autocomplete="off" spellcheck="false" maxlength="300">
+        <p class="muted" id="meta-secret-estado"></p>
+        <div class="courier-actions"><button class="btn primario" type="button" id="meta-guardar-secret">Guardar clave secreta</button><button class="btn peligro" type="button" id="meta-quitar-secret" hidden>Quitar</button></div>
+        <h3>3. Campos que hay que suscribir</h3>
+        <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Para qué</th><th></th></tr></thead><tbody id="meta-campos"></tbody></table></div>
+        <h3>4. Comprobar</h3>
+        <p class="muted">Llama a este mismo webhook como lo haría Meta: el reto con el verify token y un aviso firmado con la clave secreta. No le escribe a nadie.</p>
+        <div class="courier-actions"><button class="btn primario" type="button" id="meta-probar">Probar el webhook</button></div>
+        <div id="meta-pasos"></div>
+        <p class="courier-status" id="meta-estado" role="status"></p>
+        <h3>Lo último que llegó</h3>
+        <div id="meta-eventos" class="courier-scroll tablewrap"></div>
+        <small>Mientras la app de Meta esté en modo desarrollo solo llegan los avisos de prueba del panel de Meta; los mensajes reales empiezan a llegar cuando la app pasa a modo Live.</small>
       </section>
       <section class="courier-card courier-wide" data-na="llamadas"><div class="courier-cab"><div><h2>Últimas llamadas (API 1 y API 2)</h2><p class="muted">Lo que GSG nos envió: pedidos, órdenes de cancelar o reintentar, y las pruebas hechas desde esta pantalla.</p></div><button class="btn sm" id="courier-refrescar">Actualizar estado</button></div><div id="courier-bitacora" class="courier-scroll tablewrap"></div></section>
       <section class="courier-card courier-wide" id="courier-campos" data-na="api1"><h2>Campos que envía Courier (API 1)</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
@@ -464,6 +493,63 @@ ${MENSAJE_ERROR_HTTP_JS}
     finally { b.disabled = false; cargar(); }
   };
   cargar();
+
+  /* --- Webhook de WhatsApp Business API (Meta) ----------------------------- */
+  var RESULTADO_META = { verificado: ['verde', 'Meta verificó'], verificacion_fallida: ['rojo', 'Verificación rechazada'], recibido: ['verde', 'Aviso recibido'], firma_invalida: ['rojo', 'Firma inválida'], sin_secreto: ['ambar', 'Sin clave secreta'] };
+  function fechaMeta(iso) { return iso ? new Date(iso).toLocaleString('es-PE') : ''; }
+  function metaMsg(t, rojo) { var el = $('meta-estado'); el.textContent = t || ''; el.style.color = rojo ? '#b42318' : ''; }
+  function pintarMeta(d) {
+    $('meta-url').value = d.url;
+    if (document.activeElement !== $('meta-token')) $('meta-token').value = d.verifyToken || '';
+    var https = $('meta-https');
+    https.hidden = d.publicoHttps;
+    if (!d.publicoHttps) https.textContent = 'Esta instalación no tiene una dirección https pública (' + d.url + '). Meta solo llama a direcciones https: en producción la URL será la del dominio.';
+    $('meta-secret-estado').textContent = d.conAppSecret ? 'Guardada (termina en …' + d.appSecretFinal + '). Escribe otra solo si cambió.' : (d.setup.conAppSecret ? 'Aquí no hay una guardada, pero se usa la de Conexión (/setup), que ya tiene la de Meta.' : 'Todavía no hay ninguna guardada: sin ella se rechazan los avisos.');
+    $('meta-quitar-secret').hidden = !d.conAppSecret;
+    $('meta-campos').innerHTML = d.campos.map(function (c) { return '<tr><td><code>' + esc(c.campo) + '</code></td><td>' + esc(c.para) + '</td><td>' + (c.obligatorio ? '<span class="chip tono-azul sin-punto">Necesario</span>' : '<span class="chip tono-gris sin-punto">Recomendado</span>') + '</td></tr>'; }).join('');
+    var chip = $('meta-chip'), e = d.estado || {};
+    if (d.listo) { chip.className = 'chip tono-verde'; chip.textContent = 'Verificado por Meta'; }
+    else if (!d.verifyToken && !d.conAppSecret) { chip.className = 'chip tono-gris'; chip.textContent = 'Sin configurar'; }
+    else { chip.className = 'chip tono-ambar'; chip.textContent = e.verificadoEn ? 'Falta la clave secreta' : 'Esperando a que Meta verifique'; }
+    var resumen = [];
+    if (e.verificadoEn) resumen.push('Meta verificó el webhook el ' + fechaMeta(e.verificadoEn) + '.');
+    if (e.ultimoAvisoEn) resumen.push('Último aviso de Meta: ' + fechaMeta(e.ultimoAvisoEn) + ' (' + (e.ultimoAvisoCampos || '') + ').');
+    if (e.ultimoRechazoEn) resumen.push('Último rechazo: ' + fechaMeta(e.ultimoRechazoEn) + ' — ' + (e.ultimoRechazo || '') + '.');
+    if (!$('meta-pasos').innerHTML) metaMsg(resumen.join(' ') || 'Meta todavía no ha llamado a este webhook.');
+    $('meta-eventos').innerHTML = d.eventos.length ? '<table><thead><tr><th>Fecha</th><th>Qué pasó</th><th>Detalle</th></tr></thead><tbody>' + d.eventos.map(function (ev) { var r = RESULTADO_META[ev.resultado] || ['gris', ev.resultado]; return '<tr><td class="nowrap suave">' + esc(fechaMeta(ev.en)) + '</td><td><span class="chip tono-' + r[0] + '">' + esc(r[1]) + '</span>' + (ev.prueba ? ' <span class="chip tono-azul sin-punto">prueba</span>' : '') + '</td><td>' + esc(ev.detalle) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="vacio compacto"><h3>Todavía no llegó nada</h3><p>Aparecerá aquí cuando Meta verifique el webhook o mande un aviso.</p></div>';
+  }
+  async function cargarMeta() { if (!$('webhook-meta')) return; try { pintarMeta(await api('/admin/webhook-meta')); } catch (e) { metaMsg(e.message, true); } }
+  if ($('webhook-meta')) {
+    $('meta-copiar-url').onclick = function () { copiar($('meta-url').value); metaMsg('URL copiada.'); };
+    $('meta-copiar-token').onclick = function () { if (!$('meta-token').value) { metaMsg('Primero genera o escribe un token.', true); return; } copiar($('meta-token').value); metaMsg('Token copiado.'); };
+    $('meta-generar').onclick = async function () {
+      if ($('meta-token').value && !window.confirm('¿Cambiar el verify token? Habrá que pegar el nuevo en Meta y volver a verificar.')) return;
+      try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta/generar-token', 'POST', {})); metaMsg('Token nuevo guardado. Cópialo y pégalo en Meta como «Token de verificación».'); } catch (e) { metaMsg(e.message, true); }
+    };
+    $('meta-guardar-token').onclick = async function () {
+      try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta', 'POST', { verifyToken: $('meta-token').value.trim() })); metaMsg('Token guardado.'); } catch (e) { metaMsg(e.message, true); }
+    };
+    $('meta-guardar-secret').onclick = async function () {
+      var v = $('meta-secret').value.trim();
+      if (!v) { metaMsg('Escribe la clave secreta de la app.', true); return; }
+      try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta', 'POST', { appSecret: v })); $('meta-secret').value = ''; metaMsg('Clave secreta guardada.'); } catch (e) { metaMsg(e.message, true); }
+    };
+    $('meta-quitar-secret').onclick = async function () {
+      if (!window.confirm('¿Quitar la clave secreta? Se rechazarán los avisos de Meta hasta que pongas otra (salvo que Conexión tenga una).')) return;
+      try { pintarMeta(await api('/admin/webhook-meta', 'POST', { quitarAppSecret: true })); metaMsg('Clave secreta quitada.'); } catch (e) { metaMsg(e.message, true); }
+    };
+    $('meta-probar').onclick = async function () {
+      metaMsg('Probando…');
+      try {
+        var r = await api('/admin/webhook-meta/probar', 'POST', {});
+        $('meta-pasos').innerHTML = '<ul class="lista-pasos">' + r.pasos.map(function (p) { return '<li><span class="chip tono-' + (p.ok ? 'verde' : 'rojo') + '">' + (p.ok ? 'Bien' : 'Falta') + '</span> <b>' + esc(p.paso) + ':</b> ' + esc(p.detalle) + '</li>'; }).join('') + '</ul>';
+        pintarMeta(r);
+        metaMsg(r.ok ? 'Todo listo de nuestro lado. Falta que Meta verifique desde su panel (botón «Verificar y guardar»).' : 'Hay algo por completar: mira la lista de arriba.', !r.ok);
+      } catch (e) { metaMsg(e.message, true); }
+    };
+    cargarMeta();
+    setInterval(function () { if (!document.hidden && !$('webhook-meta').hidden) cargarMeta(); }, 15000);
+  }
   /* Pestañas: #t-<pestaña>, o el ancla de un bloque (#courier-campos) abre la suya. */
   function mostrarPestana() {
     var h = location.hash.slice(1), pestana = 'resumen', destino = null;

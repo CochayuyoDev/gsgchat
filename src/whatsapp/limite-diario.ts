@@ -53,6 +53,6 @@ export function validarLimiteDiario(valor: unknown): number {
 }
 
 /** Por que sale un mensaje por la linea que sale. */
-export type MotivoSeleccion = 'asignacion_original' | 'limite_alcanzado' | 'original_no_disponible';
+export type MotivoSeleccion = 'asignacion_original' | 'limite_alcanzado' | 'original_no_disponible' | 'ventana_cerrada';
 
 export const MOTIVO_SIN_LINEAS = 'No hay números vinculados habilitados con cupo disponible';

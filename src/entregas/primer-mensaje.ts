@@ -88,6 +88,7 @@ export function motivoLegible(codigo: string | null | undefined, detalle?: strin
   if (c === 'regla_gsg') return 'La regla «Solo lo de GSG» no deja salir este mensaje.';
   if (c === 'sin_lineas_disponibles') return 'No hay números vinculados habilitados con cupo disponible: se reintenta solo en cuanto haya uno.';
   if (c === 'limite_diario') return 'La línea elegida llegó a su máximo de mensajes por día.';
+  if (c === 'linea_fuera_de_modo') return 'La línea elegida está en pausa por el modo de Conexión: elige otra línea o cambia el modo.';
   if (c === 'sin_conexion') return 'WhatsApp está desconectado: se reintenta solo en cuanto vuelva.';
   if (c === 'resultado_incierto') return `No se sabe si le llegó: el envío se cortó a mitad. Revisa su chat antes de reintentar.${extra}`;
   if (c === 'reintentos_agotados') return `WhatsApp falló varias veces seguidas y se dejó de reintentar solo.${extra}`;

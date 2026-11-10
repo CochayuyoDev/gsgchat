@@ -1201,7 +1201,9 @@ function pintarSubtitulo(data) {
   current.windowOpen = Boolean(data.windowOpen);
   var lineaCab = variasLineas() ? lineaPorId(lineaSeleccionada() || current.lineaPorDefecto) : null;
   sub.innerHTML = '<span id="t-presencia"></span><span class="t-tel">' + esc(telefonoBonito(current.phone)) + '</span>' +
-    (lineaCab ? lineaTagHtml(lineaCab.etiqueta, 'Se le contesta por ' + lineaCab.etiqueta + (lineaCab.numero ? ' · +' + lineaCab.numero : '')) : '') +
+    (lineaCab ? lineaTagHtml(lineaCab.etiqueta, 'Se le contesta por ' + lineaCab.etiqueta + (lineaCab.tipo === 'api' ? ' (WhatsApp API)' : '') + (lineaCab.numero ? ' · +' + lineaCab.numero : '')) : '') +
+    (lineaCab && lineaCab.tipo === 'api' ? '<span class="pill t-marca" title="Esta línea es de la API oficial de Meta">API</span>' : '') +
+    (lineaCab && lineaCab.enUso === false ? '<span class="pill warn t-marca" title="Conexión tiene elegido un modo que deja esta línea en pausa: solo termina los chats abiertos; después el cliente pasa a una línea en uso.">Línea en pausa</span>' : '') +
     (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada') ? '<span class="pill warn t-marca" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
     (data.reparto ? '<a class="t-pedido" href="/hoy' + (data.reparto.referencia ? '?buscar=' + encodeURIComponent(data.reparto.referencia) : '') + '" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'Pedido ' + data.reparto.referencia : 'Reparto') + ': ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
     (data.reparto && data.reparto.esperaEnvio ? '<span class="t-tel">' + esc(data.reparto.esperaEnvio.motivo) + (data.reparto.esperaEnvio.hasta ? ' · ' + esc(new Date(data.reparto.esperaEnvio.hasta).toLocaleTimeString()) : '') + '</span>' : '');
@@ -1899,7 +1901,10 @@ function pintarSelectorDeLinea(data) {
   var elegida = lineaSeleccionada();
   sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (al azar)</option>') + LINEAS.map(function (l) {
     var caida = l.estado !== 'conectado';
-    return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
+    /* API o normal, y si el modo de Conexion la tiene en pausa (solo termina chats abiertos). */
+    var tipo = l.tipo === 'api' ? ' · API' : '';
+    var pausa = l.enUso === false ? ' (en pausa por el modo)' : '';
+    return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + tipo + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : pausa) + '</option>';
   }).join('');
   sel.style.background = elegida ? colorDeLinea((lineaPorId(elegida) || {}).etiqueta) : '#667781';
   sel.classList.remove('hidden');

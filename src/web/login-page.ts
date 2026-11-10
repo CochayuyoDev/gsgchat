@@ -25,8 +25,16 @@
  * mismo texto en dos pantallas.
  */
 
-import { INICIAL_SISTEMA, LEMA_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
+import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
+
+/**
+ * Las fuentes de la portada y del login. Viven aqui (y no en landing-page.ts)
+ * porque la portada ya importa de este fichero: al reves seria un ciclo.
+ */
+export const FUENTES_MARCA =
+  '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@125,600;125,800&family=IBM+Plex+Mono:wght@500;600&family=Public+Sans:wght@400;500;600;700&display=swap">';
 
 /**
  * Como se presenta el sistema, en un solo sitio.
@@ -53,13 +61,13 @@ export const PROMESA = {
  * sigue usando PROMESA.
  */
 export const PROMESA_PLATAFORMA = {
-  titular: 'Atiende tus pedidos y clientes por WhatsApp,',
-  remate: 'en marcha en un minuto',
-  bajada: 'Crea tu cuenta, conecta WhatsApp y recibe pedidos por API. Solicita ubicaciones, atiende chats y configura tu asistente IA.',
+  titular: 'Cada pedido sale con la',
+  remate: 'ubicación exacta',
+  bajada: 'Pide la ubicación por WhatsApp, confirma con el cliente y manda al motorizado con su hora de llegada.',
   puntos: [
-    'Cada empresa es independiente: tus clientes, pedidos y conversaciones solo los ves tú.',
-    'Tu propio número de WhatsApp: se conecta con un código QR, como WhatsApp Web.',
-    'Tu equipo entra con su propia cuenta, y tú decides quién hace qué.',
+    'Tus clientes, pedidos y chats solo los ves tú y tu equipo.',
+    'Tu WhatsApp con un QR, la API oficial de Meta o los dos juntos.',
+    'Cada persona del equipo entra con su propia cuenta.',
   ],
 } as const;
 
@@ -85,31 +93,51 @@ const CSS = `
   /* El panel de la izquierda es una franja de marca: oscura siempre, en modo
      claro y en oscuro. Por eso tiene sus propios tonos con nombre en vez de
      los del sistema, que se dan la vuelta con el tema. */
-  :root { --marca-fondo: #0f1a17; --marca-texto: #e8f1ee; --marca-suave: #a9bbb5; --marca-tenue: #8fa39c; --marca-acento: #25d366; }
+  /* El lado de marca es el de la portada: asfalto con la cinta amarilla, en
+     los dos temas. Por eso lleva sus propios tonos con nombre. */
+  :root { --marca-fondo: #18273A; --marca-fondo-2: #22364E; --marca-texto: #E9EEF4; --marca-suave: #A9B6C6; --marca-senal: #FFC21A; --marca-tinta: #0D141C; --marca-wa: #3DD47A;
+    --display: "Archivo", "Arial Narrow", system-ui, sans-serif; --mono-marca: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: grid; grid-template-columns: 1.05fr 1fr; background: var(--bg); color: var(--texto); font: var(--fs-cuerpo)/1.55 var(--fuente); }
+  body { margin: 0; min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--bg); color: var(--texto); font: var(--fs-cuerpo)/1.55 "Public Sans", var(--fuente); }
 
-  /* --- franja de marca --- */
-  .marca-lado { background: var(--marca-fondo); color: var(--marca-texto); padding: var(--esp-6) 48px; display: flex; flex-direction: column; justify-content: space-between; gap: var(--esp-5); }
-  .marca-lado .logotipo { color: #fff; }
-  .marca-lado h2 { font-size: 34px; line-height: 1.12; letter-spacing: -.02em; margin: 0 0 14px; max-width: 460px; }
-  .marca-lado h2 span { color: var(--marca-acento); }
-  .marca-lado p { color: var(--marca-suave); margin: 0; max-width: 440px; font-size: 16px; }
-  .marca-lado ul { list-style: none; padding: 0; margin: var(--esp-5) 0 0; display: grid; gap: var(--esp-2); max-width: 460px; }
-  .marca-lado li { display: flex; gap: var(--esp-2); align-items: flex-start; font-size: 14.5px; color: var(--marca-texto); }
-  .marca-lado li::before { content: '✓'; flex: none; width: 20px; height: 20px; border-radius: 50%; background: rgba(37,211,102,.18); color: var(--marca-acento); display: grid; place-items: center; font-size: 12px; font-weight: 800; margin-top: 2px; }
-  .marca-lado small { color: var(--marca-tenue); font-size: var(--fs-small); }
+  /* --- lado de marca --- */
+  .marca-lado { position: relative; overflow: hidden; background: var(--marca-fondo); color: var(--marca-texto); padding: 40px 52px 56px; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; }
+  .marca-lado::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 12px; background: repeating-linear-gradient(-45deg, var(--marca-senal) 0 14px, var(--marca-fondo) 14px 28px); }
+  .marca-lado .logotipo { color: #fff; font: 800 19px/1 var(--display); font-stretch: 125%; }
+  .marca-lado .logotipo .sello { background: var(--marca-fondo-2); color: var(--marca-senal); box-shadow: inset 0 -4px 0 var(--marca-senal); }
+  .marca-lado h2 { font: 800 clamp(30px, 3.4vw, 44px)/1.04 var(--display); font-stretch: 125%; letter-spacing: -.03em; margin: 0 0 16px; max-width: 520px; text-wrap: balance; }
+  .marca-lado h2 span { color: var(--marca-senal); }
+  .marca-lado p { color: var(--marca-suave); margin: 0; max-width: 460px; font-size: 16.5px; }
+  .marca-lado ul { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 10px; max-width: 470px; }
+  .marca-lado li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; align-items: start; font-size: 14.5px; color: var(--marca-texto); }
+  .marca-lado li::before { content: ""; width: 12px; height: 12px; margin-top: 5px; border-radius: 3px; background: var(--marca-senal); transform: rotate(45deg); }
+
+  /* La etiqueta del pedido, en chico: la misma pieza que en la portada */
+  .mini-etiqueta { max-width: 360px; background: #fff; color: var(--marca-tinta); border: 2px solid var(--marca-tinta); border-radius: 6px; box-shadow: 8px 8px 0 #0B1520; transform: rotate(-1.5deg); font-size: 13px; }
+  .mini-etiqueta .cab { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--marca-tinta); color: #fff; font: 600 11px/1.2 var(--mono-marca); letter-spacing: .05em; }
+  .mini-etiqueta .cab span:last-child { color: var(--marca-senal); }
+  .mini-etiqueta .cuerpo { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 12px 12px; align-items: end; }
+  .mini-etiqueta .trk { font: 600 21px/1.1 var(--mono-marca); }
+  .mini-etiqueta .dato { color: #4A5868; font-size: 12.5px; }
+  .mini-etiqueta .ok { grid-row: 1 / span 2; grid-column: 2; border: 2.5px solid #1FA855; color: #1FA855; border-radius: 6px; padding: 4px 8px; font: 800 11.5px/1.15 var(--display); font-stretch: 125%; text-transform: uppercase; transform: rotate(-8deg); text-align: center; }
+  @media (prefers-reduced-motion: no-preference) {
+    .mini-etiqueta .ok { animation: sella .35s cubic-bezier(.2,1.6,.4,1) .6s both; }
+    @keyframes sella { from { opacity: 0; transform: rotate(-8deg) scale(1.7); } to { opacity: 1; transform: rotate(-8deg) scale(1); } }
+  }
 
   /* --- logotipo, en las dos columnas --- */
   .logotipo { display: flex; align-items: center; gap: var(--esp-2); text-decoration: none; color: inherit; font-weight: 800; }
   .logotipo .sello { width: 36px; height: 36px; flex: none; border-radius: 10px; background: var(--primario); color: var(--primario-texto); display: grid; place-items: center; font-weight: 700; }
 
   /* --- columna del formulario --- */
-  .centro { display: flex; align-items: center; justify-content: center; padding: var(--esp-5) var(--esp-4); }
-  .caja { width: 100%; max-width: 400px; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: var(--esp-5) var(--esp-5) var(--esp-4); box-shadow: var(--sombra-2); }
+  .centro { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--esp-3); padding: var(--esp-5) var(--esp-4); }
+  .caja { width: 100%; max-width: 420px; background: var(--superficie); border: 1px solid var(--borde); border-radius: 16px; padding: var(--esp-5) var(--esp-5) var(--esp-4); box-shadow: var(--sombra-2); border-top: 5px solid var(--marca-senal); }
   .caja > .logotipo { color: var(--texto); margin-bottom: var(--esp-4); }
+  .caja > .logotipo .sello { background: var(--marca-fondo); color: var(--marca-senal); box-shadow: inset 0 -4px 0 var(--marca-senal); }
   .caja > .logotipo small { display: block; font-weight: 400; font-size: var(--fs-small); color: var(--texto-suave); }
-  h1 { font-size: var(--fs-h1); margin: 0 0 4px; letter-spacing: -.01em; }
+  h1 { font: 800 26px/1.15 var(--display); font-stretch: 125%; margin: 0 0 4px; letter-spacing: -.02em; }
+  /* En el celular la marca va arriba, en una franja corta. */
+  .marca-movil { display: none; }
   .entradilla { color: var(--texto-suave); font-size: 13px; margin: 0 0 var(--esp-3); }
 
   /* --- pestañas --- */
@@ -129,6 +157,9 @@ const CSS = `
   button[type="submit"]:hover { filter: brightness(1.06); }
   button[type="submit"]:focus-visible { outline: 2px solid var(--primario); outline-offset: 2px; }
   button[type="submit"]:disabled { opacity: .6; cursor: default; }
+  /* El boton principal con la marca: asfalto y la raya amarilla abajo, como en la portada. */
+  button[type="submit"] { background: var(--marca-fondo); color: #fff; box-shadow: inset 0 -4px 0 var(--marca-senal); }
+  button[type="submit"]:hover { filter: none; background: var(--marca-fondo-2); }
 
   /* Vacio no ocupa sitio: el formulario no da un salto cuando aparece. */
   .aviso { color: var(--rojo); font-size: 13px; margin-top: var(--esp-2); }
@@ -158,9 +189,16 @@ const CSS = `
   a { color: var(--primario); }
 
   @media (max-width: 860px) {
-    body { grid-template-columns: 1fr; }
+    body { grid-template-columns: minmax(0, 1fr); align-content: start; }
     .marca-lado { display: none; }
-    .centro { align-items: flex-start; padding-top: var(--esp-6); }
+    .marca-movil { display: block; position: relative; background: var(--marca-fondo); color: var(--marca-texto); padding: 18px 20px 26px; }
+    .marca-movil::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 8px; background: repeating-linear-gradient(-45deg, var(--marca-senal) 0 12px, var(--marca-fondo) 12px 24px); }
+    .marca-movil p { margin: 10px 0 0; font: 800 21px/1.12 var(--display); font-stretch: 125%; letter-spacing: -.02em; }
+    .marca-movil p span { color: var(--marca-senal); }
+    .marca-movil .logotipo { color: #fff; font: 800 17px/1 var(--display); font-stretch: 125%; }
+    .marca-movil .logotipo .sello { width: 30px; height: 30px; background: var(--marca-fondo-2); color: var(--marca-senal); box-shadow: inset 0 -3px 0 var(--marca-senal); }
+    .centro { justify-content: flex-start; padding-top: var(--esp-4); }
+    .caja > .logotipo { display: none; }
   }
 `;
 
@@ -450,8 +488,12 @@ export function loginPage(opts: {
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Acceso al sistema de ${negocio}.">
-<title>Entrar - ${negocio} · ${NOMBRE_SISTEMA}</title><style>${CSS}</style></head>
+<title>Entrar - ${negocio} · ${NOMBRE_SISTEMA}</title>${FUENTES_MARCA}<style>${CSS}</style></head>
 <body>
+<header class="marca-movil">
+  <a class="logotipo" href="/"><span class="sello">${INICIAL_SISTEMA}</span>${NOMBRE_SISTEMA}</a>
+  <p>${PROMESA_PLATAFORMA.titular} <span>${PROMESA_PLATAFORMA.remate}</span>.</p>
+</header>
 <aside class="marca-lado">
   <a class="logotipo" href="/"><span class="sello">${INICIAL_SISTEMA}</span>${NOMBRE_SISTEMA}</a>
   <div>
@@ -459,11 +501,14 @@ export function loginPage(opts: {
     <p>${PROMESA_PLATAFORMA.bajada}</p>
     <ul>${PROMESA_PLATAFORMA.puntos.map((p) => `<li>${p}</li>`).join('')}</ul>
   </div>
-  <small>Cada empresa con sus propios datos y su propio WhatsApp.</small>
+  <div class="mini-etiqueta" aria-hidden="true">
+    <div class="cab"><span>GSG COURIER · SURCO</span><span>HOY 3:10 PM</span></div>
+    <div class="cuerpo"><span class="trk">GSG-E-205</span><span class="ok">Ubicación<br>registrada</span><span class="dato">Rosa Q. · cobrar S/ 89.90</span></div>
+  </div>
 </aside>
 <main class="centro">
 <div class="caja">
-  <div class="logotipo"><span class="sello">${INICIAL_SISTEMA}</span><span>${negocio}<small>${NOMBRE_SISTEMA} · ${LEMA_SISTEMA}</small></span></div>
+  <div class="logotipo"><span class="sello">${INICIAL_SISTEMA}</span><span>${negocio}<small>${NOMBRE_SISTEMA} · entregas coordinadas por WhatsApp</small></span></div>
   <div class="pestanas" role="tablist" aria-label="${opts.primeraCuenta ? 'Entrar o crear la primera cuenta' : 'Entrar o crear mi tienda'}">
     <button type="button" id="tab-entrar" role="tab" aria-controls="panel-entrar">Entrar</button>
     <button type="button" id="tab-registro" role="tab" aria-controls="panel-registro">${opts.primeraCuenta ? 'Primera cuenta' : 'Crear mi tienda'}</button>
@@ -471,6 +516,7 @@ export function loginPage(opts: {
   <div id="panel-entrar" role="tabpanel" aria-labelledby="tab-entrar">${FORM_ENTRAR}</div>
   <div id="panel-registro" role="tabpanel" aria-labelledby="tab-registro">${opts.primeraCuenta ? FORM_PRIMERA : FORM_TIENDA}</div>
 </div>
+<p class="pie"><a href="/privacidad">Privacidad</a> · <a href="/terminos">Términos y condiciones</a> · <a href="/eliminacion-de-datos">Eliminar mis datos</a></p>
 </main>
 <script>${script}</script>
 </body></html>`;

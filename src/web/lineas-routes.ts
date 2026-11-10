@@ -10,7 +10,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { LineasError, MAX_LINEAS, type Linea, type ServicioLineas } from '../whatsapp/lineas.js';
+import { LineasError, MAX_LINEAS, type CredencialesLinea, type Linea, type ServicioLineas } from '../whatsapp/lineas.js';
+import { admiteTipo, esModoLineas, MODO_LINEAS_POR_DEFECTO, MODOS_LINEAS, TEXTO_MODO_LINEAS, tipoDeProveedor, type ModoLineas, type TipoLinea } from '../whatsapp/modo-lineas.js';
 import type { RegistroClientes } from '../whatsapp/registro.js';
 import { LimiteInvalido } from '../whatsapp/limite-diario.js';
 import { hayVinculacion } from '../whatsapp/local/session.js';
@@ -23,23 +24,53 @@ export interface LineasRoutesDeps {
   arrancarLinea: (id: string) => Promise<unknown>;
   /** Como se reparten los clientes entre las lineas y los ultimos cambios. */
   reparto?: RepartoDeLineas;
+  /** Normal o API: la principal es del tipo que diga /setup. Sin esto, por su fila. */
+  tipoDe?: (linea: Linea) => TipoLinea;
+  /**
+   * Comprueba con Meta las credenciales de una linea de la API y devuelve su
+   * numero. Inyectable para las pruebas; sin esto no se comprueba.
+   */
+  probarApi?: (cred: { token: string; phoneNumberId: string; businessAccountId: string }) => Promise<{ numero: string; nombre: string }>;
+  /** La direccion que hay que pegar en Meta como webhook. */
+  webhookUrl?: () => string;
 }
+
+const credencialesSchema = z.object({
+  token: z.string().trim().max(1000).optional(),
+  phoneNumberId: z.string().trim().max(100).optional(),
+  businessAccountId: z.string().trim().max(100).optional(),
+  wahaUrl: z.string().trim().max(300).optional(),
+  wahaApiKey: z.string().trim().max(300).optional(),
+  wahaSession: z.string().trim().max(100).optional(),
+  appSecret: z.string().trim().max(300).optional(),
+  verifyToken: z.string().trim().max(300).optional(),
+});
 
 const crearSchema = z.object({
   etiqueta: z.string().trim().min(1).max(80),
   proveedor: z.enum(['local', 'cloud', 'waha']).default('local'),
   telefono: z.string().trim().max(40).optional(),
-  credenciales: z
-    .object({
-      token: z.string().trim().max(1000).optional(),
-      phoneNumberId: z.string().trim().max(100).optional(),
-      businessAccountId: z.string().trim().max(100).optional(),
-      wahaUrl: z.string().trim().max(300).optional(),
-      wahaApiKey: z.string().trim().max(300).optional(),
-      wahaSession: z.string().trim().max(100).optional(),
-    })
-    .optional(),
+  credenciales: credencialesSchema.optional(),
 });
+
+/** Lo que falta para que una linea de la API pueda enviar y recibir, en palabras. */
+function faltanDeApi(c: CredencialesLinea): string[] {
+  return [
+    !c.token && 'el token de acceso',
+    !c.phoneNumberId && 'el identificador del número (Phone number ID)',
+    !c.businessAccountId && 'el identificador de la cuenta (WhatsApp Business Account ID)',
+    !c.appSecret && 'la clave secreta de la app (App secret)',
+  ].filter((x): x is string => Boolean(x));
+}
+
+/** Un error de Meta en palabras de la pantalla. */
+function explicarFalloMeta(error: unknown): string {
+  const texto = error instanceof Error ? error.message : String(error);
+  if (/401|190|token|OAuth/i.test(texto)) return 'Meta no aceptó el token: revisa que sea el token permanente y que no haya caducado.';
+  if (/100|does not exist|Unsupported get request|nonexisting/i.test(texto)) return 'Meta no encuentra ese número: revisa el Phone number ID.';
+  if (/fetch failed|ENOTFOUND|ECONN|timeout/i.test(texto)) return 'No se pudo hablar con Meta (sin internet o Meta no responde). Prueba otra vez en un rato.';
+  return `Meta contestó con un error: ${texto.slice(0, 200)}`;
+}
 
 const cambiarSchema = z.object({
   etiqueta: z.string().trim().min(1).max(80).optional(),
@@ -53,17 +84,38 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
 
   /** La principal de uso (ver `ServicioLineas.preferida`); sin el metodo, la de /setup. */
   const preferida = async (): Promise<string | null> => (lineas.preferida ? lineas.preferida().catch(() => null) : null);
+  const modoActual = async (): Promise<ModoLineas> => (lineas.modo ? lineas.modo().catch(() => MODO_LINEAS_POR_DEFECTO) : MODO_LINEAS_POR_DEFECTO);
+  const tipoDe = (linea: Linea): TipoLinea => deps.tipoDe?.(linea) ?? tipoDeProveedor(linea.proveedor);
+  const soloAdmin = (request: { usuario?: { rol?: string } | null }) => !request.usuario || request.usuario.rol === 'admin';
 
   /** Una linea tal como la ve la pantalla: sin credenciales, con su estado vivo y, si toca, el QR. */
-  async function vista(linea: Linea, preferidaId?: string | null) {
+  async function vista(linea: Linea, preferidaId?: string | null, modo?: ModoLineas) {
     const t = await registro.transporte(linea.id);
     const vivo = t?.sesion && linea.proveedor === 'local' ? t.sesion.getLocalState() : null;
     const idPrincipal = preferidaId === undefined ? await preferida() : preferidaId;
+    const tipo = tipoDe(linea);
+    const cred = linea.proveedor === 'cloud' && !linea.principal ? await lineas.credenciales(linea.id) : null;
     return {
       id: linea.id,
       etiqueta: linea.etiqueta,
       numero: linea.telefono || vivo?.phone || '',
       proveedor: linea.proveedor,
+      tipo,
+      // false = el modo de Conexion la deja en pausa (sigue conectada).
+      enUso: admiteTipo(modo ?? (await modoActual()), tipo),
+      // Solo de una linea de la API: que datos tiene (nunca los valores) y cuales le faltan.
+      ...(cred
+        ? {
+            api: {
+              phoneNumberId: cred.phoneNumberId ?? linea.idExterno ?? '',
+              businessAccountId: cred.businessAccountId ?? '',
+              conToken: Boolean(cred.token),
+              conAppSecret: Boolean(cred.appSecret),
+              conVerifyToken: Boolean(cred.verifyToken),
+              faltan: faltanDeApi({ ...cred, phoneNumberId: cred.phoneNumberId ?? linea.idExterno ?? undefined }),
+            },
+          }
+        : {}),
       estado: linea.estado,
       // `principal` = la de uso (la que eligio la tienda). `deSetup` = la conexion
       // de siempre: se conecta y desvincula desde su pantalla y no se puede quitar.
@@ -88,7 +140,73 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
   app.get('/admin/lineas', async () => {
     const todas = await lineas.listar();
     const idPrincipal = await preferida();
-    return { max: MAX_LINEAS, puedeElegirPrincipal: Boolean(lineas.fijarPreferida), lineas: await Promise.all(todas.map((l) => vista(l, idPrincipal))) };
+    const modo = await modoActual();
+    return {
+      max: MAX_LINEAS,
+      puedeElegirPrincipal: Boolean(lineas.fijarPreferida),
+      puedeElegirModo: Boolean(lineas.fijarModo),
+      modo,
+      modos: MODOS_LINEAS.map((m) => ({ id: m, ...TEXTO_MODO_LINEAS[m] })),
+      webhookUrl: deps.webhookUrl?.() ?? '',
+      lineas: await Promise.all(todas.map((l) => vista(l, idPrincipal, modo))),
+    };
+  });
+
+  /**
+   * Que lineas se usan: solo las normales, solo las de la API o las dos. No
+   * desconecta nada. No deja elegir un modo sin ninguna linea habilitada de
+   * ese tipo: con eso no saldria ningun mensaje.
+   */
+  app.post('/admin/lineas/modo', async (request, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia qué líneas se usan.' });
+    if (!lineas.fijarModo) return reply.code(404).send({ error: 'Elegir qué líneas se usan no está disponible aquí.' });
+    const modo = (request.body as { modo?: unknown } | undefined)?.modo;
+    if (!esModoLineas(modo)) return reply.code(400).send({ error: 'Elige uno de los tres: solo WhatsApp normal, solo WhatsApp API o los dos juntos.', codigo: 'modo' });
+    if (modo !== 'ambos') {
+      const hay = (await lineas.listar()).some((l) => (l.principal || l.habilitada) && tipoDe(l) === modo);
+      if (!hay) {
+        return reply.code(409).send({
+          error: modo === 'api'
+            ? 'Todavía no tienes ninguna línea de WhatsApp API. Agrega una abajo («Agregar línea» → WhatsApp API) y vuelve a elegir este modo.'
+            : 'No tienes ninguna línea de WhatsApp normal habilitada. Agrega una con QR o habilita una y vuelve a elegir este modo.',
+          codigo: 'sin_lineas_del_tipo',
+        });
+      }
+    }
+    const guardado = await lineas.fijarModo(modo);
+    const conectadas = (await registro.estados()).filter((e) => e.conectada && admiteTipo(guardado, tipoDe(e.linea))).length;
+    return { ok: true, modo: guardado, conectadasEnUso: conectadas };
+  });
+
+  /** Cambia los datos de una linea de la API (lo que se deje vacio se conserva) y los comprueba con Meta. */
+  app.patch<{ Params: { id: string } }>('/admin/lineas/:id/credenciales', async (request, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia los datos de una línea.' });
+    if (!lineas.fijarCredenciales) return reply.code(404).send({ error: 'Cambiar los datos de una línea no está disponible aquí.' });
+    const body = credencialesSchema.parse(request.body ?? {});
+    try {
+      const linea = await lineas.obtener(request.params.id);
+      if (!linea) return reply.code(404).send({ error: 'Esa linea no existe.', codigo: 'no_existe' });
+      if (linea.principal) return reply.code(400).send({ error: 'Los datos de la línea principal se cambian en su tarjeta de Conexión.', codigo: 'principal' });
+      if (linea.proveedor !== 'cloud') return reply.code(400).send({ error: 'Solo las líneas de WhatsApp API tienen datos que cambiar.', codigo: 'proveedor' });
+      const juntas = { ...(await lineas.credenciales(linea.id)), ...Object.fromEntries(Object.entries(body).filter(([, v]) => v)) } as CredencialesLinea;
+      const faltan = faltanDeApi(juntas);
+      if (faltan.length) return reply.code(400).send({ error: `Falta ${faltan.join(', ')}.`, codigo: 'faltan' });
+      let numero = '';
+      if (deps.probarApi) {
+        try {
+          numero = (await deps.probarApi({ token: juntas.token!, phoneNumberId: juntas.phoneNumberId!, businessAccountId: juntas.businessAccountId! })).numero;
+        } catch (error) {
+          return reply.code(400).send({ error: explicarFalloMeta(error), codigo: 'meta' });
+        }
+      }
+      await lineas.fijarCredenciales(linea.id, body);
+      if (numero) await lineas.sincronizar(linea.id, { telefono: numero });
+      // El cliente guardado se armo con los datos viejos.
+      registro.olvidar(linea.id);
+      return { ok: true, linea: await vista((await lineas.obtener(linea.id))!) };
+    } catch (error) {
+      return responderError(error, reply);
+    }
   });
 
   /**
@@ -110,7 +228,22 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
   app.post('/admin/lineas', async (request, reply) => {
     const body = crearSchema.parse(request.body ?? {});
     try {
-      const linea = await lineas.crear({ etiqueta: body.etiqueta, proveedor: body.proveedor, telefono: body.telefono, credenciales: body.credenciales });
+      let telefono = body.telefono;
+      if (body.proveedor === 'cloud') {
+        // Una linea de la API se da de alta completa y comprobada: si no, quedaria
+        // «conectada» en la pantalla sin poder mandar nada.
+        const cred = body.credenciales ?? {};
+        const faltan = faltanDeApi(cred);
+        if (faltan.length) return reply.code(400).send({ error: `Falta ${faltan.join(', ')}.`, codigo: 'faltan' });
+        if (deps.probarApi) {
+          try {
+            telefono = (await deps.probarApi({ token: cred.token!, phoneNumberId: cred.phoneNumberId!, businessAccountId: cred.businessAccountId! })).numero || telefono;
+          } catch (error) {
+            return reply.code(400).send({ error: explicarFalloMeta(error), codigo: 'meta' });
+          }
+        }
+      }
+      const linea = await lineas.crear({ etiqueta: body.etiqueta, proveedor: body.proveedor, telefono, credenciales: body.credenciales });
       return { ok: true, linea: await vista(linea) };
     } catch (error) {
       return responderError(error, reply);
