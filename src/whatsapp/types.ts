@@ -175,6 +175,14 @@ export interface ChangeValue {
   /** Desde Graph v24: por portafolio de Meta (compartido por todos sus numeros). */
   max_daily_conversations_per_business?: number;
   max_phone_numbers_per_business?: number;
+  // account_alerts
+  entity_type?: string;
+  entity_id?: string | number;
+  alert_info?: { alert_severity?: string; alert_status?: string; alert_type?: string; alert_description?: string };
+  // account_review_update y phone_number_name_update
+  decision?: string;
+  requested_verified_name?: string;
+  rejection_reason?: string | null;
   // user_preferences
   user_preferences?: Array<{
     wa_id?: string;

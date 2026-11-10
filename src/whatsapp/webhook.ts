@@ -20,7 +20,10 @@ import type { Repos, TemplateQuality, TemplateStatus } from '../db/repos.js';
 import { verifyChallenge, verifySignature } from './signature.js';
 import type { ChangeValue, WebhookPayload } from './types.js';
 import { claveEntrada, handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
-import type { ServicioLineas } from './lineas.js';
+import type { CredencialesLinea, ServicioLineas } from './lineas.js';
+import type { RegistroClientes } from './registro.js';
+import { resumenDelAviso, type ServicioWebhookMeta } from './webhook-meta.js';
+import type { WhatsAppClient } from './client.js';
 import type { LineaDeMensaje } from './types.js';
 import type { SettingsService } from '../settings/service.js';
 import { TtlCache } from '../util/cache.js';
@@ -39,6 +42,39 @@ export interface WebhookDeps extends InboundDeps {
   mediaDir?: string;
   /** Las lineas de la tienda, para saber por cual llego cada mensaje. Sin ellas, no se anota. */
   lineas?: ServicioLineas;
+  /**
+   * El cliente de cada linea: un adjunto que llega por una linea de la API que
+   * no es la principal se baja con el token de ESA linea. Sin esto, con `wa`.
+   */
+  registroClientes?: Pick<RegistroClientes, 'transporte'>;
+  /** Verify token y app secret propios del webhook de Meta, y su bitacora (ver webhook-meta.ts). */
+  webhookMeta?: ServicioWebhookMeta;
+}
+
+/** Cabecera con la que la prueba de «Nuestra API» marca sus llamadas (no cuentan como de Meta). */
+export const CABECERA_PRUEBA_WEBHOOK = 'x-gsgchat-prueba-webhook';
+
+/**
+ * Los app secret y verify token con los que Meta puede firmar o verificar: el
+ * de /setup y el de cada linea de la API que no es la principal (pueden ser
+ * apps distintas de Meta). Sin repetidos ni vacios.
+ */
+export async function secretosDeMeta(settings: SettingsService, lineas: ServicioLineas | undefined, webhookMeta?: ServicioWebhookMeta): Promise<{ appSecrets: string[]; verifyTokens: string[] }> {
+  const actual = settings.current();
+  const propio = webhookMeta?.config();
+  // Los propios de «Nuestra API» primero; los de /setup se siguen aceptando.
+  const appSecrets = [propio?.appSecret ?? '', actual.appSecret];
+  const verifyTokens = [propio?.verifyToken ?? '', actual.verifyToken];
+  if (lineas) {
+    for (const linea of await lineas.listar().catch(() => [])) {
+      if (linea.principal || linea.proveedor !== 'cloud') continue;
+      const cred = await lineas.credenciales(linea.id).catch(() => ({}) as CredencialesLinea);
+      appSecrets.push(cred.appSecret ?? '');
+      verifyTokens.push(cred.verifyToken ?? '');
+    }
+  }
+  const limpios = (lista: string[]) => [...new Set(lista.map((s) => (s ?? '').trim()).filter(Boolean))];
+  return { appSecrets: limpios(appSecrets), verifyTokens: limpios(verifyTokens) };
 }
 
 type RawRequest = FastifyRequest & { rawBody?: Buffer };
@@ -74,26 +110,35 @@ export async function registerWebhookRoutes(
 
   // Handshake de verificacion.
   app.get('/webhooks/whatsapp', async (request, reply) => {
-    const challenge = verifyChallenge(
-      request.query as Record<string, unknown>,
-      settings.current().verifyToken,
-    );
-    if (!challenge) return reply.code(403).send('forbidden');
+    // Vale el verify token de /setup o el de cualquier linea de la API.
+    const { verifyTokens } = await secretosDeMeta(settings, deps.lineas, deps.webhookMeta);
+    const prueba = request.headers[CABECERA_PRUEBA_WEBHOOK] === '1';
+    const challenge = verifyTokens
+      .map((token) => verifyChallenge(request.query as Record<string, unknown>, token))
+      .find((c): c is string => c !== null) ?? null;
+    if (!challenge) {
+      deps.webhookMeta?.anotar({ resultado: 'verificacion_fallida', detalle: verifyTokens.length ? 'el verify token no coincide con el guardado' : 'no hay ningún verify token guardado', prueba });
+      return reply.code(403).send('forbidden');
+    }
+    deps.webhookMeta?.anotar({ resultado: 'verificado', detalle: 'Meta verificó el webhook', prueba });
     return reply.type('text/plain').send(challenge);
   });
 
   app.post('/webhooks/whatsapp', async (request, reply) => {
     const raw = (request as RawRequest).rawBody ?? Buffer.from(JSON.stringify(request.body ?? {}));
     const signature = request.headers['x-hub-signature-256'];
+    const prueba = request.headers[CABECERA_PRUEBA_WEBHOOK] === '1';
 
-    const appSecret = settings.current().appSecret;
-    if (!appSecret) {
+    const { appSecrets } = await secretosDeMeta(settings, deps.lineas, deps.webhookMeta);
+    if (!appSecrets.length) {
       request.log.error('webhook recibido sin app secret configurado: revisa /setup');
+      deps.webhookMeta?.anotar({ resultado: 'sin_secreto', detalle: 'llegó un aviso pero no hay app secret guardado para comprobar la firma', prueba });
       return reply.code(503).send('not configured');
     }
 
-    if (!verifySignature(raw, typeof signature === 'string' ? signature : undefined, appSecret)) {
+    if (!appSecrets.some((appSecret) => verifySignature(raw, typeof signature === 'string' ? signature : undefined, appSecret))) {
       request.log.warn('webhook con firma invalida');
+      deps.webhookMeta?.anotar({ resultado: 'firma_invalida', detalle: signature ? 'la firma no cuadra con el app secret guardado' : 'llegó sin firma (cabecera X-Hub-Signature-256)', prueba });
       return reply.code(401).send('invalid signature');
     }
 
@@ -101,6 +146,7 @@ export async function registerWebhookRoutes(
     void reply.code(200).send('ok');
 
     const payload = request.body as WebhookPayload;
+    deps.webhookMeta?.anotar({ resultado: 'recibido', detalle: resumenDelAviso(payload), prueba });
     setImmediate(() => {
       void processPayload(payload, withSeen).catch((error) => {
         request.log.error({ err: error }, 'fallo procesando el webhook');
@@ -160,7 +206,8 @@ export async function processChange(
   deps: WebhookDeps,
 ): Promise<void> {
   const { repos, settings, seen } = deps;
-  const phoneNumberId = settings.current().phoneNumberId;
+  const principalId = settings.current().phoneNumberId;
+  const phoneNumberId = principalId;
 
   switch (field) {
     case 'messages': {
@@ -195,7 +242,7 @@ export async function processChange(
           seen.set(clave, true);
         }
         const entrante = conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' });
-        await guardarMediaDeMeta(entrante, deps);
+        await guardarMediaDeMeta(entrante, deps, await clienteDelAviso(linea?.id, deps));
         await handleInboundMessage(entrante, profileName, deps);
       }
       return;
@@ -278,6 +325,8 @@ export async function processChange(
     // Circuit breaker del numero: en rojo se pausa todo lo saliente y, cuando
     // Meta lo levanta, se reanuda solo si fue el sistema quien pauso.
     case 'phone_number_quality_update': {
+      // La calidad es de UN numero: si es el de otra linea de la API, va a su estado y no al de la principal.
+      const phoneNumberId = await identidadDelNumero(value, deps, principalId);
       if (value.current_limit) {
         await repos.numberState.setTier(phoneNumberId, value.current_limit);
       }
@@ -373,6 +422,47 @@ export async function processChange(
       return;
     }
 
+    // Alertas de Meta sobre la cuenta o el numero (limites, pagos, politicas).
+    // Quedan en Que todo funcione; las que no estan resueltas, como aviso.
+    case 'account_alerts': {
+      const a = value.alert_info ?? {};
+      const tipo = (a.alert_type ?? '').toUpperCase() || 'ALERTA';
+      const detalle = [a.alert_severity, a.alert_status, a.alert_description, value.entity_type].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', tipo, `account_alerts: ${detalle || tipo}`.slice(0, 500)).catch(() => undefined);
+      return;
+    }
+
+    // Meta reviso la cuenta de WhatsApp Business (APPROVED / REJECTED / PENDING).
+    case 'account_review_update': {
+      const decision = (value.decision ?? '').toUpperCase() || 'SIN_DECISION';
+      await deps.salud?.registrarEvento('cuenta', `REVISION_${decision}`, `account_review_update: ${decision}`).catch(() => undefined);
+      return;
+    }
+
+    // El nombre visible del numero: aprobado, rechazado (con el motivo) o pendiente.
+    case 'phone_number_name_update': {
+      const decision = (value.decision ?? '').toUpperCase() || 'SIN_DECISION';
+      const detalle = [value.display_phone_number, value.requested_verified_name, value.rejection_reason].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', `NOMBRE_${decision}`, `phone_number_name_update: ${decision}${detalle ? ` (${detalle})` : ''}`.slice(0, 500)).catch(() => undefined);
+      return;
+    }
+
+    // Cambios de seguridad del numero (PIN de dos pasos cambiado o pedido de cambio).
+    case 'security': {
+      const evento = (value.event ?? '').toUpperCase() || 'SEGURIDAD';
+      const detalle = [value.display_phone_number, evento].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', 'SEGURIDAD', `security: ${detalle}`).catch(() => undefined);
+      return;
+    }
+
+    // El resto de campos que se pueden suscribir en Meta (calls, flows,
+    // history, smb_message_echoes, smb_app_state_sync, standby, grupos,
+    // pagos, tracking_events, automatic_events, business_status_update,
+    // account_settings_update, message_template_components_update,
+    // template_correct_category_detection, business_username_updates,
+    // messaging_handovers, partner_solutions...) se reciben, se contesta 200
+    // y quedan en el registro del webhook, pero no cambian nada: el flujo de
+    // mensajes, entregas y bot sigue igual.
     default:
       return;
   }
@@ -385,9 +475,28 @@ export async function processChange(
  * (ver src/api/v1/archivos-gsg.ts). Si falla no se pierde nada: se vuelve a
  * intentar cuando alguien lo abra.
  */
-async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, deps: WebhookDeps): Promise<void> {
+/**
+ * Con que id se lleva el estado del numero del aviso: el de otra linea de la
+ * API si el numero mostrado es suyo (`linea:<id>`, como en el sender), si no
+ * el de la principal.
+ */
+async function identidadDelNumero(value: ChangeValue, deps: WebhookDeps, principal: string): Promise<string> {
+  const mostrado = String(value.display_phone_number ?? value.metadata?.display_phone_number ?? '').replace(/\D+/g, '');
+  if (!mostrado || !deps.lineas) return principal;
+  const linea = (await deps.lineas.listar().catch(() => [])).find((l) => !l.principal && l.proveedor === 'cloud' && l.telefono === mostrado);
+  return linea ? `linea:${linea.id}` : principal;
+}
+
+/** El cliente de la linea por la que llego el aviso; sin registro o sin linea, el de siempre. */
+async function clienteDelAviso(lineaId: string | undefined, deps: WebhookDeps): Promise<WhatsAppClient> {
+  if (!lineaId || !deps.registroClientes) return deps.wa;
+  const t = await deps.registroClientes.transporte(lineaId).catch(() => null);
+  return t?.cliente ?? deps.wa;
+}
+
+async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, deps: WebhookDeps, wa: WhatsAppClient = deps.wa): Promise<void> {
   const media = message.media as { id?: unknown; mimeType?: unknown } | undefined;
-  if (!media || typeof media.id !== 'string' || typeof media.mimeType !== 'string' || (!deps.wa.downloadMedia && !deps.wa.downloadMediaToFile)) return;
+  if (!media || typeof media.id !== 'string' || typeof media.mimeType !== 'string' || (!wa.downloadMedia && !wa.downloadMediaToFile)) return;
   try {
     const dir = deps.mediaDir ?? mediaDirectory();
     const copia = idDeMedia(`meta:${media.id}`, extensionDe(media.mimeType, message.type as MediaKind));
@@ -395,11 +504,11 @@ async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, d
     if ((await tamanoMedia(dir, media.id)) !== null || (await tamanoMedia(dir, copia)) !== null) return;
     await mkdir(dir, { recursive: true });
     await conCupoDeDescarga(async () => {
-      if (deps.wa.downloadMediaToFile) {
-        await deps.wa.downloadMediaToFile(media.id as string, path.join(dir, copia));
+      if (wa.downloadMediaToFile) {
+        await wa.downloadMediaToFile(media.id as string, path.join(dir, copia));
         return;
       }
-      const bajado = await deps.wa.downloadMedia!(media.id as string);
+      const bajado = await wa.downloadMedia!(media.id as string);
       await writeFile(path.join(dir, copia), bajado.datos);
     });
   } catch (error) {

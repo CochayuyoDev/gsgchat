@@ -195,9 +195,16 @@ export interface ConsultaSolicitudes {
   incidencias?: CodigoIncidencia[];
   requiereHumano?: boolean;
   q?: string;
+  /** Solo los que entraron desde este instante (incluido). */
+  creadoDesde?: Date;
+  /** Solo los que entraron antes de este instante (excluido): «hoy» es [00:00, 00:00 de mañana). */
+  creadoHasta?: Date;
   limit: number;
   offset: number;
 }
+
+/** El tramo de dias que se mira en Pedidos GSG (por la fecha en que entro el pedido). */
+export type RangoCreacion = Pick<ConsultaSolicitudes, 'creadoDesde' | 'creadoHasta'>;
 
 /** Una solicitud viva con el lote al que pertenece (para la lista de envio automatico). */
 export interface SolicitudConLote extends Solicitud {
@@ -230,7 +237,7 @@ export interface RutasRepo {
   /** Solicitudes de un lote para varios teléfonos, en una sola lectura. */
   solicitudesPorLoteYTelefonos(loteId: string, phones: string[]): Promise<Solicitud[]>;
   /** Conteo agrupado para construir las vistas del tablero en una lectura. */
-  resumenSolicitudes(loteId?: string): Promise<Array<{ estado: EstadoSolicitud; incidencia: CodigoIncidencia | null; requiereHumano: boolean; total: number }>>;
+  resumenSolicitudes(loteId?: string, rango?: RangoCreacion): Promise<Array<{ estado: EstadoSolicitud; incidencia: CodigoIncidencia | null; requiereHumano: boolean; total: number }>>;
   contarSolicitudes(query: Omit<ConsultaSolicitudes, 'limit' | 'offset'>): Promise<number>;
   actualizarSolicitud(id: number, patch: SolicitudPatch): Promise<Solicitud>;
   /** Recalcula de una vez el proximo seguimiento de clientes que siguen activos. */
@@ -486,6 +493,14 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       params.push(query.requiereHumano);
       partes.push(`requiere_humano = $${params.length}`);
     }
+    if (query.creadoDesde) {
+      params.push(query.creadoDesde);
+      partes.push(`created_at >= $${params.length}`);
+    }
+    if (query.creadoHasta) {
+      params.push(query.creadoHasta);
+      partes.push(`created_at < $${params.length}`);
+    }
     if (query.q?.trim()) {
       // La colacion es binaria (distingue mayusculas): el ilike de antes es
       // lower(...) like lower(...).
@@ -632,12 +647,13 @@ export function createRutasRepo(pool: Pool): RutasRepo {
       return rows.map(toSolicitud);
     },
 
-    async resumenSolicitudes(loteId) {
+    async resumenSolicitudes(loteId, rango) {
+      const { where, params } = filtros({ loteId, ...rango });
       const { rows } = await pool.query<{ estado: EstadoSolicitud; incidencia: CodigoIncidencia | null; requiere_humano: number | boolean; total: number }>(
         `select estado, incidencia, requiere_humano, count(*) as total
-           from rutas_solicitudes ${loteId ? 'where lote_id = $1' : ''}
+           from rutas_solicitudes ${where}
           group by estado, incidencia, requiere_humano`,
-        loteId ? [loteId] : [],
+        params,
       );
       return rows.map((r) => ({ estado: r.estado, incidencia: r.incidencia, requiereHumano: Boolean(r.requiere_humano), total: Number(r.total) }));
     },

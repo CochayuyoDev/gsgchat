@@ -63,6 +63,8 @@ import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { atenderComoAgente, atenderConReglaGsg, cerrarChat, clasificarPinLejos, pideAsesor, type DepsAgente } from '../ia/agente-operativo.js';
+import { detectarPrivacidad } from '../privacidad/detectar.js';
+import { atenderPedidoDePrivacidad } from '../privacidad/servicio.js';
 import { entradaAdmitida, esMediaAdmitida } from '../whatsapp/entradas-admitidas.js';
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
@@ -977,6 +979,33 @@ async function handleInboundMessageEnFila(
   // que lo vean aquí y GSG desde el historial, y nada más. No se transcribe, no
   // se contesta, no cuenta como respuesta ni mueve el pedido ni el recordatorio.
   if (esMediaAdmitida(message)) return;
+
+  // «BAJA», «no me escriban más», «borren mis datos» (regla del dueño, 09/11):
+  // no se ejecuta solo. Se apunta, se para el bot, su pedido pasa a una
+  // persona y sale el aviso; la baja o el borrado los hace el equipo desde
+  // Chats. Va antes de todo lo demás (también con el bot en pausa o el plazo
+  // vencido): quien lo pide tiene que quedar anotado siempre.
+  if (message.type === 'text' && repos.privacidad && !(await esMotorizadoQueEscribe())) {
+    const escrito = String(message.text?.body ?? '').trim();
+    const deteccion = escrito
+      ? await detectarPrivacidad(escrito, deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined).catch(() => null)
+      : null;
+    if (deteccion) {
+      await atenderPedidoDePrivacidad(
+        {
+          repos,
+          sender,
+          entregas: deps.entregas,
+          ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),
+          log: (m, d) => console.warn(`[privacidad] ${m}`, d ?? ''),
+        },
+        contact,
+        escrito,
+        deteccion,
+      ).catch((error) => request_log(deps, 'no se pudo apuntar el pedido de privacidad', error));
+      return;
+    }
+  }
 
   // Regla del dueño (20/10): pasado el plazo para marcar la incidencia, el
   // sistema ya no hace nada con ese cliente: se marca la incidencia, se le

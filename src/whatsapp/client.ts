@@ -327,7 +327,8 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     businessAccountId,
     graphVersion = 'v25.0',
     fetchImpl = fetch,
-    baseUrl = 'https://graph.facebook.com',
+    // WHATSAPP_GRAPH_URL solo para probar contra un Meta falso en la propia maquina.
+    baseUrl = process.env.WHATSAPP_GRAPH_URL?.trim().replace(/\/+$/, '') || 'https://graph.facebook.com',
     timeoutMs = TIMEOUT_PROVEEDOR_MS,
   } = opts;
 

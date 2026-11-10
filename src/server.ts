@@ -19,6 +19,7 @@ import { algunaLineaConectada, algunaLineaConfigurada } from './whatsapp/estado-
 import type { Sender } from './outbound/sender.js';
 import type { OutboundQueue } from './outbound/queue.js';
 import { registerWebhookRoutes } from './whatsapp/webhook.js';
+import { registerWebhookMetaRoutes } from './web/webhook-meta-routes.js';
 import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
 
 import { registerAdminRoutes } from './admin/routes.js';
@@ -150,6 +151,8 @@ export interface ServerDeps {
   /** Las lineas de WhatsApp de la tienda (ver src/whatsapp/lineas.ts) y el cliente de cada una. */
   lineas?: import('./whatsapp/lineas.js').ServicioLineas;
   registroClientes?: import('./whatsapp/registro.js').RegistroClientes;
+  /** El webhook de Meta configurable desde «Nuestra API» (verify token, app secret, bitacora). */
+  webhookMeta?: import('./whatsapp/webhook-meta.js').ServicioWebhookMeta;
   repartoLineas?: import('./whatsapp/reparto-lineas.js').RepartoDeLineas;
   /** Para apuntar el telefono vinculado: la salud guarda el riesgo por numero (src/salud/numero.ts). */
   anotarNumeroVigente?: (telefono: string | null | undefined) => void;
@@ -329,7 +332,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas, mediaDir, lineas: deps.lineas });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas, mediaDir, lineas: deps.lineas, registroClientes: deps.registroClientes, webhookMeta: deps.webhookMeta });
+  if (deps.webhookMeta) await registerWebhookMetaRoutes(app, { webhookMeta: deps.webhookMeta, settings, publicBase: config.PUBLIC_BASE_URL });
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
   if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, webhooks: repos.webhooks, simulador: deps.simuladorGsg, config });
   if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });
@@ -403,7 +407,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
   await registerApiConversacionesGsg(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
   // Los archivos de ese historial (`archivo.url`): enlace firmado, sin clave. Ver src/api/v1/archivos-gsg.ts.
-  await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa });
+  await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa, registroClientes: deps.registroClientes });
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
 

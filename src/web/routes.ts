@@ -72,7 +72,7 @@ import { fijarModoVigente } from './shell.js';
 import { entrenamientoPage } from './entrenamiento-page.js';
 
 
-import { ICONO_192_PNG_BASE64, ICONO_512_PNG_BASE64 } from './iconos.js';
+import { registerMarcaRoutes } from './marca-routes.js';
 import { NOMBRE_SISTEMA } from '../marca.js';
 import type { ServicioEntrenamiento } from '../entrenamiento/servicio.js';
 
@@ -196,29 +196,12 @@ export async function registerWebRoutes(app: FastifyInstance, deps: WebDeps): Pr
         lang: 'es-PE',
         icons: [
           { src: '/icono-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: '/icono-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/icono-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
         ],
       });
   });
-  for (const [ruta, base64] of [
-    ['/icono-192.png', ICONO_192_PNG_BASE64],
-    ['/icono-512.png', ICONO_512_PNG_BASE64],
-  ] as const) {
-    const bytes = Buffer.from(base64, 'base64');
-    app.get(ruta, async (_request, reply) => reply.type('image/png').header('cache-control', 'public, max-age=86400').send(bytes));
-  }
-
-  // El icono de la pestaña, para todas las paginas: sin el, cada visita deja
-  // un 404 en la consola del navegador.
-  app.get('/favicon.ico', async (_request, reply) => {
-    return reply
-      .type('image/svg+xml')
-      .header('cache-control', 'public, max-age=86400')
-      .send(
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#128c7e"/>` +
-          `<text x="16" y="22" text-anchor="middle" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="#fff">G</text></svg>`,
-      );
-  });
+  // El favicon, los iconos del celular y el logo (los mismos que en la plataforma).
+  registerMarcaRoutes(app);
 
   app.get('/setup', async (_request, reply) => {
     const page = html(connectPage({ labels: FIELD_LABELS, nombreNegocio: negocio(), demo: config.DEMO_MODE, conGsg: Boolean(deps.entregas), vista: 'whatsapp' }));

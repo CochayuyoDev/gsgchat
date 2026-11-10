@@ -114,6 +114,8 @@ const VISTAS: Record<string, Partial<ConsultaSolicitudes>> = {
   derivados: { estado: 'derivado' },
   supervision: { estado: 'supervision' },
   requieren_persona: { requiereHumano: true },
+  // BAJA o «borren mis datos» (src/privacidad): lo atiende una persona desde Chats.
+  privacidad: { incidencias: ['pide_baja', 'pide_borrar_datos'] },
 };
 
 export const NOMBRES_VISTA: Record<keyof typeof VISTAS | string, string> = {
@@ -128,6 +130,7 @@ export const NOMBRES_VISTA: Record<keyof typeof VISTAS | string, string> = {
   derivados: 'Para el repartidor',
   supervision: 'Necesitan revisión',
   requieren_persona: 'Esperan a una persona',
+  privacidad: 'Piden baja o borrar datos',
 };
 
 const listaSchema = z.object({
@@ -137,6 +140,8 @@ const listaSchema = z.object({
   incidencia: z.enum(CODIGOS as [CodigoIncidencia, ...CodigoIncidencia[]]).optional(),
   requiereHumano: z.coerce.boolean().optional(),
   q: z.string().max(120).optional(),
+  creadoDesde: z.coerce.date().optional(),
+  creadoHasta: z.coerce.date().optional(),
   limit: z.coerce.number().int().positive().max(500).default(100),
   offset: z.coerce.number().int().nonnegative().default(0),
 });
@@ -471,8 +476,8 @@ export async function registerRutasRoutes(
 
   /** Cuantos hay en cada vista: son las tarjetas de arriba de la pantalla. */
   app.get('/admin/rutas/vistas', async (request) => {
-    const query = z.object({ loteId: z.string().optional() }).parse(request.query ?? {});
-    const grupos = await repos.rutas.resumenSolicitudes(query.loteId);
+    const query = z.object({ loteId: z.string().optional(), creadoDesde: z.coerce.date().optional(), creadoHasta: z.coerce.date().optional() }).parse(request.query ?? {});
+    const grupos = await repos.rutas.resumenSolicitudes(query.loteId, { creadoDesde: query.creadoDesde, creadoHasta: query.creadoHasta });
     const cifras: Record<string, number> = Object.fromEntries(Object.keys(VISTAS).map((nombre) => [nombre, 0]));
     const sumar = (nombre: string, n: number) => { cifras[nombre] = (cifras[nombre] ?? 0) + n; };
     for (const grupo of grupos) {
@@ -488,6 +493,7 @@ export async function registerRutasRoutes(
       if (grupo.estado === 'derivado') sumar('derivados', n);
       if (grupo.estado === 'supervision') sumar('supervision', n);
       if (grupo.requiereHumano) sumar('requieren_persona', n);
+      if (grupo.incidencia === 'pide_baja' || grupo.incidencia === 'pide_borrar_datos') sumar('privacidad', n);
     }
     return { cifras, nombres: NOMBRES_VISTA };
   });

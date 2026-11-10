@@ -193,7 +193,7 @@ ${tablaCampos(CAMPOS_FLUJO)}
   { clave: 'empezar', titulo: 'Puesta en marcha', cuerpo: `<ol><li>Conecta el número en <a href="/setup">Conexión WhatsApp</a>.</li>
 <li>Crea la API Key para GSG en <a href="/api-gsgchat#t-claves">Nuestra API</a> y pon la de GSG en <a href="/conexion-gsg">Conexión con GSG</a>.</li>
 <li>Revisa el horario y los mensajes en <a href="/automatizacion-gsg#ajustes">Pedidos GSG → Ajustes de chat</a>.</li>
-<li>Comprueba en el <a href="/panel#inicio">Dashboard</a> que WhatsApp, la API y GSG salen conectados.</li></ol>` },
+<li>Comprueba en el <a href="/panel#inicio">Inicio</a> que WhatsApp, la API y GSG salen conectados.</li></ol>` },
   { clave: 'hoy', titulo: 'Pedidos y ubicación', cuerpo: '<p>Se solicita ubicación hasta tres veces por cliente. Un pin o enlace válido se registra y se devuelve a GSG con tracking, latitud y longitud. Los errores y pedidos sin respuesta quedan visibles para atención humana. Se puede corregir o reintentar desde <a href="/hoy">Pedidos GSG</a>.</p>' },
   { clave: 'automatizacion-gsg', titulo: 'Solicitud de ubicación y ajustes de chat', cuerpo: `<p>En <a href="/automatizacion-gsg">Pedidos GSG → Solicitud de ubicación</a> se ve a quién se le está pidiendo la ubicación y en qué punto va cada uno.</p>
 <p>En <a href="/automatizacion-gsg#ajustes">Ajustes de chat</a> se configura:</p>

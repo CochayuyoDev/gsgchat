@@ -33,6 +33,7 @@ import { createEntregasRepo, type EntregasRepo } from '../entregas/repo.js';
 import { createProcesosRepo, type ProcesosRepo } from '../procesos/repo.js';
 import { crearReportadosRepo, type ReportadosRepo } from '../entregas/reportados.js';
 import { crearMensajesGsgRepo, type MensajesGsgRepo } from './mensajes-gsg.js';
+import { crearPrivacidadRepo, type PrivacidadRepo } from '../privacidad/repo.js';
 import { crearChatEtiquetasRepo, type ChatEtiquetasRepo } from './chat-etiquetas.js';
 import type { ComoSeDecidio, DecisionBot, IntencionGsg, NuevaDecision } from '../ia/decision.js';
 
@@ -649,6 +650,8 @@ export interface Repos {
   mensajesGsg?: MensajesGsgRepo;
   /** Las etiquetas que la IA pone a las conversaciones del dia en Chats (migracion 013). Ver src/chat/etiquetar.ts. */
   chatEtiquetas?: ChatEtiquetasRepo;
+  /** Lo que el cliente pide sobre sus datos (BAJA, borrarlos) y el borrado (migracion 020). Ver src/privacidad. */
+  privacidad?: PrivacidadRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -2080,6 +2083,7 @@ export function createRepos(pool: Pool): Repos {
     reportados: crearReportadosRepo(pool),
     mensajesGsg: crearMensajesGsgRepo(pool),
     chatEtiquetas: crearChatEtiquetasRepo(pool),
+    privacidad: crearPrivacidadRepo(pool),
     desarrollador: createDesarrolladorRepo(pool),
     procesos: createProcesosRepo(pool),
     decisiones,

@@ -83,6 +83,8 @@ export type GateCode =
   // ninguna linea habilitada, conectada y con cupo diario / la linea elegida llego a su maximo diario
   | 'sin_lineas_disponibles'
   | 'limite_diario'
+  // la linea elegida a mano esta en pausa por el modo de Conexion (normal / API / los dos)
+  | 'linea_fuera_de_modo'
   | 'opt_out'
   | 'no_opt_in'
   | 'number_paused'

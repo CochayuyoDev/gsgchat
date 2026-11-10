@@ -12,6 +12,7 @@ import type { Config } from '../config.js';
 import { normalizePhone, type Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import { providerOf, type SettingsService } from '../settings/service.js';
+import { admiteTipo, MODO_LINEAS_POR_DEFECTO, tipoDeProveedor, type ModoLineas } from '../whatsapp/modo-lineas.js';
 import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { alcanceChat } from '../web/alcance-chat.js';
@@ -512,15 +513,26 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   // ------------------------------------------------------------ lineas
 
   /** Lo que la pantalla sabe de una linea: rotulo, estado y lo que su proveedor permite. */
-  const vistaDeLinea = (l: import('../whatsapp/lineas.js').Linea) => ({
-    id: l.id,
-    etiqueta: l.etiqueta,
-    numero: l.telefono,
-    estado: l.estado,
-    principal: l.principal,
-    proveedor: l.proveedor,
-    puede: capacidadesDelChat(l.proveedor),
-  });
+  const vistaDeLinea = (l: import('../whatsapp/lineas.js').Linea, modo: ModoLineas = MODO_LINEAS_POR_DEFECTO) => {
+    // Normal o API (la principal, la que diga /setup) y si el modo de Conexion la deja en uso.
+    const tipo = tipoDeProveedor(l.principal ? providerOf(settings.current()) : l.proveedor);
+    return {
+      id: l.id,
+      etiqueta: l.etiqueta,
+      numero: l.telefono,
+      estado: l.estado,
+      principal: l.principal,
+      proveedor: l.proveedor,
+      tipo,
+      enUso: admiteTipo(modo, tipo),
+      puede: capacidadesDelChat(l.proveedor),
+    };
+  };
+  /** Las vistas de varias lineas con el modo vigente (una sola lectura). */
+  const vistasDeLineas = async (ls: import('../whatsapp/lineas.js').Linea[]) => {
+    const modo = (await deps.lineas?.modo?.().catch(() => null)) ?? MODO_LINEAS_POR_DEFECTO;
+    return ls.map((l) => vistaDeLinea(l, modo));
+  };
 
   /** Las lineas con las que se puede responder (habilitadas), la principal primero. */
   const lineasActivas = async () => (deps.lineas ? (await deps.lineas.listar()).filter((l) => l.habilitada || l.principal) : []);
@@ -641,14 +653,29 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
         incluirApartados: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
         /** Solo los de esa etiqueta (codigo del catalogo, sin_clasificar o sin_etiquetar). */
         etiqueta: z.string().trim().regex(/^[a-z][a-z0-9_]{1,59}$/, 'etiqueta no válida').optional(),
+        /** Solo los que pidieron la baja o borrar sus datos y nadie lo atendió todavía. */
+        privacidad: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
       })
       .parse(request.query ?? {});
     const alcance = alcanceChat(request.usuario);
+    // Quien pidió la baja o borrar sus datos (pendiente): su chat lleva el estado en la lista.
+    const pendientesPrivacidad = await repos.privacidad?.pendientes(500).catch(() => []) ?? [];
+    const privacidadDe = new Map<string, string>();
+    for (const s of pendientesPrivacidad) if (!privacidadDe.has(s.phone) || s.tipo === 'borrar_datos') privacidadDe.set(s.phone, s.tipo);
     const comun = {
       unread: await repos.messages.unreadTotal(undefined, alcance),
       scopeId: request.usuario?.chatSesion?.sid ?? 'api',
       vistaDesde: request.usuario?.chatSesion?.desde.toISOString() ?? null,
+      privacidadPendientes: privacidadDe.size,
     };
+    if (query.privacidad) {
+      const filtradas = (await conversacionesConEtiqueta(query, alcance))
+        .filter((c) => privacidadDe.has(c.phone))
+        .map((c) => ({ ...c, privacidad: privacidadDe.get(c.phone) ?? null }));
+      const pagina = filtradas.slice(query.offset, query.offset + query.limit);
+      const hay = filtradas.length > query.offset + query.limit;
+      return responderLectura(request, reply, { items: pagina, hasMore: hay, siguienteOffset: hay ? query.offset + query.limit : null, total: filtradas.length, ...comun });
+    }
     if (query.etiqueta) {
       // Se filtra en el servidor sobre TODA la bandeja, no sobre la pagina cargada.
       const filtradas = (await conversacionesConEtiqueta(query, alcance)).filter((c) => pasaEtiqueta(c.etiqueta, query.etiqueta!));
@@ -664,14 +691,14 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const porId = new Map((await lineasActivas()).map((l) => [l.id, l]));
     const conLinea = pagina.map((c) => {
       const m = c.lastMessage;
-      const base = { ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone) };
+      const base = { ...c, etiqueta: c.tipo === 'grupo' ? null : etiqueta(c.phone), privacidad: privacidadDe.get(c.phone) ?? null };
       if (!m?.lineaId) return { ...base, linea: null };
       const viva = porId.get(m.lineaId);
       return { ...base, linea: { id: m.lineaId, etiqueta: viva?.etiqueta ?? m.lineaEtiqueta ?? '', numero: viva?.telefono || m.lineaNumero || '' } };
     });
     return responderLectura(request, reply, {
       items: conLinea,
-      lineas: (await lineasActivas()).map(vistaDeLinea),
+      lineas: await vistasDeLineas(await lineasActivas()),
       hasMore: items.length > query.limit,
       siguienteOffset: items.length > query.limit ? query.offset + query.limit : null,
       ...comun,
@@ -709,7 +736,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
    * cuantas conversaciones guardadas tiene. Solo lectura.
    */
   /** Las lineas con las que se puede responder, para el selector del chat y los rotulos. */
-  app.get('/admin/chat/lineas', async () => ({ lineas: (await lineasActivas()).map(vistaDeLinea) }));
+  app.get('/admin/chat/lineas', async () => ({ lineas: await vistasDeLineas(await lineasActivas()) }));
 
   app.get<{ Params: { contactId: string } }>('/admin/chat/:contactId/ficha', async (request, reply) => {
     const alcance = alcanceChat(request.usuario);
@@ -729,7 +756,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       entrega = null;
     }
     const guardadas = 0;
+    const privacidad = contact.tipo === 'grupo' ? [] : await repos.privacidad?.pendientesDe(contact.phone).catch(() => []) ?? [];
     return {
+      privacidad: privacidad.map((s) => ({ id: s.id, tipo: s.tipo, texto: s.texto, como: s.como, createdAt: s.createdAt })),
       contacto: { id: contact.id, phone: contact.phone, name: contact.name, tipo: contact.tipo ?? 'persona', optInAt: contact.optInAt, optOutAt: contact.optOutAt, lastInboundAt: contact.lastInboundAt, botPausadoAt: contact.botPausadoAt ?? null, iaCerradaAt: contact.iaCerradaAt ?? null },
       ubicacion: ubicacion ? { lat: ubicacion.lat, lng: ubicacion.lng, mapa: `https://www.google.com/maps/search/?api=1&query=${ubicacion.lat},${ubicacion.lng}` } : null,
       entrega,
@@ -781,7 +810,17 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     const activas = await lineasActivas();
     const lineaId = await lineaPorDefecto(contact.id, activas);
     const puede = capacidadesDelChat(await proveedorDeLinea(lineaId));
-    const lineasVista = activas.map(vistaDeLinea);
+    const lineasVista = await vistasDeLineas(activas);
+    // La ventana de 24 h solo obliga si lo escrito saldria por la API: con una
+    // linea normal en uso y conectada, el texto libre sale por ella (ver el sender).
+    const ventanaEnEsteChat = (() => {
+      if (!deps.lineas || !lineasVista.length) return ventanaObliga();
+      if (lineasVista.some((l) => l.tipo === 'normal' && l.enUso && l.estado === 'conectado')) return false;
+      const suya = lineasVista.find((l) => l.id === lineaId);
+      if (suya) return suya.tipo === 'api';
+      const enUso = lineasVista.filter((l) => l.enUso);
+      return enUso.length ? enUso.every((l) => l.tipo === 'api') : ventanaObliga();
+    })();
 
     if (contact.tipo === 'grupo') {
       return responderLectura(request, reply, {
@@ -808,10 +847,10 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       reparto,
       windowOpen,
       // Lo que el operador puede escribir ahora mismo, y por que.
-      canWrite: (windowOpen || !ventanaObliga()) && !contact.optOutAt,
+      canWrite: (windowOpen || !ventanaEnEsteChat) && !contact.optOutAt,
       blockedReason: contact.optOutAt
         ? 'el contacto se dio de baja'
-        : windowOpen || !ventanaObliga()
+        : windowOpen || !ventanaEnEsteChat
           ? null
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
       messages: pagina,

@@ -13,6 +13,7 @@ import type { Pool } from '../db/pool.js';
 import { decrypt, encrypt } from '../settings/crypto.js';
 import type { Provider } from '../settings/service.js';
 import { validarLimiteDiario } from './limite-diario.js';
+import { CLAVE_MODO_LINEAS, esModoLineas, MODO_LINEAS_POR_DEFECTO, type ModoLineas } from './modo-lineas.js';
 
 export const MAX_LINEAS = 8;
 export const ID_LINEA_PRINCIPAL = '00000000-0000-0000-0000-000000000001';
@@ -43,6 +44,9 @@ export interface CredencialesLinea {
   wahaUrl?: string;
   wahaApiKey?: string;
   wahaSession?: string;
+  /** Solo la API oficial: con que se firma y se verifica el webhook de Meta de esta linea. */
+  appSecret?: string;
+  verifyToken?: string;
 }
 
 export class LineasError extends Error {
@@ -121,6 +125,11 @@ export interface ServicioLineas {
   preferida?(): Promise<string>;
   /** Fija la principal de uso. Solo una linea que exista y este habilitada. */
   fijarPreferida?(id: string): Promise<Linea>;
+  /** Que lineas usa la tienda: normales, API o las dos (ver src/whatsapp/modo-lineas.ts). */
+  modo?(): Promise<ModoLineas>;
+  fijarModo?(modo: ModoLineas): Promise<ModoLineas>;
+  /** Cambia las credenciales de una linea que no es la principal (las que falten se conservan). */
+  fijarCredenciales?(id: string, credenciales: CredencialesLinea): Promise<Linea>;
 }
 
 /** No empieza por `whatsapp.`: esas claves las lee el servicio de ajustes como credenciales. */
@@ -168,8 +177,54 @@ export function crearServicioLineas(pool: Pool, claveCifrado: Buffer, base: stri
     return preferidaGuardada;
   }
 
+  // Igual que la preferida: se consulta en cada envio y solo lo cambia este servicio.
+  let modoGuardado: ModoLineas | undefined;
+  async function leerModo(): Promise<ModoLineas> {
+    if (modoGuardado) return modoGuardado;
+    try {
+      const { rows } = await pool.query<{ value: string }>('select value from settings where `key` = $1', [CLAVE_MODO_LINEAS]);
+      const valor = rows[0]?.value?.trim();
+      modoGuardado = esModoLineas(valor) ? valor : MODO_LINEAS_POR_DEFECTO;
+    } catch {
+      return MODO_LINEAS_POR_DEFECTO;
+    }
+    return modoGuardado;
+  }
+
   return {
     obtener,
+
+    modo: leerModo,
+
+    async fijarModo(modo) {
+      if (!esModoLineas(modo)) throw new LineasError('proveedor', 'Ese modo no existe.');
+      await pool.query(
+        `insert into settings (\`key\`, value, encrypted, updated_at) values ($1,$2,false,now(3))
+         on duplicate key update value = values(value), updated_at = now(3)`,
+        [CLAVE_MODO_LINEAS, modo],
+      );
+      modoGuardado = modo;
+      return modo;
+    },
+
+    async fijarCredenciales(id, nuevas) {
+      const linea = await exigir(id);
+      if (linea.principal) throw new LineasError('principal', 'Las credenciales de la línea principal se cambian en su tarjeta de Conexión.');
+      const limpias = Object.fromEntries(Object.entries(nuevas).filter(([, v]) => typeof v === 'string' && v.trim() !== '')) as CredencialesLinea;
+      const actuales = await leerCredenciales(id);
+      const juntas: CredencialesLinea = { ...actuales, ...limpias };
+      const idExterno = linea.proveedor === 'cloud' ? juntas.phoneNumberId ?? linea.idExterno : linea.proveedor === 'waha' ? juntas.wahaSession ?? linea.idExterno : null;
+      if (idExterno && idExterno !== linea.idExterno) {
+        const repetida = await pool.query('select 1 from whatsapp_numbers where provider = $1 and external_id = $2 and id <> $3 limit 1', [linea.proveedor, idExterno, id]);
+        if (repetida.rowCount) throw new LineasError('duplicada', 'Ese número ya está registrado en otra línea.');
+      }
+      await pool.query('update whatsapp_numbers set credentials = $2, external_id = $3, updated_at = now(3) where id = $1', [
+        id,
+        encrypt(JSON.stringify(juntas), claveCifrado),
+        idExterno ?? null,
+      ]);
+      return exigir(id);
+    },
 
     async preferida() {
       const id = await leerPreferida();
@@ -302,16 +357,18 @@ export function crearServicioLineas(pool: Pool, claveCifrado: Buffer, base: stri
       await pool.query('delete from whatsapp_numbers where id = $1', [id]);
     },
 
-    async credenciales(id) {
-      const { rows } = await pool.query<{ credentials: string | null }>('select credentials from whatsapp_numbers where id = $1', [id]);
-      const guardado = rows[0]?.credentials;
-      if (!guardado) return {};
-      try {
-        return JSON.parse(decrypt(guardado, claveCifrado)) as CredencialesLinea;
-      } catch {
-        // Clave rotada o dato corrupto: se trata como sin credenciales, no se tumba el arranque.
-        return {};
-      }
-    },
+    credenciales: leerCredenciales,
   };
+
+  async function leerCredenciales(id: string): Promise<CredencialesLinea> {
+    const { rows } = await pool.query<{ credentials: string | null }>('select credentials from whatsapp_numbers where id = $1', [id]);
+    const guardado = rows[0]?.credentials;
+    if (!guardado) return {};
+    try {
+      return JSON.parse(decrypt(guardado, claveCifrado)) as CredencialesLinea;
+    } catch {
+      // Clave rotada o dato corrupto: se trata como sin credenciales, no se tumba el arranque.
+      return {};
+    }
+  }
 }

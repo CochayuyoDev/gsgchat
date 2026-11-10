@@ -21,6 +21,9 @@ export type IntencionGsg =
   | 'estado_pedido'
   | 'direccion_escrita'
   | 'no_soy_yo'
+  /** Pidió que no le escriban más / que borren sus datos: lo atiende una persona (src/privacidad). */
+  | 'pedir_baja'
+  | 'borrar_datos'
   | 'acuse'
   | 'ajena'
   | 'sin_texto'
@@ -37,6 +40,8 @@ export const NOMBRE_INTENCION: Record<IntencionGsg, string> = {
   estado_pedido: 'estado u hora del pedido',
   direccion_escrita: 'dirección escrita',
   no_soy_yo: 'no es la persona del pedido',
+  pedir_baja: 'pidió la baja (no recibir más mensajes)',
+  borrar_datos: 'pidió borrar sus datos',
   acuse: 'acuse (ok, gracias)',
   ajena: 'fuera del servicio',
   sin_texto: 'sticker, reacción o archivo sin texto',

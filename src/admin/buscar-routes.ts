@@ -79,6 +79,7 @@ export const MOTIVOS_EN_PALABRAS: Record<string, string> = {
   sin_conexion: 'WhatsApp no estaba conectado en ese momento.',
   sin_lineas_disponibles: 'No había números vinculados habilitados con cupo disponible.',
   limite_diario: 'La línea elegida había llegado a su máximo de mensajes por día.',
+  linea_fuera_de_modo: 'La línea elegida estaba en pausa por el modo de Conexión (solo WhatsApp normal o solo API) y el chat ya estaba cerrado.',
   opt_out: 'El equipo lo dio de baja: no recibe más mensajes.',
   no_opt_in: 'El cliente no dio su consentimiento para recibir mensajes iniciados por el negocio.',
   number_paused: 'Los envíos del número estaban pausados.',

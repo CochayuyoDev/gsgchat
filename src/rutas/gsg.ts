@@ -180,7 +180,7 @@ const MOTIVOS_GSG: Record<string, MotivoGsg> = {
   numero_corto: 'TELEFONO_MAL', numero_largo: 'TELEFONO_MAL', numero_invalido: 'TELEFONO_MAL', numero_fijo: 'TELEFONO_MAL',
   sin_whatsapp: 'TELEFONO_MAL', telefono_invalido: 'TELEFONO_MAL', telefono_de_motorizado: 'TELEFONO_MAL',
   numero_equivocado: 'NO_RECONOCE_PEDIDO', no_soy_yo: 'NO_RECONOCE_PEDIDO',
-  rechaza_contacto: 'RECHAZA',
+  rechaza_contacto: 'RECHAZA', pide_baja: 'RECHAZA',
   ubicacion_fuera_de_zona: 'DIRECCION_MAL',
   cambio_ubicacion: 'DIRECCION_MAL',
 };

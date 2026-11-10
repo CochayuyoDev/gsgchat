@@ -22,7 +22,8 @@ import { esComandoCambioUbicacion, type ResultadoComandoCambio } from '../entreg
 import type { Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
-import type { WhatsAppClient } from '../whatsapp/client.js';
+import { createWhatsAppClient, type WhatsAppClient } from '../whatsapp/client.js';
+import { tipoDeProveedor } from '../whatsapp/modo-lineas.js';
 import { createSeenCache, processChange, type WebhookDeps } from '../whatsapp/webhook.js';
 import type { StokyClient } from '../stoky/client.js';
 import { mediaDirectory } from '../whatsapp/local/media.js';
@@ -377,7 +378,19 @@ export async function registerLocalRoutes(
       });
     }
 
-    await registerLineasRoutes(app, { lineas, registro, arrancarLinea, reparto: deps.repartoLineas });
+    await registerLineasRoutes(app, {
+      lineas,
+      registro,
+      arrancarLinea,
+      reparto: deps.repartoLineas,
+      tipoDe: (linea) => tipoDeProveedor(linea.principal ? providerOf(settings.current()) : linea.proveedor),
+      // Se pregunta a Meta por el numero: si contesta, el token y el id valen.
+      probarApi: async (cred) => {
+        const info = await createWhatsAppClient({ ...cred, graphVersion: config.GRAPH_API_VERSION }).getPhoneNumber();
+        return { numero: info.displayPhoneNumber.replace(/\D+/g, ''), nombre: info.verifiedName };
+      },
+      webhookUrl: () => `${config.PUBLIC_BASE_URL.replace(/\/+$/, '')}/webhooks/whatsapp`,
+    });
     await registerLineasLimitesRoutes(app, { lineas, uso: repos.usoLineas, salud: crearSaludDeLineas({ lineas, registro }) });
   }
 

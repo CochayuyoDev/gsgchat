@@ -73,19 +73,26 @@ const CSS = `${REPARTO_CSS}
   .demo, .aviso { margin-bottom: var(--esp-3); flex-wrap: wrap; }
   .demo a, .aviso a { font-weight: 700; }
 
-  .barra { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; padding: var(--esp-3); margin-bottom: var(--esp-3); }
-  .barra .sep { flex: 1; }
-  .barra label { font-size: var(--fs-small); color: var(--texto-suave); }
+  /* La barra de arriba: qué se mira (día y lote) a la izquierda, qué se hace
+     (cargar, pausar, empezar) a la derecha, y debajo cuánto va. */
+  .barra { display: grid; gap: 0; padding: 0; margin-bottom: var(--esp-3); overflow: hidden; }
+  .barra-fila { display: flex; align-items: center; gap: var(--esp-3) var(--esp-4); flex-wrap: wrap; padding: 12px 16px; }
+  .barra-fila .sep { flex: 1; }
+  .barra-grupo { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; min-width: 0; }
+  .barra-etq { font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); }
+  .barra select { min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; max-width: 260px; }
+  .barra-acciones .btn { flex: none; }
 
   .wrap textarea { width: 100%; min-height: 150px; font-family: var(--mono); font-size: 13px; }
-  .barra select { min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; }
 
   /* Cuánto va y qué está haciendo el motor: la única cifra grande. */
-  .progreso { display: flex; align-items: center; gap: var(--esp-3); flex-wrap: wrap; margin-bottom: var(--esp-3); }
+  .progreso { display: flex; align-items: center; gap: var(--esp-2) var(--esp-4); flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--borde); background: var(--superficie-2); }
+  .progreso:empty { display: none; }
   .cifra { border: 0; background: transparent; padding: 0; color: var(--texto-suave); font-size: var(--fs-small); text-align: left; cursor: pointer; }
-  .cifra b { color: var(--texto); font-size: 21px; font-weight: 700; }
+  .cifra b { color: var(--texto); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cifra-cuando { color: var(--primario); font-weight: 600; }
   .cifra:hover b { color: var(--primario); }
-  .progreso-barra { flex: 1; min-width: 180px; height: 8px; border-radius: 999px; background: var(--superficie-2); overflow: hidden; }
+  .progreso-barra { flex: 1; min-width: 180px; height: 8px; border-radius: 999px; background: var(--borde); overflow: hidden; }
   .progreso-barra > span { display: block; height: 100%; background: var(--verde);  }
   .motor { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-small); color: var(--texto-suave); }
   .motor .punto { width: 9px; height: 9px; border-radius: 50%; background: var(--gris-claro); flex: none; }
@@ -112,7 +119,7 @@ const CSS = `${REPARTO_CSS}
   .filtro.urge[aria-pressed="true"] { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
 
   .cols { display: grid; grid-template-columns: 1fr 380px; gap: var(--esp-3); align-items: start; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 
   /* Las cajas son la .tarjeta del armazón, pero con cabecera propia: el
      relleno lo pone cada zona, no la tarjeta. */
@@ -135,13 +142,16 @@ const CSS = `${REPARTO_CSS}
   td b { font-weight: 600; }
   td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
   .tabla-scroll { max-height: 62vh; overflow: auto; }
-  .filtro-dia { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--borde); }
+  .filtro-lista { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--borde); }
   .fd-fila { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .fd-fila #buscar { flex: 1 1 260px; max-width: 380px; min-height: var(--alto-control-sm); }
-  .fd-fila .s-segmento { flex: none; }
-  .fd-fila #f-estado { flex: 0 1 210px; min-height: var(--alto-control-sm); }
+  .fd-fila #buscar { flex: 1 1 260px; min-height: var(--alto-control-sm); }
+  .fd-fila #f-mas { flex: none; }
+  .fd-cuantos { color: var(--primario); font-weight: 700; }
+  .fd-cuantos:empty { display: none; }
+  .fd-limpiar { align-self: end; justify-self: start; }
   .fd-resumen button { border: 0; background: none; color: var(--primario); font: inherit; font-weight: 600; cursor: pointer; padding: 0; text-decoration: underline; }
-  .fd-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; padding: 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
+  .fd-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; padding: 12px 16px; border-top: 1px solid var(--borde); background: var(--superficie); }
+  .barra-mas[aria-expanded="true"] { border-color: var(--primario); color: var(--primario); background: var(--primario-suave); }
   .fd-campos[hidden] { display: none; }
   .fd-campos label { display: grid; gap: 4px; font-size: var(--fs-micro); color: var(--texto-suave); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
   .fd-campos input, .fd-campos select { width: 100%; min-height: var(--alto-control-sm); font-weight: 400; font-size: 13.5px; color: var(--texto); text-transform: none; letter-spacing: 0; }
@@ -186,7 +196,7 @@ const CSS = `${REPARTO_CSS}
   .aj .aj-guardar-barra { position: sticky; bottom: 0; margin-top: 14px; padding: 12px 0; background: var(--superficie); border-top: 1px solid var(--borde); z-index: 2; justify-content: flex-end; }
   .aj .aj-guardar-barra #aj-estado { order: -1; margin-right: auto; flex: 1 1 auto; }
   .aj .aj-guardar-barra #aj-guardar { order: 2; min-width: 120px; }
-  @media (max-width: 860px) { .aj .aj-bloques { grid-template-columns: 1fr; } .aj .aj-que { margin-left: 0; } }
+  @media (max-width: 860px) { .aj .aj-bloques { grid-template-columns: minmax(0, 1fr); } .aj .aj-que { margin-left: 0; } }
   .aj .aj-frase { margin: 0; line-height: 2.1; font-size: var(--fs-cuerpo); }
   .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
   .aj .paso { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-2); background: var(--superficie-2); }
@@ -211,7 +221,7 @@ const CSS = `${REPARTO_CSS}
   .aj-editor-inicial .aj-ei-datos { display: flex; flex-wrap: wrap; gap: 6px; }
   .aj-editor-inicial .aj-ei-datos button { border: 1px solid var(--borde); background: var(--superficie-2); color: inherit; font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
   .aj-editor-inicial .aj-ei-datos button:hover, .aj-editor-inicial .aj-ei-datos button:focus-visible { border-color: var(--primario); color: var(--primario); }
-  @media (max-width: 760px) { .aj-editor-inicial .aj-ei-cols { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .aj-editor-inicial .aj-ei-cols { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 900px) { #aj-pasos-adicionales .paso { grid-template-columns: minmax(0, 1fr); } }
   .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
   .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
@@ -237,11 +247,20 @@ const CSS = `${REPARTO_CSS}
   .aj-tiempo-control select { max-width: 120px; }
   .aj-fin { margin: 13px 0 0; padding-top: 11px; border-top: 1px solid var(--borde); }
   .aj-seccion .aj-titulo { margin-top: 0; }
-  @media (max-width: 780px) { .aj-tiempo-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 780px) { .aj-tiempo-grid { grid-template-columns: minmax(0, 1fr); } }
 
   /* De pie y con una mano: la tabla deja de ser tabla y cada cliente es una
      ficha que se lee de arriba abajo. */
   @media (max-width: 680px) {
+    /* La barra de arriba, de pie: el día ocupa el ancho y los botones van en su fila. */
+    .barra-fila { gap: 10px; padding: 12px; }
+    .barra-fila .sep { display: none; }
+    .barra-grupo { flex: 1 1 100%; }
+    .barra-grupo select { flex: 1; max-width: none; }
+    .barra-acciones .btn { flex: 1 1 auto; }
+    .barra-mas { flex: 1 1 100%; }
+    .fd-campos { padding: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .progreso { padding: 10px 12px; }
     .panel > h2 { flex-wrap: wrap; }
     .panel > h2 input { max-width: none; flex: 1 1 100%; order: 3; }
     .panel > h2 .btn { order: 4; }
@@ -284,13 +303,42 @@ export function rutasPage(opts: RutasOpts): string {
   ${bandaDemo}
   ${aviso}
 
-  <div class="tarjeta barra">
-    <label for="lote">Lote</label>
-    <select id="lote" aria-label="Elegir el lote que se mira"></select>
-    <button type="button" class="btn primario sm" id="arrancar">Empezar a pedir</button>
-    <button type="button" class="btn sm" id="pausar">Pausar</button>
-    <span class="sep"></span>
-    <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
+  <!-- La barra de arriba manda sobre toda la pantalla: el día y el lote
+       recortan el avance, los contadores y la lista a la vez. -->
+  <div class="tarjeta barra" id="barra">
+    <div class="barra-fila">
+      <div class="barra-grupo">
+        <span class="barra-etq" id="etq-dia">Día</span>
+        <div class="s-segmento" role="group" aria-labelledby="etq-dia" id="filtro-dia">
+          <button type="button" class="seg activo" data-rango="hoy" aria-pressed="true">Hoy</button>
+          <button type="button" class="seg" data-rango="ayer" aria-pressed="false">Ayer</button>
+          <button type="button" class="seg" data-rango="semana" aria-pressed="false">7 días</button>
+          <button type="button" class="seg" data-rango="todos" aria-pressed="false">Todos</button>
+        </div>
+      </div>
+      <div class="barra-grupo">
+        <label class="barra-etq" for="lote">Lote</label>
+        <select id="lote" aria-label="Elegir el lote que se mira"></select>
+      </div>
+      <button type="button" class="btn sm barra-mas" id="f-mas" aria-expanded="false" aria-controls="f-campos">Más filtros <span class="fd-cuantos" id="f-cuantos"></span></button>
+      <span class="sep"></span>
+      <div class="barra-grupo barra-acciones">
+        <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
+        <button type="button" class="btn sm" id="pausar">Pausar</button>
+        <button type="button" class="btn primario sm" id="arrancar">Empezar a pedir</button>
+      </div>
+    </div>
+    <!-- Más filtros: fechas exactas (cambian todo, como el día) y hora, distrito y estado (afinan la lista). -->
+    <div class="fd-campos" id="f-campos" hidden>
+      <label>Fecha desde <input type="date" id="f-desde"></label>
+      <label>Fecha hasta <input type="date" id="f-hasta"></label>
+      <label>Hora desde <input type="time" id="f-hora-desde"></label>
+      <label>Hora hasta <input type="time" id="f-hora-hasta"></label>
+      <label>Distrito <select id="f-distrito"><option value="">Todos</option></select></label>
+      <label>Estado <select id="f-estado"><option value="">Todos los estados</option></select></label>
+      <button type="button" class="btn sm fd-limpiar" id="f-limpiar">Quitar estos filtros</button>
+    </div>
+    <div class="progreso" id="progreso" role="status"></div>
   </div>
 
   <!-- Ajustes de chat: cómo se le escribe al cliente (horario, ritmo, insistencia y textos) -->
@@ -390,8 +438,7 @@ export function rutasPage(opts: RutasOpts): string {
     </div>
   </div>
 
-  <div class="progreso" id="progreso" role="status"></div>
-  <div class="filtros" id="filtros"></div>
+  <div class="filtros" id="filtros" role="group" aria-label="Qué clientes ver"></div>
 
   <div class="cols">
     <div class="tarjeta panel">
@@ -400,24 +447,9 @@ export function rutasPage(opts: RutasOpts): string {
         <span class="sep"></span>
         <button type="button" class="btn sm" id="csv">Descargar CSV</button>
       </h2>
-      <div class="filtro-dia" id="filtro-dia">
+      <div class="filtro-lista">
         <div class="fd-fila">
           <input id="buscar" type="search" placeholder="Buscar cliente, tracking o celular" aria-label="Buscar cliente, tracking o celular">
-          <div class="s-segmento" role="group" aria-label="Día">
-            <button type="button" class="seg activo" data-rango="hoy" aria-pressed="true">Hoy</button>
-            <button type="button" class="seg" data-rango="ayer" aria-pressed="false">Ayer</button>
-            <button type="button" class="seg" data-rango="semana" aria-pressed="false">7 días</button>
-            <button type="button" class="seg" data-rango="todos" aria-pressed="false">Todos</button>
-          </div>
-          <select id="f-estado" aria-label="Estado"><option value="">Todos los estados</option></select>
-          <button type="button" class="btn sm" id="f-mas" aria-expanded="false" aria-controls="f-campos">Más filtros</button>
-        </div>
-        <div class="fd-campos" id="f-campos" hidden>
-          <label>Fecha desde <input type="date" id="f-desde"></label>
-          <label>Fecha hasta <input type="date" id="f-hasta"></label>
-          <label>Hora desde <input type="time" id="f-hora-desde"></label>
-          <label>Hora hasta <input type="time" id="f-hora-hasta"></label>
-          <label>Distrito <select id="f-distrito"><option value="">Todos</option></select></label>
         </div>
         <p class="muted fd-resumen" id="f-resumen" role="status"></p>
       </div>
@@ -485,6 +517,7 @@ var listasPegadas = 0;   /* filas utiles que dijo la ultima revision de lo pegad
  */
 var FILTROS = [
   { vista: 'requieren_persona', clase: 'urge' },
+  { vista: 'privacidad', clase: 'urge', soloSiHay: true },
   { vista: 'sin_ubicacion' },
   { vista: 'pendientes' },
   { vista: 'esperando' },
@@ -559,11 +592,15 @@ function pintarProgreso(datos) {
   var cifras = lote ? lote.cifras : datos.cifras;
   var total = lote ? lote.total : Object.keys(cifras).reduce(function (suma, k) { return suma + cifras[k]; }, 0);
   var hechos = cifras.resuelto || 0;
+  /* Con los contadores ya cargados, el avance cuenta lo mismo que ellos:
+     el día y el lote de la barra. */
+  if (cifrasVista && cifrasVista.todos !== undefined) { total = cifrasVista.todos || 0; hechos = cifrasVista.resueltos || 0; }
   var porcentaje = total ? Math.round((hechos / total) * 100) : 0;
+  var cuando = textoDelRango();
 
   document.getElementById('progreso').innerHTML =
     '<button type="button" class="cifra" data-vista="resueltos" title="Ver a quiénes ya les llegó la ubicación">' +
-      '<b>' + hechos + '</b> de ' + total + ' con ubicación</button>' +
+      '<b>' + hechos + '</b> de ' + total + ' con ubicación' + (cuando ? ' <span class="cifra-cuando">' + esc(cuando) + '</span>' : '') + '</button>' +
     '<span class="progreso-barra"><span style="width:' + porcentaje + '%"></span></span>' +
     estadoDelMotor(datos.motor) +
     (datos.alertas.coordinador ? '' : '<span class="muted">Nadie recibe avisos por WhatsApp de los casos parados.</span>') +
@@ -643,7 +680,9 @@ function pintarGsg(datos) {
 /* --- filtros y lista --------------------------------------------------- */
 
 async function cargarFiltros() {
-  var data = await api('/admin/rutas/vistas' + (loteActual ? '?loteId=' + encodeURIComponent(loteActual) : ''));
+  var params = paramsDeRango();
+  if (loteActual) params.push('loteId=' + encodeURIComponent(loteActual));
+  var data = await api('/admin/rutas/vistas' + (params.length ? '?' + params.join('&') : ''));
   nombresVista = data.nombres;
   cifrasVista = data.cifras;
   var html = FILTROS.map(function (f) {
@@ -655,10 +694,12 @@ async function cargarFiltros() {
   }).join('');
   var caja = document.getElementById('filtros');
   if (caja.innerHTML !== html) caja.innerHTML = html;
+  /* El avance cuenta lo mismo que los contadores: el día y el lote elegidos. */
+  if (resumen) pintarProgreso(resumen);
 }
 
 async function cargarLista() {
-  var params = ['vista=' + encodeURIComponent(vista), 'limit=500'];
+  var params = ['vista=' + encodeURIComponent(vista), 'limit=500'].concat(paramsDeRango());
   if (loteActual) params.push('loteId=' + encodeURIComponent(loteActual));
   var q = document.getElementById('buscar').value.trim();
   /* Un celular se busca igual escrito con espacios, guiones, «+51» o sin nada. */
@@ -666,7 +707,8 @@ async function cargarLista() {
   if (qEnvio) params.push('q=' + encodeURIComponent(qEnvio));
 
   var data = await api('/admin/rutas/solicitudes?' + params.join('&'));
-  /* La lista muestra por defecto solo el día de hoy; lo anterior sigue guardado y se ve con las fechas. */
+  /* El día lo recorta el servidor (así las cifras y la lista cuentan lo mismo);
+     hora, distrito y estado se afinan aquí sobre lo que llegó. */
   var visibles = data.items.filter(pasaFiltroDia);
   llenarDistritos(data.items);
   document.getElementById('titulo-lista').textContent =
@@ -674,8 +716,8 @@ async function cargarLista() {
   var ocultos = data.items.length - visibles.length;
   var aviso = document.getElementById('f-resumen');
   if (ocultos > 0) {
-    aviso.innerHTML = esc(ocultos + (ocultos === 1 ? ' resultado queda' : ' resultados quedan')) + ' fuera de los filtros de día, hora, distrito o estado. <button type="button" id="f-ver-todos">Ver todos los días</button>';
-    document.getElementById('f-ver-todos').onclick = function () { aplicarRango('todos'); document.getElementById('f-estado').value = ''; cargarLista().catch(function () {}); };
+    aviso.innerHTML = esc(ocultos + (ocultos === 1 ? ' resultado queda' : ' resultados quedan')) + ' fuera de los filtros de hora, distrito o estado. <button type="button" id="f-ver-todos">Quitar esos filtros</button>';
+    document.getElementById('f-ver-todos').onclick = function () { limpiarFiltrosFinos(); cargarLista().catch(function () {}); };
   } else aviso.textContent = '';
   data = { items: visibles, total: data.total };
 
@@ -697,7 +739,7 @@ async function cargarLista() {
   pintarListaVacia(data.items.length, q);
 }
 
-/* --- filtro por día, hora y distrito (solo vista: los datos no se tocan) --- */
+/* --- filtros: el día lo aplica el servidor; hora, distrito y estado, la lista --- */
 function aIsoLocal(fecha) {
   var m = fecha.getMonth() + 1, d = fecha.getDate();
   return fecha.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
@@ -705,10 +747,6 @@ function aIsoLocal(fecha) {
 function pasaFiltroDia(s) {
   var f = new Date(s.createdAt || s.updatedAt || 0);
   if (isNaN(f.getTime())) return true;
-  var dia = aIsoLocal(f);
-  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value;
-  if (desde && dia < desde) return false;
-  if (hasta && dia > hasta) return false;
   var hm = (f.getHours() < 10 ? '0' : '') + f.getHours() + ':' + (f.getMinutes() < 10 ? '0' : '') + f.getMinutes();
   var h1 = document.getElementById('f-hora-desde').value, h2 = document.getElementById('f-hora-hasta').value;
   if (h1 && hm < h1) return false;
@@ -727,44 +765,97 @@ function llenarDistritos(items) {
   var html = '<option value="">Todos</option>' + vistos.map(function (v) { return '<option value="' + esc(v) + '">' + esc(v) + '</option>'; }).join('');
   if (lista.innerHTML !== html) { lista.innerHTML = html; lista.value = actual; }
 }
-var CAMPOS_DIA = ['f-desde', 'f-hasta', 'f-hora-desde', 'f-hora-hasta', 'f-distrito', 'f-estado'];
+/* Los filtros finos: no cambian las cifras de arriba, solo afinan la lista. */
+var CAMPOS_FINOS = ['f-hora-desde', 'f-hora-hasta', 'f-distrito', 'f-estado'];
 (function () {
   document.getElementById('f-estado').innerHTML = '<option value="">Todos los estados</option>' + Object.keys(ESTADOS).map(function (k) {
     return '<option value="' + k + '">' + esc(ESTADOS[k].texto) + '</option>';
   }).join('');
 })();
+
+/* El día se elige por la fecha en que entró el pedido, en la hora de este
+   equipo: «hoy» va de las 00:00 de hoy a las 00:00 de mañana. */
+function inicioDelDia(iso) {
+  var p = iso.split('-');
+  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+}
+function paramsDeRango() {
+  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value, params = [];
+  if (desde) params.push('creadoDesde=' + encodeURIComponent(inicioDelDia(desde).toISOString()));
+  if (hasta) {
+    var fin = inicioDelDia(hasta);
+    fin.setDate(fin.getDate() + 1);
+    params.push('creadoHasta=' + encodeURIComponent(fin.toISOString()));
+  }
+  return params;
+}
+var rangoActual = 'hoy';
+function textoDelRango() {
+  if (rangoActual === 'hoy') return 'hoy';
+  if (rangoActual === 'ayer') return 'ayer';
+  if (rangoActual === 'semana') return 'en los últimos 7 días';
+  if (rangoActual === 'todos') return '';
+  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value;
+  var corto = function (iso) { var p = iso.split('-'); return p[2] + '/' + p[1]; };
+  if (desde && hasta) return desde === hasta ? 'el ' + corto(desde) : 'del ' + corto(desde) + ' al ' + corto(hasta);
+  if (desde) return 'desde el ' + corto(desde);
+  if (hasta) return 'hasta el ' + corto(hasta);
+  return '';
+}
 function aplicarRango(rango) {
   var hoy = new Date(), desde = '', hasta = '';
   if (rango === 'hoy') { desde = hasta = aIsoLocal(hoy); }
-  else if (rango === 'ayer') { var a = new Date(hoy.getTime() - 86400000); desde = hasta = aIsoLocal(a); }
-  else if (rango === 'semana') { desde = aIsoLocal(new Date(hoy.getTime() - 6 * 86400000)); hasta = aIsoLocal(hoy); }
+  else if (rango === 'ayer') { var a = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1); desde = hasta = aIsoLocal(a); }
+  else if (rango === 'semana') { desde = aIsoLocal(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 6)); hasta = aIsoLocal(hoy); }
   document.getElementById('f-desde').value = desde;
   document.getElementById('f-hasta').value = hasta;
-  ['f-hora-desde', 'f-hora-hasta', 'f-distrito'].forEach(function (id) { document.getElementById(id).value = ''; });
   marcarRango(rango);
 }
 function marcarRango(rango) {
+  rangoActual = rango;
   document.querySelectorAll('#filtro-dia [data-rango]').forEach(function (b) {
     var on = b.getAttribute('data-rango') === rango;
     b.classList.toggle('activo', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
 }
+function limpiarFiltrosFinos() {
+  CAMPOS_FINOS.forEach(function (id) { document.getElementById(id).value = ''; });
+  contarFiltrosFinos();
+}
+/* «Más filtros (2)»: que se vea que hay algo puesto aunque esté plegado. */
+function contarFiltrosFinos() {
+  var n = CAMPOS_FINOS.filter(function (id) { return document.getElementById(id).value; }).length;
+  document.getElementById('f-cuantos').textContent = n ? '(' + n + ')' : '';
+}
+/* Cambiar el día cambia todo: el avance, los contadores y la lista. */
+function recargarPorDia() {
+  return cargarFiltros().then(cargarLista).catch(function (e) { toast(e.message); });
+}
 aplicarRango('hoy');
 document.getElementById('f-mas').onclick = function () {
   var caja = document.getElementById('f-campos'), abrir = caja.hidden;
   caja.hidden = !abrir;
   this.setAttribute('aria-expanded', abrir ? 'true' : 'false');
-  this.textContent = abrir ? 'Menos filtros' : 'Más filtros';
+  this.firstChild.textContent = abrir ? 'Menos filtros ' : 'Más filtros ';
 };
-CAMPOS_DIA.forEach(function (id) {
-  document.getElementById(id).addEventListener('change', function () { marcarRango(''); cargarLista().catch(function () {}); });
+document.getElementById('lista-vacia').addEventListener('click', function (ev) {
+  if (!ev.target.closest('[data-ver-todos-dias]')) return;
+  aplicarRango('todos');
+  recargarPorDia();
+});
+document.getElementById('f-limpiar').onclick =function () { limpiarFiltrosFinos(); cargarLista().catch(function () {}); };
+CAMPOS_FINOS.forEach(function (id) {
+  document.getElementById(id).addEventListener('change', function () { contarFiltrosFinos(); cargarLista().catch(function () {}); });
+});
+['f-desde', 'f-hasta'].forEach(function (id) {
+  document.getElementById(id).addEventListener('change', function () { marcarRango(''); recargarPorDia(); });
 });
 document.getElementById('filtro-dia').addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-rango]');
   if (!b) return;
   aplicarRango(b.getAttribute('data-rango'));
-  cargarLista().catch(function () {});
+  recargarPorDia();
 });
 
 /* El hueco cuando no hay nada: siempre dice qué hacer a continuación. */
@@ -783,6 +874,13 @@ function pintarListaVacia(cuantos, q) {
     return;
   }
   if (vista === 'todos') {
+    var cuando = textoDelRango();
+    if (cuando && rangoActual !== 'todos') {
+      caja.innerHTML = '<div class="vacio"><h3>No entró ningún pedido ' + esc(cuando) + '</h3>' +
+        '<p>Los de otros días siguen guardados.</p>' +
+        '<div class="acciones"><button type="button" class="btn" data-ver-todos-dias="1">Ver todos los días</button></div></div>';
+      return;
+    }
     caja.innerHTML = '<div class="vacio"><h3>Esta lista está vacía</h3>' +
       '<p>El lote elegido no tiene ningún cliente. Elige otro lote arriba o carga una lista nueva.</p></div>';
     return;

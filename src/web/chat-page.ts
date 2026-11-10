@@ -345,6 +345,7 @@ function pasaFiltro(c) {
   if (filtroLista === 'sin_leer') return c.unread > 0;
   if (filtroLista === 'esperan') return c.lastMessage && c.lastMessage.direction === 'in';
   if (filtroLista === 'ventana') return c.windowOpen;
+  if (filtroLista === 'privacidad') return Boolean(c.privacidad);
   return true;
 }
 
@@ -355,8 +356,10 @@ async function loadChats(keepScroll, anexar) {
     var offset = anexar ? offsetChats : 0;
     if (anexar) cargandoMasChats = true;
     var qs = '&incluirApartados=true&q=' + encodeURIComponent(document.getElementById('q').value.trim()) +
-      (filtroEtiqueta ? '&etiqueta=' + encodeURIComponent(filtroEtiqueta) : '');
+      (filtroEtiqueta ? '&etiqueta=' + encodeURIComponent(filtroEtiqueta) : '') +
+      (filtroLista === 'privacidad' ? '&privacidad=true' : '');
     var data = await api('/admin/chat/conversations?limit=30&offset=' + offset + qs);
+    privacidadPendientes = data.privacidadPendientes || 0;
     /* Al refrescar (no al anexar) se vuelve a pedir lo que ya estaba cargado: si solo
        se trajeran las primeras 30, la lista se acortaria y el scroll saltaria arriba. */
     var yaCargados = keepScroll && !anexar ? offsetChats : 0;
@@ -392,10 +395,14 @@ async function loadChats(keepScroll, anexar) {
 
     var box = document.getElementById('chats');
     var top = box.scrollTop;
+    /* «Piden baja o borrar datos»: las solicitudes, tengan o no su chat a la vista
+       (pudo borrarse a las 72 h, o el sistema nunca llegó a escribirle). */
+    if (filtroLista === 'privacidad') { await pintarSolicitudesPrivacidad(box, conversations, top); return; }
     var visibles = conversations.filter(pasaFiltro);
     /* Los filtros de estado miran lo cargado: con uno activo, se trae el resto para no dejar chats fuera
        (tambien cuando en lo cargado aun no hay ninguno: suelen estar mas abajo). */
-    var faltanPaginas = filtroLista !== 'todos' && hasMoreChats && conversations.length < 2000;
+    /* «Piden baja o borrar datos» ya lo filtra el servidor sobre toda la bandeja. */
+    var faltanPaginas = filtroLista !== 'todos' && filtroLista !== 'privacidad' && hasMoreChats && conversations.length < 2000;
     if (faltanPaginas) setTimeout(function () { if (!cargandoMasChats) loadChats(true, true); }, 0);
     if (!conversations.length) {
       pintarLista(box, filtroEtiqueta
@@ -404,7 +411,7 @@ async function loadChats(keepScroll, anexar) {
       return;
     }
     if (!visibles.length) {
-      pintarLista(box, faltanPaginas ? '<div class="empty">Buscando…</div>' : '<div class="empty">Ninguna conversación con ese filtro.</div>', top);
+      pintarLista(box, faltanPaginas ? '<div class="empty">Buscando…</div>' : filtroLista === 'privacidad' ? '<div class="empty">Nadie pidió la baja ni borrar sus datos. Cuando alguien lo pida, aparece aquí y en la campana.</div>' : '<div class="empty">Ninguna conversación con ese filtro.</div>', top);
       return;
     }
     var html = visibles.map(filaDeChat).join('') + (hasMoreChats ? '<button class="cargar-chats" type="button" data-cargar-chats>Ver 30 conversaciones más</button>' : '');
@@ -428,7 +435,9 @@ function filaDeChat(c) {
       (variasLineas() && c.linea ? lineaTagHtml(((lineaPorId(c.linea.id) || {}).etiqueta) || c.linea.etiqueta, 'Último mensaje por ' + (c.linea.etiqueta || '') + (c.linea.numero ? ' · +' + c.linea.numero : '')) : '') +
       (marcas ? '<span class="marcas">' + marcas + '</span>' : '') +
       '<span class="when">' + esc(shortWhen(last ? last.createdAt : c.lastInboundAt)) + '</span>' +
-    '</div><div class="last"><span class="texto">' + prefijo + esc(texto.slice(0, 70)) + '</span>' + chipEtiqueta(c.etiqueta) +
+    '</div><div class="last"><span class="texto">' + prefijo + esc(texto.slice(0, 70)) + '</span>' +
+      (c.privacidad ? '<span class="chip-privacidad" title="Lo atiende una persona: abre el chat y mira «Lo pidió el cliente»">' + esc(NOMBRE_PRIVACIDAD[c.privacidad] || 'Privacidad') + '</span>' : '') +
+      chipEtiqueta(c.etiqueta) +
       (c.unread ? '<span class="badge">' + c.unread + '</span>' : '') +
     '</div></div>' +
     '<button class="icon fila-menu" data-menu-fila="' + esc(c.contactId) + '" title="Opciones de esta conversación" aria-label="Opciones de esta conversación">⋮</button>' +
@@ -555,7 +564,9 @@ var FILTROS_LISTA = [
   { valor: 'sin_leer', texto: 'Sin leer' },
   { valor: 'esperan', texto: 'Esperan respuesta' },
   { valor: 'ventana', texto: 'Escribieron hoy' },
+  { valor: 'privacidad', texto: 'Piden baja o borrar datos' },
 ];
+var privacidadPendientes = 0;
 var conteoEtiquetas = null;
 
 /* Las opciones del desplegable de etiquetas: las que tienen chats (de mas a menos) y los estados. */
@@ -651,7 +662,8 @@ function abrirListaFiltro(boton, grupos, actual, elegir) {
 }
 
 document.getElementById('sel-lista').onclick = function () {
-  abrirListaFiltro(this, [{ opciones: FILTROS_LISTA }], filtroLista, function (valor) {
+  var opciones = FILTROS_LISTA.map(function (f) { return f.valor === 'privacidad' ? { valor: f.valor, texto: f.texto, n: privacidadPendientes, tono: privacidadPendientes ? 'rojo' : undefined } : f; });
+  abrirListaFiltro(this, [{ opciones: opciones }], filtroLista, function (valor) {
     filtroLista = valor;
     pintarSelectores();
     loadChats();
@@ -1201,7 +1213,9 @@ function pintarSubtitulo(data) {
   current.windowOpen = Boolean(data.windowOpen);
   var lineaCab = variasLineas() ? lineaPorId(lineaSeleccionada() || current.lineaPorDefecto) : null;
   sub.innerHTML = '<span id="t-presencia"></span><span class="t-tel">' + esc(telefonoBonito(current.phone)) + '</span>' +
-    (lineaCab ? lineaTagHtml(lineaCab.etiqueta, 'Se le contesta por ' + lineaCab.etiqueta + (lineaCab.numero ? ' · +' + lineaCab.numero : '')) : '') +
+    (lineaCab ? lineaTagHtml(lineaCab.etiqueta, 'Se le contesta por ' + lineaCab.etiqueta + (lineaCab.tipo === 'api' ? ' (WhatsApp API)' : '') + (lineaCab.numero ? ' · +' + lineaCab.numero : '')) : '') +
+    (lineaCab && lineaCab.tipo === 'api' ? '<span class="pill t-marca" title="Esta línea es de la API oficial de Meta">API</span>' : '') +
+    (lineaCab && lineaCab.enUso === false ? '<span class="pill warn t-marca" title="Conexión tiene elegido un modo que deja esta línea en pausa: solo termina los chats abiertos; después el cliente pasa a una línea en uso.">Línea en pausa</span>' : '') +
     (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada') ? '<span class="pill warn t-marca" title="El asistente ya le mandó su mensaje de cierre y no contesta en este chat: contéstale tú.">Para una persona</span>' : '') +
     (data.reparto ? '<a class="t-pedido" href="/hoy' + (data.reparto.referencia ? '?buscar=' + encodeURIComponent(data.reparto.referencia) : '') + '" title="Ver en Hoy">' + esc(data.reparto.referencia ? 'Pedido ' + data.reparto.referencia : 'Reparto') + ': ' + esc(ESTADO_REPARTO[data.reparto.estado] || data.reparto.estado) + '</a>' : '') +
     (data.reparto && data.reparto.esperaEnvio ? '<span class="t-tel">' + esc(data.reparto.esperaEnvio.motivo) + (data.reparto.esperaEnvio.hasta ? ' · ' + esc(new Date(data.reparto.esperaEnvio.hasta).toLocaleTimeString()) : '') + '</span>' : '');
@@ -1682,7 +1696,37 @@ async function abrirFicha() {
       var coords = Number(f.ubicacion.lat).toFixed(6) + ', ' + Number(f.ubicacion.lng).toFixed(6);
       html += '<div><h4>Su última ubicación</h4><div class="fila"><span class="pin-coords">' + coords + '</span></div><div class="fila" style="margin-top:6px"><a class="sm" href="' + esc(f.ubicacion.mapa) + '" target="_blank" rel="noopener">Abrir en el mapa</a><button class="sm" type="button" data-copiar="' + esc(coords) + '" aria-label="Copiar las coordenadas">Copiar</button></div><div class="muted" style="margin-top:4px;font-size:12px">Las coordenadas las ves tú; al cliente solo le llega el enlace.</div></div>';
     } else html += '<div><h4>Su última ubicación</h4><div class="muted">Todavía no ha mandado ninguna. Con «Pedirle su ubicación» (menú ＋) se le manda el botón.</div></div>';
+    /* Sus datos: borrarlos del todo (lo pide el cliente o la ley). Solo un administrador. */
+    html += '<div class="ficha-datos"><h4>Sus datos</h4><div class="muted">Borra sus mensajes, pedidos, ubicaciones y adjuntos. Si más adelante tiene otro pedido, empieza de cero como un cliente nuevo.</div>' +
+      '<div class="fila" style="margin-top:6px"><button class="sm peligro" type="button" id="ficha-borrar">Eliminar datos del cliente</button></div></div>';
+    /* Lo que pidió el cliente sobre sus datos va primero: es lo que hay que atender. */
+    if (f.privacidad && f.privacidad.length) html = htmlPrivacidad(f.privacidad, c) + html;
     cuerpo.innerHTML = html;
+    document.getElementById('ficha-borrar').onclick = function () { eliminarDatosCliente(c); };
+    var descartar = document.getElementById('priv-descartar');
+    if (descartar) descartar.onclick = async function () {
+      var ok = await confirmarDialogo({ titulo: 'No era eso', texto: 'Se quita el aviso y el bot vuelve a atender este chat. Úsalo solo si el cliente no pedía la baja ni borrar sus datos.', boton: 'Quitar el aviso' });
+      if (!ok) return;
+      try {
+        await api('/admin/privacidad/descartar', { method: 'POST', body: { phone: c.phone } });
+        toast('Aviso quitado: el bot vuelve a atender este chat.');
+        current.botPausadoAt = null;
+        abrirFicha();
+        loadChats(true);
+      } catch (error) { toast(error.message); }
+    };
+    var bajaYa = document.getElementById('priv-baja');
+    if (bajaYa) bajaYa.onclick = async function () {
+      this.disabled = true;
+      try {
+        await api('/admin/contacts/opt-out', { method: 'POST', body: { phone: c.phone } });
+        toast('Cliente dado de baja: no recibe más mensajes.');
+        abrirFicha();
+        loadChats(true);
+      } catch (error) { toast(error.message); this.disabled = false; }
+    };
+    var borrarYa = document.getElementById('priv-borrar');
+    if (borrarYa) borrarYa.onclick = function () { eliminarDatosCliente(c); };
     document.getElementById('ficha-baja').onclick = async function () {
       this.disabled = true;
       try {
@@ -1693,6 +1737,143 @@ async function abrirFicha() {
     };
   } catch (e) { cuerpo.innerHTML = '<p class="muted">' + esc(e.message) + '</p>'; }
 }
+/* «Pidió la baja» / «Pidió borrar sus datos»: qué escribió y los botones para atenderlo. */
+var NOMBRE_PRIVACIDAD = { baja: 'Pidió la baja', borrar_datos: 'Pidió borrar sus datos' };
+function htmlPrivacidad(lista, c) {
+  var pideBorrar = lista.some(function (s) { return s.tipo === 'borrar_datos'; });
+  var pideBaja = lista.some(function (s) { return s.tipo === 'baja'; });
+  var filas = lista.map(function (s) {
+    return '<div class="priv-caso"><span class="pill bad">' + esc(NOMBRE_PRIVACIDAD[s.tipo] || s.tipo) + '</span>' +
+      '<span class="muted">' + esc(hhmm(s.createdAt)) + ' · ' + (s.como === 'ia' ? 'lo reconoció la IA' : 'lo reconocieron las reglas') + '</span>' +
+      (s.texto ? '<blockquote>«' + esc(s.texto) + '»</blockquote>' : '') + '</div>';
+  }).join('');
+  return '<div class="ficha-privacidad" role="alert"><h4>Lo pidió el cliente: atiéndelo</h4>' + filas +
+    '<div class="muted">El sistema no lo hace solo: el bot se calló en este chat hasta que alguien lo atienda.</div>' +
+    '<div class="fila" style="margin-top:8px">' +
+      (pideBaja && !c.optOutAt ? '<button class="sm principal" type="button" id="priv-baja">Dar de baja</button>' : '') +
+      (pideBorrar ? '<button class="sm peligro" type="button" id="priv-borrar">Eliminar sus datos</button>' : '') +
+      '<button class="sm" type="button" id="priv-descartar">No era eso</button>' +
+    '</div></div>';
+}
+
+/* La lista de quienes pidieron la baja o borrar sus datos, con sus botones. */
+async function pintarSolicitudesPrivacidad(box, chats, top) {
+  var datos;
+  try { datos = await api('/admin/privacidad'); }
+  catch (error) { pintarLista(box, '<div class="empty">' + esc(error.message) + '</div>', top); return; }
+  var lista = datos.pendientes || [];
+  privacidadPendientes = lista.length;
+  if (!lista.length) {
+    pintarLista(box, '<div class="empty">Nadie pidió la baja ni borrar sus datos. Cuando alguien lo pida, aparece aquí y en la campana.</div>', top);
+    return;
+  }
+  var porTelefono = {};
+  chats.forEach(function (c) { porTelefono[c.phone] = c; });
+  /* Una tarjeta por cliente: si pidió las dos cosas, van juntas. */
+  var clientes = [], vistos = {};
+  lista.forEach(function (s) {
+    if (!vistos[s.phone]) { vistos[s.phone] = { phone: s.phone, nombre: s.nombre, dadoDeBaja: s.dadoDeBaja, casos: [] }; clientes.push(vistos[s.phone]); }
+    vistos[s.phone].casos.push(s);
+  });
+  var html = '<div class="priv-lista-cab">' + clientes.length + (clientes.length === 1 ? ' cliente lo pidió' : ' clientes lo pidieron') + ': el sistema no lo hace solo, lo atiendes tú.</div>' +
+    clientes.map(function (k) {
+      var chat = porTelefono[k.phone];
+      var pideBorrar = k.casos.some(function (s) { return s.tipo === 'borrar_datos'; });
+      var pideBaja = k.casos.some(function (s) { return s.tipo === 'baja'; });
+      return '<div class="priv-tarjeta" data-phone="' + esc(k.phone) + '">' +
+        '<div class="priv-quien"><b>' + esc(k.nombre || 'Sin nombre') + '</b><span class="muted">' + esc(telefonoBonito(k.phone)) + '</span></div>' +
+        k.casos.map(function (s) {
+          return '<div class="priv-caso"><span class="chip-privacidad">' + esc(NOMBRE_PRIVACIDAD[s.tipo] || s.tipo) + '</span>' +
+            '<span class="muted">' + esc(hhmm(s.createdAt)) + ' · ' + (s.como === 'ia' ? 'lo reconoció la IA' : 'lo reconocieron las reglas') + '</span>' +
+            (s.texto ? '<blockquote>«' + esc(s.texto) + '»</blockquote>' : '') + '</div>';
+        }).join('') +
+        '<div class="priv-botones">' +
+          (chat ? '<button type="button" class="sm" data-priv-abrir="' + esc(chat.contactId) + '">Abrir el chat</button>' : '') +
+          (pideBaja && !k.dadoDeBaja ? '<button type="button" class="sm principal" data-priv-baja>Dar de baja</button>' : '') +
+          (pideBorrar ? '<button type="button" class="sm peligro" data-priv-borrar>Eliminar sus datos</button>' : '') +
+          '<button type="button" class="sm" data-priv-descartar>No era eso</button>' +
+        '</div></div>';
+    }).join('');
+  pintarLista(box, html, top);
+}
+document.getElementById('chats').addEventListener('click', async function (ev) {
+  var tarjeta = ev.target.closest('.priv-tarjeta');
+  if (!tarjeta) return;
+  var phone = tarjeta.getAttribute('data-phone');
+  var abrir = ev.target.closest('[data-priv-abrir]');
+  if (abrir) { openChat(abrir.getAttribute('data-priv-abrir')); return; }
+  if (ev.target.closest('[data-priv-borrar]')) { eliminarDatosCliente({ phone: phone }); return; }
+  var boton = ev.target.closest('[data-priv-baja], [data-priv-descartar]');
+  if (!boton) return;
+  if (boton.hasAttribute('data-priv-descartar')) {
+    var ok = await confirmarDialogo({ titulo: 'No era eso', texto: 'Se quita el aviso y el bot vuelve a atender a este cliente. Úsalo solo si no pedía la baja ni borrar sus datos.', boton: 'Quitar el aviso' });
+    if (!ok) return;
+  }
+  boton.disabled = true;
+  try {
+    if (boton.hasAttribute('data-priv-baja')) {
+      await api('/admin/contacts/opt-out', { method: 'POST', body: { phone: phone } });
+      toast('Cliente dado de baja: no recibe más mensajes.');
+    } else {
+      await api('/admin/privacidad/descartar', { method: 'POST', body: { phone: phone } });
+      toast('Aviso quitado: el bot vuelve a atender a este cliente.');
+    }
+    await loadChats(true);
+  } catch (error) { toast(error.message); boton.disabled = false; }
+});
+
+/* Borrar todo lo del cliente. Se escribe su número para confirmar: no tiene vuelta atrás. */
+function eliminarDatosCliente(c) {
+  var fondo = document.createElement('div');
+  fondo.className = 'dlg-fondo';
+  fondo.innerHTML =
+    '<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="borrar-titulo">' +
+      '<h3 id="borrar-titulo">Eliminar los datos de este cliente</h3>' +
+      '<p>Se borran sus mensajes, sus pedidos, sus ubicaciones, sus etiquetas y sus fotos y audios. No se puede deshacer.</p>' +
+      '<p>Si más adelante entra otro pedido suyo, el sistema empieza con él de cero, como con un cliente nuevo.</p>' +
+      '<div class="campo"><label for="borrar-confirma">Para confirmar, escribe su número (' + esc(telefonoBonito(c.phone)) + ')</label>' +
+      '<input id="borrar-confirma" inputmode="tel" autocomplete="off"></div>' +
+      '<label class="borrar-avisar"><input type="checkbox" id="borrar-avisar" checked> Avisarle por WhatsApp que sus datos se eliminaron (el aviso sale antes y también se borra)</label>' +
+      '<p class="mal" id="borrar-mal" role="alert"></p>' +
+      '<div class="botones"><button type="button" id="borrar-no">Cancelar</button><button type="button" class="peligro" id="borrar-si" disabled>Eliminar sus datos</button></div>' +
+    '</div>';
+  var input = fondo.querySelector('#borrar-confirma'), si = fondo.querySelector('#borrar-si'), mal = fondo.querySelector('#borrar-mal');
+  var digitos = function (t) { return String(t || '').replace(/\D+/g, ''); };
+  function cerrar() { document.removeEventListener('keydown', teclas); fondo.remove(); }
+  function teclas(ev) { if (ev.key === 'Escape') cerrar(); }
+  input.oninput = function () {
+    mal.textContent = '';
+    var a = digitos(input.value), b = digitos(c.phone);
+    si.disabled = !(a.length >= 9 && a.slice(-9) === b.slice(-9));
+  };
+  fondo.querySelector('#borrar-no').onclick = cerrar;
+  fondo.onclick = function (ev) { if (ev.target === fondo) cerrar(); };
+  si.onclick = async function () {
+    si.disabled = true;
+    si.textContent = 'Eliminando…';
+    try {
+      var r = await api('/admin/privacidad/borrar', { method: 'POST', body: { phone: c.phone, confirmar: input.value, avisar: fondo.querySelector('#borrar-avisar').checked } });
+      cerrar();
+      var aviso = fondo.querySelector('#borrar-avisar').checked;
+      toast('Datos eliminados: ' + r.mensajes + ' mensajes, ' + r.pedidos + ' pedidos y ' + r.adjuntos + ' adjuntos.' + (r.avisado ? ' Se le avisó por WhatsApp.' : aviso ? ' No se le pudo avisar por WhatsApp (revisa la conexión).' : ''));
+      document.getElementById('ficha').classList.add('hidden');
+      /* Su chat ya no existe: se vuelve a la bandeja. */
+      current = null; deseado = null;
+      hilo = { contactId: null, mensajes: [], masAntiguos: false, cargando: false };
+      ver('thread-head', false); ver('messages', false); ver('composer', false); ver('placeholder', true);
+      document.getElementById('rapidas-barra').classList.add('hidden');
+      await loadChats(false);
+    } catch (error) {
+      mal.textContent = error.message || 'No se pudo eliminar.';
+      si.textContent = 'Eliminar sus datos';
+      si.disabled = false;
+    }
+  };
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(fondo);
+  input.focus();
+}
+
 document.getElementById('abrir-ficha').onclick = function () {
   if (!current || current.tipo === 'grupo') return;
   if (document.getElementById('ficha').classList.contains('hidden')) abrirFicha();
@@ -1899,7 +2080,10 @@ function pintarSelectorDeLinea(data) {
   var elegida = lineaSeleccionada();
   sel.innerHTML = (elegida ? '' : '<option value="" selected>Automática (al azar)</option>') + LINEAS.map(function (l) {
     var caida = l.estado !== 'conectado';
-    return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : '') + '</option>';
+    /* API o normal, y si el modo de Conexion la tiene en pausa (solo termina chats abiertos). */
+    var tipo = l.tipo === 'api' ? ' · API' : '';
+    var pausa = l.enUso === false ? ' (en pausa por el modo)' : '';
+    return '<option value="' + esc(l.id) + '"' + (l.id === elegida ? ' selected' : '') + '>' + esc(l.etiqueta) + tipo + (l.numero ? ' · ' + esc(l.numero.slice(-4)) : '') + (caida ? ' (sin conexión)' : pausa) + '</option>';
   }).join('');
   sel.style.background = elegida ? colorDeLinea((lineaPorId(elegida) || {}).etiqueta) : '#667781';
   sel.classList.remove('hidden');
@@ -2057,8 +2241,11 @@ async function revisarConexion() {
       caja.classList.remove('hidden');
       return;
     }
-    caja.innerHTML = 'WhatsApp no está conectado' + (estado.detail ? ' (' + esc(estado.detail) + ')' : '') +
-      ': lo que escribas aquí no va a salir. <a href="/setup">Conectar ahora</a>';
+    /* «Sin conectar.» no dice nada nuevo: el motivo solo se muestra si cuenta algo más. */
+    var motivo = String(estado.detail || '').trim().replace(/\.+$/, '');
+    caja.innerHTML = 'WhatsApp no está conectado: lo que escribas aquí no va a salir.' +
+      (motivo && !/^sin conectar$/i.test(motivo) ? ' Motivo: ' + esc(motivo) + '.' : '') +
+      ' <a href="/setup">Conectar ahora</a>';
     caja.classList.remove('hidden');
   } catch (error) {
     /* Si no se puede preguntar, no se inventa un estado: se deja como esta. */
@@ -2157,6 +2344,8 @@ pintarBotonDeEnviar();
 cargarAtajos();
 window.sondearPanel(revisarConexion, 30000, true);
 
+/* /chat?filtro=privacidad (el aviso de la campana): abre la lista de quienes pidieron la baja o borrar sus datos. */
+if (new URLSearchParams(location.search).get('filtro') === 'privacidad') { filtroLista = 'privacidad'; pintarSelectores(); }
 loadChats().then(abrirDesdeUrl);
 seguirEtiquetado(true);
 cargarConteoEtiquetas();

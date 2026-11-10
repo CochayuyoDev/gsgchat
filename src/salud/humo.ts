@@ -106,6 +106,7 @@ export function explicarBloqueo(code: string, reason: string): string {
     sin_conexion: 'WhatsApp no está conectado',
     sin_lineas_disponibles: 'No hay números vinculados habilitados con cupo disponible',
     limite_diario: 'La línea elegida llegó a su máximo de mensajes por día',
+    linea_fuera_de_modo: 'La línea elegida está en pausa por el modo de Conexión',
     opt_out: 'el número del supervisor está dado de baja; dalo de alta desde su ficha en Chats',
     no_opt_in: 'el número del supervisor no tiene consentimiento: dale de alta en Contactos con opt-in',
     number_paused: 'el número está en pausa (Estado del número)',

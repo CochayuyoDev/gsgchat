@@ -53,7 +53,7 @@ const CSS = `
   .caja.atencion { border-color: var(--ambar); }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: 14px; z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: var(--esp-4); align-items: start; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 
   /* --- tarjetas de resumen --------------------------------------------- */
   .tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--esp-3); margin-bottom: var(--esp-4); }
