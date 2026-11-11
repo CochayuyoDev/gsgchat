@@ -46,6 +46,11 @@ import {
   type PasoUbicacion,
 } from './mensajes.js';
 
+/** Las plantillas de recordatorio de GSG, en orden: recordatorio 1 y recordatorio 2. */
+export const SEGUIMIENTOS_POR_DEFECTO = ['segundo_intento_seguimiento', 'seguimiento'] as const;
+/** Qué dato va en cada {{n}} (1 nombre, 2 producto, 3 empresa...): «seguimiento» lleva nombre y empresa. */
+export const DATOS_POR_DEFECTO: Record<string, number[]> = { seguimiento: [1, 3] };
+
 export interface OpcionesMotor {
   /** Pausa entre envios, en segundos: se sortea entre los dos. */
   pausaMinSegundos: number;
@@ -170,6 +175,8 @@ export interface MotorDeps {
    */
   textoSolicitud?: (solicitud: Solicitud) => Promise<string | null>;
   plantillaSolicitud?: (solicitud: Solicitud) => Promise<{ name: string; language?: string; variables: string[] } | null>;
+  /** Los 8 datos del pedido de esa solicitud, en el orden de la plantilla de Pedidos GSG; null si no es de un pedido. */
+  datosPedido?: (solicitud: Solicitud) => Promise<string[] | null>;
   /**
    * Con la conexión principal de QR y una línea de WhatsApp API en uso: si
    * hay plantilla aprobada por Meta en los ajustes (Pedidos GSG → Ajustes de
@@ -475,6 +482,12 @@ export function crearMotor(deps: MotorDeps): Motor {
     return { name: primera.name, language: primera.language, variables: primera.variables };
   }
 
+  /** Una plantilla con menos datos que los 8 del pedido recibe solo los primeros (Meta rechaza parámetros de más: #132000). */
+  async function ajustarAlNumeroDeDatos(p: { name: string; language?: string; variables: string[] }): Promise<string[]> {
+    const t = await repos.templates.get(p.name, p.language ?? 'es').catch(() => null);
+    return t && t.variables > 0 && t.variables < p.variables.length ? p.variables.slice(0, t.variables) : p.variables;
+  }
+
   /** Si el paso tiene alguna plantilla propia (elegida o del catálogo) ya aprobada por Meta. */
   async function hayAprobadaDelPaso(paso: PasoUbicacion): Promise<boolean> {
     const nombres = ajustes.plantillas[paso].length ? ajustes.plantillas[paso] : PLANTILLAS[paso].variantes;
@@ -628,9 +641,25 @@ export function crearMotor(deps: MotorDeps): Motor {
     // Meta (si no, el recordatorio pediría una que Meta no tiene: #132001).
     // También si en «Plantillas aprobadas por Meta» se eligió esa misma para los recordatorios.
     const delPedido = conPlantilla ? await deps.plantillaSolicitud?.(solicitud) : null;
-    const conDatosDelPedido = Boolean(delPedido) && (paso === 'solicitud' || ajustes.plantillas[paso].includes(delPedido!.name) || !(await hayAprobadaDelPaso(paso)));
+    // Pantalla «Plantillas de Meta»: cada recordatorio tiene la suya, en orden
+    // (la última se repite). Manda sobre todo lo demás y nunca cae en la del
+    // primer mensaje: si falta o Meta no la tiene, el rechazo lo dice con su nombre.
+    const registroPlantillas = conPlantilla && paso !== 'solicitud' ? await repos.templates.list().catch(() => []) : [];
+    let lista = ajustes.plantillasSeguimientos ?? [];
+    // Sin nada elegido en la pantalla: las dos plantillas de GSG, si la cuenta
+    // las tiene aprobadas las dos; si no, como antes (nunca se pide una que Meta no tiene).
+    if (!lista.length && SEGUIMIENTOS_POR_DEFECTO.every((n) => registroPlantillas.some((t) => t.name === n && t.status === 'APPROVED'))) lista = [...SEGUIMIENTOS_POR_DEFECTO];
+    const nombreSeg = conPlantilla && paso !== 'solicitud' && lista.length ? lista[Math.min(Math.max(solicitud.intentos - 1, 0), lista.length - 1)] : undefined;
+    const registroSeg = nombreSeg ? registroPlantillas.find((t) => t.name === nombreSeg) : undefined;
+    const cuantasSeg = registroSeg?.variables ?? 2;
+    const datosSeg = nombreSeg ? await deps.datosPedido?.(solicitud).catch(() => null) ?? null : null;
+    const mapaSeg = (nombreSeg && (ajustes.datosPlantillas?.[nombreSeg] ?? DATOS_POR_DEFECTO[nombreSeg])) || [1, 2, 3, 4, 5, 6, 7, 8];
+    const variablesSeg = nombreSeg
+      ? datosSeg ? mapaSeg.slice(0, cuantasSeg).map((n) => datosSeg[n - 1] ?? '') : variablesPara(nombreSeg, paso, ctx, cuantasSeg)
+      : null;
+    const conDatosDelPedido = !nombreSeg && Boolean(delPedido) && (paso === 'solicitud' || ajustes.plantillas[paso].includes(delPedido!.name) || !(await hayAprobadaDelPaso(paso)));
     const agrupada = conDatosDelPedido ? delPedido : null;
-    const elegida = conPlantilla ? (agrupada ? { name: agrupada.name, language: agrupada.language ?? 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
+    const elegida = conPlantilla ? (nombreSeg ? { name: nombreSeg, language: registroSeg?.language ?? 'es', variables: cuantasSeg } : agrupada ? { name: agrupada.name, language: agrupada.language ?? 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
     // La primera solicitud de una entrega de GSG: la plantilla con los datos del envio.
     const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud) : null;
     // La cadencia por cliente la fija el reparto (espera e intentos), no la
@@ -647,7 +676,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           category: 'UTILITY',
           templateName: elegida!.name,
           templateLanguage: elegida!.language,
-          variables: agrupada?.variables ?? variablesPara(elegida!.name, paso, ctx, elegida!.variables),
+          variables: variablesSeg ?? (agrupada ? await ajustarAlNumeroDeDatos(agrupada) : variablesPara(elegida!.name, paso, ctx, elegida!.variables)),
           limitesContacto,
         })
       : await sender.send({
