@@ -100,7 +100,7 @@ export const SISTEMA_CSS = `
 
   /* --- tablas ------------------------------------------------------------- */
   .s-base :where(table) { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
-  .s-base :where(th) { text-align: left; padding: 10px 12px; font-size: var(--fs-micro); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--texto-suave); background: var(--superficie-2); border-bottom: 1px solid var(--borde); white-space: nowrap; vertical-align: bottom; }
+  .s-base :where(th) { text-align: left; padding: 10px 12px; font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--texto-suave); background: var(--superficie-2); border-bottom: 1px solid var(--borde); white-space: nowrap; vertical-align: bottom; }
   .s-base :where(td) { padding: 11px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; line-height: 1.45; }
   .s-base :where(tbody tr) {  }
   .s-base :where(tbody tr:hover) { background: var(--fila-hover); }
@@ -190,6 +190,34 @@ export const SISTEMA_CSS = `
   .s-pestanas a.activa::after, .s-pestanas a[aria-current]::after { background: var(--primario); }
   .s-pestanas a[hidden] { display: none; }
   .s-base :where([role=tabpanel]:not([hidden]):not(.hidden)) {  }
+
+  /* --- jerarquia de cajas (11/11) ---------------------------------------
+     Una tarjeta dentro de otra se leia como «caja en caja en caja». La de
+     dentro pasa a ser un panel plano: mismo borde fino, sin sombra y con el
+     fondo apenas teñido, asi agrupa sin competir con la de fuera. */
+  .s-base :where(.card, .tarjeta) :where(.card, .tarjeta) { box-shadow: none; background: var(--superficie-2); border-color: var(--borde); }
+  .s-base :where(.card, .tarjeta) :where(fieldset) { background: transparent; }
+  /* Una sola separacion entre bloques de una pantalla: ni pegados ni a la deriva. */
+  /* (margen abajo y no «+»: entre dos tarjetas a veces hay un aviso escondido y el «+» no las separaba) */
+  .s-base :where(.wrap) > :where(.card, .tarjeta):not(:last-child) { margin-bottom: var(--esp-5); }
+  .s-base :where(.card) { padding: var(--esp-5); }
+  @media (max-width: 640px) { .s-base :where(.card) { padding: var(--esp-4); } }
+  /* --- tono sereno (11/11) ----------------------------------------------
+     Solo apariencia: menos mayusculas gritadas, menos relleno de color,
+     menos sombra. Ninguna regla esconde, mueve ni cambia lo que hace algo. */
+  .s-base :where(th) { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 600; background: transparent; color: var(--texto-suave); border-bottom: 1px solid var(--borde-fuerte); }
+  .s-base :where(.tablewrap, .tabla-marco) :where(thead th) { background: var(--superficie-2); }
+  .btn, .s-base :where(button:not([class])) { box-shadow: none; font-weight: 600; }
+  .s-base :where(button[type=submit]:not([class])):hover, .btn.primario:hover { box-shadow: none; }
+  .btn.peligro { border-color: color-mix(in srgb, var(--rojo) 25%, var(--borde)); }
+  .chip { font-weight: 500; }
+  .s-base :where(.card) { box-shadow: none; }
+  .tarjeta { box-shadow: none; }
+  .s-alerta { border-color: transparent; }
+  .s-alerta.ok, .s-alerta.info, .s-alerta.warn, .s-alerta.bad { border-color: transparent; }
+  .vacio { border-style: solid; border-color: var(--borde); }
+  /* Titulo de bloque con su explicacion debajo, pegados, y aire antes del contenido. */
+  .s-base :where(.card) > :where(h2:first-child) + :where(p.muted) { margin-top: calc(var(--esp-2) * -1); margin-bottom: var(--esp-4); }
 
 
 

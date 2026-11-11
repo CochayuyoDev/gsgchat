@@ -65,7 +65,7 @@ const CSS = `
 
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); position: sticky; top: 0; z-index: 1; }
+  th { font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); position: sticky; top: 0; z-index: 1; }
   tbody tr:hover > td { background: var(--superficie-2); }
   tr:last-child td { border-bottom: 0; }
   td .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 2px; }

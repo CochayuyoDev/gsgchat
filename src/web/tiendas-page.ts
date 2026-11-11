@@ -75,7 +75,7 @@ const CSS = `
   .cargando { text-align: center; color: var(--texto-suave); padding: var(--esp-5); }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
+  th { font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
   td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
   td .sub.viejo { color: var(--ambar); }
   tr.historial td { background: var(--superficie-2); padding: 8px 14px 12px; }
@@ -136,7 +136,7 @@ const CSS = `
     tbody tr:not(.fila-acciones):not(.historial):first-child { border-top: 0; }
     tbody tr:not(.fila-acciones):not(.historial) td { padding: 4px 12px; border: 0; }
     tbody tr:not(.fila-acciones):not(.historial) td:first-child { padding-top: 12px; }
-    tbody td[data-etiqueta]::before { content: attr(data-etiqueta); display: block; color: var(--texto-suave); font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
+    tbody td[data-etiqueta]::before { content: attr(data-etiqueta); display: block; color: var(--texto-suave); font-size: 11.5px; text-transform: none; letter-spacing: 0; }
     tr.fila-acciones td { padding: 8px 12px 12px; border-bottom: 0; }
     .salud { min-width: 0; }
   }

@@ -78,7 +78,7 @@ const CSS = `
   /* --- las dos columnas: a la izquierda lo que sabe, a la derecha ensenar */
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: var(--esp-4); align-items: start; }
   @media (max-width: 1080px) { .cols { grid-template-columns: minmax(0, 1fr); } }
-  .columna-titulo { margin: 0 0 var(--esp-3); font-size: var(--fs-h3); color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
+  .columna-titulo { margin: 0 0 var(--esp-3); font-size: var(--fs-h3); color: var(--texto-suave); text-transform: none; letter-spacing: 0; }
 
   .tarjeta.caja { padding: 0; overflow: hidden; margin-bottom: var(--esp-4); }
   .caja > h2 { margin: 0; font-size: var(--fs-h3); border-bottom: 1px solid var(--borde); }
@@ -101,7 +101,7 @@ const CSS = `
 
   table { width: 100%; border-collapse: collapse; font-size: var(--fs-cuerpo); }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .03em; color: var(--texto-suave); font-weight: 600; }
+  th { font-size: var(--fs-small); text-transform: none; letter-spacing: 0; color: var(--texto-suave); font-weight: 600; }
   tbody tr:hover { background: var(--superficie-2); }
   td.texto { max-width: 360px; white-space: pre-wrap; word-break: break-word; }
   .tabla-scroll { max-height: 68vh; overflow: auto; }
@@ -153,7 +153,7 @@ const CSS = `
   .previa { margin-top: var(--esp-3); padding: var(--esp-3); border: 1px dashed var(--borde); border-radius: var(--radio-sm); font-size: var(--fs-small); }
   .previa ul { margin: var(--esp-2) 0 0; padding-left: 18px; }
   .previa li { margin: 2px 0; }
-  .elegidas h4 { margin: var(--esp-3) 0 var(--esp-1); font-size: var(--fs-small); color: var(--texto-suave); text-transform: uppercase; letter-spacing: .03em; }
+  .elegidas h4 { margin: var(--esp-3) 0 var(--esp-1); font-size: var(--fs-small); color: var(--texto-suave); text-transform: none; letter-spacing: 0; }
   .elegidas .item { margin: var(--esp-1) 0; padding: var(--esp-2) var(--esp-3); border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font-size: var(--fs-small); white-space: pre-wrap; }
   .elegidas .item .sub { display: block; color: var(--texto-suave); }
 
@@ -161,7 +161,7 @@ const CSS = `
   #etiquetar > h2 .cab { box-sizing: border-box; }
   .et-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
   @media (max-width: 900px) { .et-cols { grid-template-columns: minmax(0, 1fr); } }
-  .et-h { margin: var(--esp-3) 0 var(--esp-2); font-size: var(--fs-small); color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
+  .et-h { margin: var(--esp-3) 0 var(--esp-2); font-size: var(--fs-small); color: var(--texto-suave); text-transform: none; letter-spacing: 0; }
   .et-cols > div > .et-h:first-child { margin-top: 0; }
   .et-item { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: var(--esp-3); margin-bottom: var(--esp-2); }
   .et-cambio { display: flex; gap: var(--esp-2); align-items: center; flex-wrap: wrap; font-size: var(--fs-small); }

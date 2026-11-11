@@ -6,6 +6,10 @@ export interface PanelOpts { configured: boolean; nombreNegocio: string; demo?: 
 
 const CSS = `
 .wrap{max-width:1400px;margin:auto}.card{padding:24px;margin-bottom:18px}
+/* Las pantallas de formulario (IA, Ajustes, Mi cuenta) van en una columna del ancho del formulario:
+   antes la tarjeta medía 1400 px con el formulario de 760 dentro y media pantalla vacía. */
+#tab-ia,#tab-configuracion,#tab-mi-cuenta{max-width:880px}
+.wrap #tab-ia>p,.wrap #ia-form,.wrap #tab-configuracion .aj-form{max-width:none}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 24px}.actions{margin:16px 0}
 label{display:block;margin:16px 0 6px}input:not([type=checkbox]),textarea,select{width:100%}textarea{min-height:100px}
 label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px;font-weight:500}
@@ -43,16 +47,16 @@ a.db-ficha:hover{background:var(--fila-hover)}
 .db-ficha[data-ok="1"] .db-servicio{color:var(--primario)}
 .db-ficha[data-ok="0"] .db-servicio{color:var(--rojo);background:var(--rojo-suave);border-color:transparent}
 .db-ficha-txt{min-width:0;display:grid;gap:4px}
-.db-ficha small{font-size:var(--fs-micro);font-weight:700;color:var(--texto-suave);text-transform:uppercase;letter-spacing:.07em}
+.db-ficha small{font-size:var(--fs-micro);font-weight:700;color:var(--texto-suave);text-transform: none;letter-spacing: 0}
 .db-ficha b{font-size:17px;line-height:1.2}
 .db-ficha span.sub{font-size:13px;color:var(--texto-suave)}
 .db-ficha .chip{justify-self:start}
 .db-ficha[data-ok="0"] b{color:var(--rojo)}
 @media(max-width:640px){.db .db-ficha{align-items:center;gap:12px;padding:11px 16px}.db-ficha .db-servicio{width:34px;height:34px}.db-ficha-txt{flex:1;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;column-gap:10px;row-gap:1px}.db-ficha-txt small{grid-row:1;grid-column:1}.db-ficha b{grid-row:1;grid-column:2;font-size:15px;text-align:right}.db-ficha span.sub{grid-column:1/-1;font-size:12.5px}}
 .db-avisos{padding:14px 22px 18px;border-top:1px solid var(--borde);display:grid;gap:8px}
-.db-avisos h3{margin:0;font-size:var(--fs-micro);text-transform:uppercase;letter-spacing:.07em;color:var(--texto-suave)}
+.db-avisos h3{margin:0;font-size:var(--fs-micro);text-transform: none;letter-spacing: 0;color:var(--texto-suave)}
 .db-avisos:empty{display:none}
-.db-aviso-linea{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--borde);border-radius:var(--radio-sm);background:var(--superficie)}.db-aviso-linea.bad{border-color:color-mix(in srgb,var(--rojo) 30%,var(--borde));background:color-mix(in srgb,var(--rojo-suave) 55%,var(--superficie))}.db-aviso-ico{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%}.db-aviso-ico svg{width:16px;height:16px}.db-aviso-linea.bad .db-aviso-ico{background:var(--rojo-suave);color:var(--rojo)}.db-aviso-linea.warn .db-aviso-ico{background:var(--ambar-suave);color:var(--ambar)}.db-aviso-linea.info .db-aviso-ico{background:var(--azul-suave);color:var(--azul)}.db-aviso-txt{flex:1;min-width:0;color:var(--texto);text-decoration:none;font-size:var(--fs-cuerpo)}a.db-aviso-txt:hover{text-decoration:underline;text-underline-offset:3px}a.db-aviso-txt::after{content:' →';color:var(--texto-suave)}.db-aviso-cerrar{flex:none;display:grid;place-items:center;width:32px;height:32px;border:0;background:transparent;color:var(--texto-suave);font-size:20px;line-height:1;padding:0;border-radius:var(--radio-xs);cursor:pointer}.db-aviso-cerrar:hover{background:color-mix(in srgb,var(--texto) 8%,transparent);color:var(--texto)}
+.db-aviso-linea{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--borde);border-radius:var(--radio-sm);background:var(--superficie)}.db-aviso-linea.bad{border-color:color-mix(in srgb,var(--rojo) 14%,var(--borde));background:color-mix(in srgb,var(--rojo-suave) 55%,var(--superficie))}.db-aviso-ico{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%}.db-aviso-ico svg{width:16px;height:16px}.db-aviso-linea.bad .db-aviso-ico{background:var(--rojo-suave);color:var(--rojo)}.db-aviso-linea.warn .db-aviso-ico{background:var(--ambar-suave);color:var(--ambar)}.db-aviso-linea.info .db-aviso-ico{background:var(--azul-suave);color:var(--azul)}.db-aviso-txt{flex:1;min-width:0;color:var(--texto);text-decoration:none;font-size:var(--fs-cuerpo)}a.db-aviso-txt:hover{text-decoration:underline;text-underline-offset:3px}a.db-aviso-txt::after{content:' →';color:var(--texto-suave)}.db-aviso-cerrar{flex:none;display:grid;place-items:center;width:32px;height:32px;border:0;background:transparent;color:var(--texto-suave);font-size:20px;line-height:1;padding:0;border-radius:var(--radio-xs);cursor:pointer}.db-aviso-cerrar:hover{background:color-mix(in srgb,var(--texto) 8%,transparent);color:var(--texto)}
 /* Las cifras del dia: un dato grande por tarjeta y el resto en segundo plano. */
 .db-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .db-card{padding:18px 20px;border:1px solid var(--borde);border-radius:var(--radio);background:var(--superficie);box-shadow:var(--sombra);min-width:0;display:flex;flex-direction:column}

@@ -120,7 +120,7 @@ ${bandaDemo}
       </div>
     </div>
 
-    <div class="messages hidden" id="messages" tabindex="-1"></div>
+    <div class="messages hidden" id="messages" tabindex="-1" data-visor-grupo></div>
     <button class="bajar hidden" id="bajar" title="Bajar al último mensaje" aria-label="Bajar al último mensaje">↓<span class="nuevos hidden" id="bajar-nuevos"></span></button>
 
 
@@ -1566,9 +1566,12 @@ function adjuntoHtml(m) {
   var a = m.archivo;
   if (!a || !a.url) return '';
   var url = esc(a.url);
-  if (m.kind === 'image') return '<a class="adjunto adjunto-foto" href="' + url + '" target="_blank" rel="noopener" title="Abrir la foto"><img src="' + url + '" alt="Foto del cliente" loading="lazy"></a>';
+  var de = m.direction === 'in' ? 'del cliente' : 'enviado';
+  var cuando = m.createdAt ? ' · ' + new Date(m.createdAt).toLocaleString('es-PE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+  /* La foto y el video se abren en el visor de la misma pagina (visor-medios.ts), no en otra pestaña. */
+  if (m.kind === 'image') return '<a class="adjunto adjunto-foto" href="' + url + '" data-visor="imagen" data-visor-titulo="' + esc('Foto ' + de + cuando) + '" title="Ver la foto en grande"><img src="' + url + '" alt="Foto ' + de + '" loading="lazy"></a>';
   if (m.kind === 'audio') return audioHtml(a, url);
-  if (m.kind === 'video') return '<div class="adjunto adjunto-video"><video controls preload="metadata" src="' + url + '"></video></div>';
+  if (m.kind === 'video') return '<button type="button" class="adjunto adjunto-video visor-video" data-visor="video" data-visor-src="' + url + '" data-visor-titulo="' + esc('Video ' + de + cuando) + '" title="Ver el video" aria-label="Ver el video ' + de + '"><video preload="metadata" muted playsinline src="' + url + '#t=0.1"></video><span class="visor-dur">' + esc(window.visorDuracion ? window.visorDuracion(a.url) : '') + '</span></button>';
   if (m.kind === 'sticker') return '<div class="adjunto adjunto-sticker"><img src="' + url + '" alt="Sticker del cliente" loading="lazy"></div>';
   return '';
 }

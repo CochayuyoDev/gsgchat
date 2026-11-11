@@ -240,7 +240,7 @@ ${TOKENS_CSS}
   /* La parada siguiente se ve desde lejos; las demás quedan en segundo plano. */
   .tarjeta.actual { border-color: var(--primario); box-shadow: 0 0 0 3px var(--primario-suave), var(--sombra-2); }
   .tarjeta.urgente { border-color: var(--rojo); }
-  .banda { display: inline-block; margin: -4px 0 var(--esp-2); padding: 3px 10px; border-radius: 999px; background: var(--primario-suave); color: var(--primario); font-size: 13px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+  .banda { display: inline-block; margin: -4px 0 var(--esp-2); padding: 3px 10px; border-radius: 999px; background: var(--primario-suave); color: var(--primario); font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; }
   .banda.gris { background: var(--gris-suave); color: var(--gris); }
   .cab { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .orden { width: 34px; height: 34px; border-radius: 50%; background: var(--primario); color: var(--primario-texto); display: inline-grid; place-items: center; font-weight: 700; flex: none; font-size: 17px; }

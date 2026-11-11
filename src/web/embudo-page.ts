@@ -83,7 +83,7 @@ ${PESTANAS_PEDIDOS_CSS}
 .em-vacio { padding: 26px 8px; text-align: center; color: var(--texto-suave); }
 
 .em-lista-op { position: fixed; z-index: 60; overflow-y: auto; padding: 6px; border-radius: 12px; border: 1px solid var(--borde); background: var(--superficie); box-shadow: 0 12px 32px rgba(0, 0, 0, .3); }
-.em-lista-op .t { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--texto-suave); }
+.em-lista-op .t { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--texto-suave); }
 .em-lista-op button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--texto); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
 .em-lista-op button:hover, .em-lista-op button:focus-visible { background: var(--primario-suave); outline: none; }
 .em-lista-op button.activo { color: var(--primario); font-weight: 600; }

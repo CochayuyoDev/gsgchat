@@ -13,35 +13,33 @@
  * de ruta con sus paradas. Todo dibujado con HTML y CSS: sin imagenes.
  *
  * No lleva armazon: define su CSS aqui, con su propia paleta (el verde del logo
- * para las franjas, un menta suave para botones y resaltados, papel) en claro y
- * en oscuro. Los nombres de los tonos (asfalto, senal) vienen de la version
- * anterior; lo que cuenta es su papel, no el nombre. Respeta el tema elegido en el sistema
- * (`data-tema`) y `prefers-reduced-motion`.
+ * para las franjas, un menta suave para botones y resaltados, papel). Los
+ * nombres de los tonos (asfalto, senal) vienen de la version anterior; lo que
+ * cuenta es su papel, no el nombre.
+ *
+ * Siempre en claro: es la cara publica del producto y no cambia segun el modo
+ * del Windows del visitante ni el tema que alguien eligio dentro del panel
+ * (antes, con el sistema en oscuro, la portada se veia toda negra y la burbuja
+ * de la ilustracion desaparecia). Respeta `prefers-reduced-motion`.
  */
 
 import { NOMBRE_SISTEMA } from '../marca.js';
 import { ICONOS_HEAD, RUTA_LOGO } from './marca-routes.js';
 import { escapeHtml, FUENTES_MARCA } from './login-page.js';
-import { TEMA_SCRIPT } from './tokens.js';
 
 const CLARO = `
     --fondo: #F1F6F2; --papel: #FFFFFF; --tinta: #0F1B15; --tinta-suave: #4B5E54; --linea: #D4E2D9;
     --asfalto: #0B5A3C; --asfalto-2: #126A49; --sobre-asfalto: #EAF6EF; --sobre-asfalto-suave: #AFD3BF;
     --senal: #8DDDB0; --senal-tinta: #063321; --wa: #1FA855; --wa-suave: #DCF5E5; --burbuja: #FFFFFF; --burbuja-mia: #D9FDD3; --chat-fondo: #EFE7DC;`;
-const OSCURO = `
-    --fondo: #0A120E; --papel: #111C17; --tinta: #E6F0EA; --tinta-suave: #9AB3A6; --linea: #233B2F;
-    --asfalto: #0E3626; --asfalto-2: #164532; --sobre-asfalto: #E6F0EA; --sobre-asfalto-suave: #A0C4B2;
-    --senal: #74D69E; --senal-tinta: #04261A; --wa: #3DD47A; --wa-suave: #123222; --burbuja: #1F2C38; --burbuja-mia: #144D37; --chat-fondo: #0E161E;`;
 
 const CSS = `
   :root {${CLARO}
+    color-scheme: light;
     --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
     --texto: "Public Sans", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
     --radio: 14px;
   }
-  @media (prefers-color-scheme: dark) { :root:not([data-tema="claro"]) {${OSCURO}} }
-  :root[data-tema="oscuro"] {${OSCURO}}
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--fondo); color: var(--tinta); font: 16px/1.6 var(--texto); -webkit-font-smoothing: antialiased; }
   a { color: inherit; }
@@ -65,7 +63,6 @@ const CSS = `
   .btn.senal:hover { box-shadow: 0 6px 0 -2px var(--asfalto); }
   .btn.borde { background: transparent; color: var(--tinta); border-color: var(--linea); }
   .btn.borde:hover { border-color: var(--tinta); box-shadow: none; }
-  :root[data-tema="oscuro"] .btn:not(.senal):not(.borde) { border-color: var(--sobre-asfalto); }
 
   /* --- lo primero que se ve --- */
   .hero { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 56px; align-items: center; padding-top: 72px; padding-bottom: 64px; }
@@ -111,7 +108,6 @@ const CSS = `
       linear-gradient(0deg, transparent 30%, rgba(255,255,255,.75) 30% 36%, transparent 36%),
       linear-gradient(125deg, transparent 60%, rgba(255,255,255,.7) 60% 64%, transparent 64%),
       #CFE3D2; }
-  :root[data-tema="oscuro"] .mapita { filter: brightness(.7); }
   .mapita::after { content: ""; position: absolute; left: 50%; top: 42%; width: 16px; height: 16px; margin: -16px 0 0 -8px; background: #E5484D; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 2px 4px rgba(0,0,0,.3); }
 
   /* Entrada: la conversacion se arma sola, una vez */
@@ -240,7 +236,7 @@ export function landingPage(opts: { nombreNegocio: string; conSesion: boolean })
     : '<a class="btn senal" href="/registro">Crear mi cuenta</a><a class="btn borde" href="/login">Ya tengo cuenta</a>';
 
   return `<!doctype html>
-<html lang="es-PE"><head><meta charset="utf-8">${TEMA_SCRIPT}<meta name="viewport" content="width=device-width, initial-scale=1">${ICONOS_HEAD}
+<html lang="es-PE"><head><meta charset="utf-8"><meta name="color-scheme" content="light"><meta name="viewport" content="width=device-width, initial-scale=1">${ICONOS_HEAD}
 <title>${NOMBRE_SISTEMA} · Entregas coordinadas por WhatsApp</title>
 <meta name="description" content="${NOMBRE_SISTEMA} pide la ubicación de cada pedido por WhatsApp, confirma con el cliente y manda al motorizado con la hora de llegada. Con WhatsApp normal o con la API oficial de Meta.">
 ${FUENTES_MARCA}

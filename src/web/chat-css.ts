@@ -32,8 +32,9 @@ export const CHAT_CSS = `
      bloque de "no se puede escribir") diciendo casi lo mismo. */
   .aviso { padding: 9px 14px; font-size: 13.5px; text-align: center; line-height: 1.35; flex: none; color: #fff; }
   .aviso a { color: inherit; text-decoration: underline; }
-  .aviso.demo { background: var(--ambar); }
-  .aviso.roto { background: var(--rojo); }
+  /* Teñidos, no rellenos (11/11): se lee el aviso sin que la pantalla grite. */
+  .aviso.demo { background: var(--ambar-suave); color: var(--ambar); border-bottom: 1px solid color-mix(in srgb, var(--ambar) 20%, transparent); }
+  .aviso.roto { background: var(--rojo-suave); color: var(--rojo); border-bottom: 1px solid color-mix(in srgb, var(--rojo) 20%, transparent); font-weight: 500; }
 
   /* -------------------------------------------------------- lista de chats */
   .side { background: var(--panel); border-right: 1px solid var(--line);
@@ -147,7 +148,7 @@ export const CHAT_CSS = `
 
   /* La lista que se abre: todas las opciones a la vista, con color y cuantos chats. */
   .lista-filtro { position: fixed; z-index: 60; overflow-y: auto; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 12px 32px rgba(0, 0, 0, .35); }
-  .lista-filtro .lf-titulo { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .lista-filtro .lf-titulo { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); }
   .lista-filtro .lf-op { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
   .lista-filtro .lf-op:hover, .lista-filtro .lf-op:focus-visible { background: var(--primario-suave); outline: none; }
   .lista-filtro .lf-op.activo { color: var(--accent); font-weight: 600; }
@@ -228,7 +229,7 @@ export const CHAT_CSS = `
   .prueba-dlg .pr-kpi { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 12px; color: var(--muted); }
   .prueba-dlg .pr-kpi b { display: block; font-size: 18px; color: var(--text); }
   .prueba-dlg .pr-kpi.malo b { color: var(--rojo); }
-  .prueba-dlg h4 { margin: 14px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .prueba-dlg h4 { margin: 14px 0 8px; font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--muted); }
   .prueba-dlg .pr-etiquetas { display: flex; flex-wrap: wrap; gap: 6px; }
   .prueba-dlg .pr-etiquetas .pe { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 3px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
   .prueba-dlg .pr-etiquetas .pe .etq { max-width: none; }
@@ -272,7 +273,7 @@ export const CHAT_CSS = `
   .ficha { position: absolute; top: 58px; right: 8px; width: min(360px, calc(100% - 16px)); max-height: calc(100% - 70px); overflow: auto; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra-2); z-index: 6; }
   .ficha-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
   .ficha-cuerpo { padding: 10px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 10px; }
-  .ficha-cuerpo h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .02em; }
+  .ficha-cuerpo h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--texto-suave); text-transform: none; letter-spacing: 0; }
   .ficha-cuerpo .fila { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
   .ficha-cuerpo .pin-coords { font-family: ui-monospace, Consolas, monospace; user-select: all; }
   .ficha-cuerpo a.sm, .ficha-cuerpo button.sm { min-height: 34px; padding: 4px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: none; color: var(--texto); display: inline-flex; align-items: center; }
@@ -445,8 +446,7 @@ export const CHAT_CSS = `
   .pin-cliente { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px; padding: 8px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
   .pin-cliente .pin-titulo { font-weight: 600; font-size: 13px; }
   .adjunto { display: block; margin: 2px 0 6px; max-width: min(320px, 100%); }
-  .adjunto-foto img, .adjunto-video video { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 8px; background: var(--borde); }
-  .adjunto-sticker img { display: block; width: 160px; max-width: 100%; height: auto; background: transparent; }
+  .adjunto-foto img, .adjunto-video video { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 8px; background: var(--borde); }  .adjunto-sticker img { display: block; width: 160px; max-width: 100%; height: auto; background: transparent; }
   /* Nota de voz como en WhatsApp: play, onda, tiempo y velocidad */
   .msg .adjunto-audio, .adjunto-audio { display: flex; align-items: center; gap: 8px; min-width: 230px; max-width: min(300px, 100%); padding: 4px 2px; font-size: 12.5px; font-weight: 500; }
   .wa-a-play { flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; background: #00a884; color: #fff; cursor: pointer; position: relative; padding: 0; }
@@ -466,7 +466,7 @@ export const CHAT_CSS = `
   .day {
     align-self: center; background: var(--panel); color: var(--muted); font-size: 12.5px;
     padding: 5px 12px; border-radius: 8px; margin: 14px 0 8px; position: sticky; top: 4px;
-    z-index: 2; box-shadow: var(--sombra); text-transform: uppercase;
+    z-index: 2; box-shadow: var(--sombra); text-transform: none;
     letter-spacing: .3px; font-weight: 500;
   }
   /* por que respondio el bot: nota interna, discreta, que el cliente no ve */
@@ -476,7 +476,7 @@ export const CHAT_CSS = `
     color: var(--muted); font-size: 11.5px; line-height: 1.35; text-align: center;
     display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; overflow-wrap: anywhere;
   }
-  .decision-bot .decision-etq { font-weight: 600; text-transform: uppercase; letter-spacing: .3px; font-size: 10.5px; }
+  .decision-bot .decision-etq { font-weight: 600; text-transform: none; letter-spacing: .3px; font-size: 10.5px; }
   .decision-bot .decision-txt { flex-basis: 100%; }
   .decision-bot .decision-extra { flex-basis: 100%; font-style: italic; }
   .decision-bot .decision-hora { font-size: 10.5px; opacity: .8; }
@@ -558,7 +558,7 @@ export const CHAT_CSS = `
   .emojis { padding: 8px 12px 12px; }
   .emojis .buscador { width: 100%; padding: 8px 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm);
     background: var(--superficie); color: var(--texto); font: inherit; font-size: 13.5px; margin-bottom: 8px; }
-  .emojis h5 { margin: 6px 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+  .emojis h5 { margin: 6px 0 4px; font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 600; }
   .emojis .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 2px; }
   .emojis .rejilla button { border: 0; background: none; font-size: 22px; cursor: pointer; border-radius: var(--radio-sm);
     min-height: 38px; line-height: 1; }
