@@ -232,6 +232,10 @@ const CSS = `${REPARTO_CSS}
   .aj .marcadores { font-size: var(--fs-small); color: var(--texto-suave); margin: 6px 0 0; }
   .aj .marcadores code { background: var(--superficie); border: 1px solid var(--borde); border-radius: 5px; padding: 1px 5px; font-size: 12px; cursor: pointer; }
   .aj-intro { margin: 0; padding: 12px 14px; border-radius: var(--radio-sm); background: var(--superficie-2); color: var(--texto-suave); }
+  .aj-tandas-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+  .aj-ayuda-tandas { margin: 8px 0 0; color: var(--texto-suave); font-size: var(--fs-small); line-height: 1.5; max-width: 75ch; }
+  .aj-ayuda-tandas:empty { display: none; }
+  #aj-tandas .aj-titulo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .aj-seccion { margin-top: 18px; padding: 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
   .aj-seccion-inicial { border-color: var(--primario); background: var(--primario-suave); }
   .aj-seccion-cab { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 12px; }
@@ -432,6 +436,13 @@ export function rutasPage(opts: RutasOpts): string {
       <section class="aj-seccion">
         <h3 class="aj-titulo">Pausa entre clientes</h3>
         <p class="aj-frase">Entre un cliente y el siguiente, esperar entre <input id="aj-pausa-min" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa mínima"> <select id="aj-pausa-min-unidad" data-unidad-for="aj-pausa-min" aria-label="Unidad de pausa mínima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select> y <input id="aj-pausa-max" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa máxima"> <select id="aj-pausa-max-unidad" data-unidad-for="aj-pausa-max" aria-label="Unidad de pausa máxima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select>. Esta pausa es independiente de los tiempos por pedido.</p>
+      </section>
+
+      <section class="aj-seccion" id="aj-tandas">
+        <h3 class="aj-titulo">Envío por tandas <span class="chip tono-azul sin-punto">Solo WhatsApp API</span></h3>
+        <p class="aj-frase"><label class="aj-tandas-check"><input type="checkbox" id="aj-tandas-activo" disabled> Enviar por tandas:</label> <input id="aj-tandas-tamano" disabled type="number" min="1" max="80" step="1" class="aj-num" aria-label="Mensajes por tanda"> mensajes cada <input id="aj-tandas-min" disabled type="number" min="2" max="60" step="1" class="aj-num" aria-label="Minutos entre tandas"> minutos.</p>
+        <p class="aj-ayuda-tandas">Solo para los números de <b>WhatsApp API</b>: en vez de esperar entre cada cliente, salen hasta ese número de mensajes seguidos y después se espera. Entre tanda y tanda el sistema revisa los rechazos de Meta y frena si algo va mal. Los <b>números normales (con QR)</b> no cambian: siguen con la pausa entre clientes de arriba. Recomendado: 50 mensajes cada 3 minutos.</p>
+        <p class="aj-ayuda-tandas" id="aj-tandas-estado" role="status"></p>
       </section>
 
       <section class="aj-seccion" id="aj-cambio-ubi">
@@ -1498,6 +1509,39 @@ function pintarPrevia(paso) {
   caja.innerHTML = previaHtml(lineas, d.ejemplo, d.textosDeSiempre[paso]) + '<small>' + pie + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
 }
 
+/* El envio por tandas (solo lineas de la API) vive en los ajustes generales: se lee y se guarda aparte. */
+/* true cuando ya se leyo lo guardado: antes, guardar no toca las tandas (si no, una
+   carga lenta las apagaria sin querer: la casilla aun no muestra lo de verdad). */
+var tandasCargadas = false;
+function pintarTandas(t) {
+  t = t || { activo: false, tamano: 50, pausaMin: 3 };
+  document.getElementById('aj-tandas-activo').disabled = false;
+  document.getElementById('aj-tandas-activo').checked = Boolean(t.activo);
+  document.getElementById('aj-tandas-tamano').value = t.tamano || 50;
+  document.getElementById('aj-tandas-min').value = t.pausaMin || 3;
+  document.getElementById('aj-tandas-tamano').disabled = !t.activo;
+  document.getElementById('aj-tandas-min').disabled = !t.activo;
+}
+async function cargarTandas() {
+  try {
+    var r = await api('/admin/ajustes');
+    pintarTandas(r.guardado && r.guardado.tandasApi);
+    tandasCargadas = true;
+  } catch (e) {
+    document.getElementById('aj-tandas-estado').textContent = 'No se pudo leer el envío por tandas: ' + e.message + ' Recarga la página antes de cambiarlo.';
+  }
+}
+function leerTandas() {
+  var activo = document.getElementById('aj-tandas-activo').checked;
+  var tamano = Math.min(80, Math.max(1, Math.round(Number(document.getElementById('aj-tandas-tamano').value) || 50)));
+  var pausaMin = Math.min(60, Math.max(2, Math.round(Number(document.getElementById('aj-tandas-min').value) || 3)));
+  return { activo: activo, tamano: tamano, pausaMin: pausaMin };
+}
+document.getElementById('aj-tandas-activo').addEventListener('change', function () {
+  document.getElementById('aj-tandas-tamano').disabled = !this.checked;
+  document.getElementById('aj-tandas-min').disabled = !this.checked;
+});
+
 function pintarAjustes(d) {
   ajustesCache = d;
   if (ajustesSucios) return;
@@ -1506,6 +1550,7 @@ function pintarAjustes(d) {
   var esperas = a.esperasMensajesSegundos || (a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos)).map(function (n) { return n * 60; });
   ponerDuracion('aj-pausa-min', a.pausaMinSegundos);
   ponerDuracion('aj-pausa-max', a.pausaMaxSegundos);
+  cargarTandas();
   document.getElementById('aj-hora-inicio').value = a.horaInicio;
   document.getElementById('aj-hora-fin').value = a.horaFin;
   ponerDuracion('aj-espera-final', a.esperaFinalSegundos != null ? a.esperaFinalSegundos : (a.esperaFinalMinutos || 0) * 60);
@@ -2133,6 +2178,14 @@ document.getElementById('aj-guardar').onclick = async function () {
       textosSeguimientos: leerTextosAdicionales()
     }});
     var v = r.vigente;
+    var tandas = leerTandas();
+    var avisoTandas = '';
+    if (!tandasCargadas) avisoTandas = ' El envío por tandas no se tocó: todavía no se había leído lo guardado.';
+    else try {
+      await api('/admin/ajustes', { method: 'POST', body: { tandasApi: tandas } });
+      avisoTandas = tandas.activo ? ' Envío por tandas (WhatsApp API): ' + tandas.tamano + ' mensajes cada ' + tandas.pausaMin + ' min.' : ' Envío por tandas apagado.';
+    } catch (e) { avisoTandas = ' El envío por tandas no se guardó: ' + e.message; }
+    document.getElementById('aj-tandas-estado').textContent = avisoTandas.trim();
     ajustesSucios = false;
     actualizarEstadoCambios();
     await cargarAjustes();

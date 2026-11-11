@@ -20,6 +20,8 @@
  *  4. Contactos nuevos por dia (no oficial): escribir a mucha gente que no
  *     te tiene agendada es la senal mas fuerte de spam en un cliente web.
  *  5. La pausa sorteada desde el ultimo envio, dentro del rango configurado.
+ *     O, en las lineas de la API con el envio por tandas encendido, la tanda:
+ *     hasta N envios en cualquier ventana de M minutos, sin pausa entre ellos.
  *
  * Es una funcion pura sobre una foto del estado, y una clase pequena que
  * guarda lo que no esta en la base: los envios del ultimo minuto y la pausa
@@ -45,6 +47,11 @@ export interface FotoRitmo {
   nuevosContactosHoy: number;
   /** Si este envio va a un contacto al que nunca se le escribio. */
   esContactoNuevo: boolean;
+  /**
+   * Instantes (ms) de los envios por las lineas de la API con tandas, de la
+   * ultima hora: con ellos se cuenta cuantos van en la tanda en curso.
+   */
+  enviosTanda?: number[];
 }
 
 export type CodigoRitmo =
@@ -54,7 +61,8 @@ export type CodigoRitmo =
   | 'cupo_minuto'
   | 'cupo_hora'
   | 'nuevos_contactos_dia'
-  | 'pausa_entre_envios';
+  | 'pausa_entre_envios'
+  | 'pausa_entre_tandas';
 
 export type DecisionRitmo =
   | { ok: true }
@@ -136,7 +144,7 @@ export function decidirRitmo(foto: FotoRitmo, politica: Politica): DecisionRitmo
     };
   }
 
-  if (politica.soloRitmo) return decidirPausa(foto);
+  if (politica.soloRitmo) return decidirPausa(foto, politica);
 
   if (foto.factor <= 0) {
     return {
@@ -194,10 +202,32 @@ export function decidirRitmo(foto: FotoRitmo, politica: Politica): DecisionRitmo
     }
   }
 
-  return decidirPausa(foto);
+  return decidirPausa(foto, politica);
 }
 
-function decidirPausa(foto: FotoRitmo): DecisionRitmo {
+/**
+ * La tanda: cuantos salieron en la ventana que acaba ahora. Si ya van
+ * `tamano`, se espera a que el mas viejo de la ventana salga de ella. Asi
+ * salen N seguidos, se espera, y vuelven a salir N: tandas sin reloj aparte.
+ */
+export function decidirTanda(enviosMs: number[], ahora: Date, tandas: { tamano: number; ventanaMs: number }): DecisionRitmo {
+  const desde = ahora.getTime() - tandas.ventanaMs;
+  const enVentana = enviosMs.filter((t) => t > desde).sort((a, b) => a - b);
+  if (enVentana.length < tandas.tamano) return { ok: true };
+  // El que libera un hueco: el que hace (tamano) contando desde el final.
+  const libera = enVentana[enVentana.length - tandas.tamano]!;
+  const minutos = Math.round(tandas.ventanaMs / 60_000);
+  return {
+    ok: false,
+    codigo: 'pausa_entre_tandas',
+    motivo: `ya salió la tanda de ${tandas.tamano}: la siguiente sale ${minutos} min después`,
+    esperaMs: Math.max(500, libera + tandas.ventanaMs - ahora.getTime() + 50),
+  };
+}
+
+function decidirPausa(foto: FotoRitmo, politica: Politica): DecisionRitmo {
+  // Lineas de la API con tandas: manda la tanda, no la pausa entre clientes.
+  if (politica.tandas) return decidirTanda(foto.enviosTanda ?? [], foto.ahora, politica.tandas);
   if (foto.ultimoEnvioAt) {
     // El riesgo limita cupos y puede detener el número, pero no modifica
     // silenciosamente el intervalo que configuró el operador.
@@ -223,6 +253,8 @@ function decidirPausa(foto: FotoRitmo): DecisionRitmo {
  */
 export class Marcapasos {
   private envios: number[] = [];
+  /** Envios por lineas de la API con tandas (ultima hora). */
+  private tanda: number[] = [];
   private ultimo: Date | null = null;
   private proporcion: number;
 
@@ -238,17 +270,32 @@ export class Marcapasos {
     if (!this.ultimo || ultimo > this.ultimo) this.ultimo = ultimo;
   }
 
-  /** Un envio iniciado por la empresa acaba de salir. */
-  anotar(at: Date): void {
+  /**
+   * Un envio iniciado por la empresa acaba de salir. `porTanda`: salio por una
+   * linea de la API con tandas; cuenta para su tanda y NO mueve la pausa de las
+   * lineas normales, que siguen con su ritmo de siempre.
+   */
+  anotar(at: Date, porTanda = false): void {
     this.envios.push(at.getTime());
-    this.ultimo = at;
-    this.proporcion = sortearPausa(0, 1_000_000, this.azar) / 1_000_000;
+    if (porTanda) {
+      this.tanda.push(at.getTime());
+    } else {
+      this.ultimo = at;
+      this.proporcion = sortearPausa(0, 1_000_000, this.azar) / 1_000_000;
+    }
     this.podar(at);
   }
 
   private podar(ahora: Date): void {
     const limite = ahora.getTime() - HORA;
     while (this.envios.length && this.envios[0]! < limite) this.envios.shift();
+    while (this.tanda.length && this.tanda[0]! < limite) this.tanda.shift();
+  }
+
+  /** Los envios de la tanda (lineas de la API) de la ultima hora. */
+  enviosTanda(ahora: Date): number[] {
+    this.podar(ahora);
+    return [...this.tanda];
   }
 
   enUltimoMinuto(ahora: Date): number {

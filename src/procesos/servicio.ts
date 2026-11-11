@@ -216,7 +216,8 @@ export async function crearServicioProcesos(deps: DepsServicioProcesos): Promise
     const max = Math.max(min, opciones.pausaMaxSegundos);
     return Math.round((min + azar() * (max - min)) * 1000);
   };
-  const pausaEfectiva = () => pausaActual / Math.max(deps.salud?.factor() ?? 1, 0.05);
+  // Envio por tandas (lineas de la API): la tanda la decide el marcapasos, no esta pausa.
+  const pausaEfectiva = () => (deps.salud && deps.politica?.()?.tandas ? 0 : pausaActual / Math.max(deps.salud?.factor() ?? 1, 0.05));
   async function refrescarOpciones(): Promise<void> {
     try {
       const base = deps.opciones ?? OPCIONES_POR_DEFECTO;
