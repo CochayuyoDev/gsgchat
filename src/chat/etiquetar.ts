@@ -30,7 +30,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { CATALOGO_POR_DEFECTO, clasificarConIA, nombreDeEtiqueta, type Catalogo, type IAQueCompleta } from '../archive/clasificar.js';
+import { CATALOGO_POR_DEFECTO, CODIGO_OTRO, clasificarConIA, nombreDeEtiqueta, type Catalogo, type IAQueCompleta } from '../archive/clasificar.js';
 import type { AlcanceMensajes, ChatEtiquetasRepo, EstadoLote, EtiquetaChat, EventoEtiquetas, LoteEtiquetas, MensajeCapturado, MensajeDelDia, TipoLote } from '../db/chat-etiquetas.js';
 import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import { fechaDelNegocio } from '../ajustes/generales.js';
@@ -202,6 +202,9 @@ type ChatDeLoteConMensajes = Awaited<ReturnType<ChatEtiquetasRepo['chatsDelLote'
 const esDelBot = <T extends { origen: string; etiqueta: string | null; huella: string }>(e: T | undefined): e is T =>
   Boolean(e && e.origen === 'reglas' && e.etiqueta && e.huella.startsWith('bot-'));
 
+/** Lo único que puede decir un chat en el que el cliente todavía no escribió nada. */
+const SIN_CLIENTE_VALE = new Set<string | null>([CODIGO_OTRO, 'sin_novedad']);
+
 /** Un lote completo. `alAvanzar` recibe el estado cada vez que algo avanza. */
 export async function etiquetarDelDia(
   deps: EtiquetadoDeps,
@@ -263,6 +266,12 @@ export async function etiquetarDelDia(
       const base = { phone: c.phone, dia, huella: c.huella, mensajes: c.totalMensajes, loteId: lote.id };
       try {
         const r = await clasificarConIA(ia, c.mensajes ?? [], c.nombre, negocio, { catalogo, conReglas: false, ejemplos });
+        // Sin nada del cliente no hay qué leer (solo la plantilla o un «hola» del
+        // operador): la IA, sin datos, inventaba etiquetas como «Pedido no
+        // reconocido» (10/11). Ahí solo valen «Otro» y «Sin novedad».
+        if (r.estado === 'clasificada' && !SIN_CLIENTE_VALE.has(r.etiqueta) && !(c.mensajes ?? []).some((m) => m.direction === 'in') && catalogo.some((e) => e.codigo === CODIGO_OTRO)) {
+          r.etiqueta = CODIGO_OTRO;
+        }
         // Mientras la IA leia, una persona pudo ponerla a mano: esa manda y no se pisa.
         const mientras = (await deps.repo.delDia(dia, [c.phone]))[0];
         if (mientras?.origen === 'manual' || esDelBot(mientras)) {

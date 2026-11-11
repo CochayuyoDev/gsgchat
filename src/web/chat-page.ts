@@ -573,7 +573,11 @@ var conteoEtiquetas = null;
 function opcionesEtiqueta() {
   var d = conteoEtiquetas;
   if (!d) return [];
-  var con = d.etiquetas.filter(function (e) { return e.n > 0; }).sort(function (a, b) { return b.n - a.n; });
+  /* Todas las del catálogo, siempre: primero las que tienen chats (de más a menos) y después las que hoy no tienen
+     ninguno, en el orden del catálogo. Esconder las de 0 parecía que se habían borrado (10/11). */
+  var con = d.etiquetas.map(function (e, i) { return { e: e, i: i }; })
+    .sort(function (a, b) { return (b.e.n > 0) - (a.e.n > 0) || b.e.n - a.e.n || a.i - b.i; })
+    .map(function (x) { return x.e; });
   var estados = [];
   if (d.sinEtiquetar) estados.push({ valor: 'sin_etiquetar', texto: 'Sin etiquetar', n: d.sinEtiquetar, tono: 'hueco' });
   if (d.sinClasificar) estados.push({ valor: 'sin_clasificar', texto: 'Sin clasificar', n: d.sinClasificar, tono: 'sin' });
@@ -622,7 +626,7 @@ function abrirListaFiltro(boton, grupos, actual, elegir) {
   panel.innerHTML = grupos.map(function (g) {
     return (g.titulo ? '<div class="lf-titulo">' + esc(g.titulo) + '</div>' : '') + g.opciones.map(function (o) {
       var es = o.valor === actual;
-      return '<button type="button" class="lf-op' + (es ? ' activo' : '') + '" role="option" aria-selected="' + (es ? 'true' : 'false') + '" data-valor="' + esc(o.valor) + '">' +
+      return '<button type="button" class="lf-op' + (es ? ' activo' : '') + (o.n === 0 ? ' vacia' : '') + '" role="option" aria-selected="' + (es ? 'true' : 'false') + '" data-valor="' + esc(o.valor) + '">' +
         '<span class="lf-marca" aria-hidden="true">' + (es ? '✓' : '') + '</span>' +
         (o.tono ? '<i class="punto ' + esc(o.tono) + '" aria-hidden="true"></i>' : '') +
         '<span class="lf-texto">' + esc(o.texto) + '</span>' +
@@ -1677,7 +1681,7 @@ async function abrirFicha() {
     var marcas = [];
     if (c.optOutAt) marcas.push('<span class="pill bad">Dado de baja</span>');
     else if (current.windowOpen) marcas.push('<span class="pill ok">Puede recibir mensajes</span>');
-    else marcas.push('<span class="pill warn" title="Pasaron más de 24 horas desde su último mensaje: solo se le puede escribir con una plantilla aprobada.">Fuera de las 24 h</span>');
+    /* Fuera de las 24 h ya no se avisa: se escribe libre siempre (decisión del dueño, 10/11). */
     if (c.botPausadoAt || current.botPausadoAt) marcas.push('<span class="pill warn">Bot callado</span>');
     if (current.iaCerradaAt && !String(current.iaCerradaMotivo || '').startsWith('ubicación registrada')) marcas.push('<span class="pill warn">Para una persona</span>');
     var html = '<div><h4>Este chat</h4><div class="fila">' + marcas.join('') + '<button class="sm" type="button" id="ficha-baja">' + (c.optOutAt ? 'Dar de alta' : 'Dar de baja') + '</button></div></div>' +

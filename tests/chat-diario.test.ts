@@ -95,6 +95,28 @@ describe('chat del día, iniciado únicamente por GSGchat', () => {
     expect(await perteneceAlChatActual(repos, settings, { ...entrada, viejo: true })).toBe(false);
   });
 
+  it('por WhatsApp API (Meta) el corte del QR no descarta las respuestas: pulsar «Conectar y mostrar el QR» no las pierde (10/11)', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-10T16:00:00Z'));
+    const repos = createFakeRepos();
+    const settings = await createSettingsService(createMemorySettingsRepo(), config, TEST_SETTINGS_KEY);
+    const cliente = await repos.contacts.upsertFromInbound('51914337189');
+    const extrano = await repos.contacts.upsertFromInbound('51914000000');
+    // La plantilla sale a las 16:00 por la línea de API...
+    await repos.messages.add({ contactId: cliente.id, direction: 'out', kind: 'template', wamid: 'plantilla', body: '¡Hola!', createdAt: new Date(), payload: { origen: 'sistema' } });
+    // ...y a las 16:05 alguien pulsa «Conectar y mostrar el QR» en la principal sin vincular: el corte se mueve.
+    vi.setSystemTime(new Date('2026-11-10T16:05:00Z'));
+    await settings.iniciarVistaChat!();
+    vi.setSystemTime(new Date('2026-11-10T16:06:00Z'));
+    const respuesta = { from: cliente.phone, timestamp: String(Math.floor(Date.now() / 1000)) };
+    // Por QR, como siempre: el corte manda.
+    expect(await perteneceAlChatActual(repos, settings, respuesta)).toBe(false);
+    // Por Meta: entra (el sistema sí le escribió).
+    expect(await perteneceAlChatActual(repos, settings, respuesta, { sinCorte: true })).toBe(true);
+    // A quien el sistema nunca le escribió, ni por Meta.
+    expect(await perteneceAlChatActual(repos, settings, { ...respuesta, from: extrano.phone }, { sinCorte: true })).toBe(false);
+    expect(await perteneceAlChatActual(repos, settings, { ...respuesta, historial: true }, { sinCorte: true })).toBe(false);
+  });
+
   it('un nuevo login conserva los chats que aún están dentro de las últimas 72 horas', async () => {
     const e = await crearEscenarioEntregas();
     try {

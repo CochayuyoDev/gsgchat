@@ -33,6 +33,16 @@ export interface SendIntent {
    * peticion explicita de una persona, ni el freno de emergencia.
    */
   manual?: boolean;
+  /**
+   * Escrito por una persona en Chats: aunque sea a mano, la ventana de 24 h
+   * de Meta lo frena si sale por una línea de la API (Meta no lo entregaría).
+   */
+  respetarVentana?: boolean;
+  /**
+   * Escrito por una persona en Chats (decisión del dueño, 10/11): sale aunque
+   * la ventana de 24 h esté cerrada. Meta puede no entregarlo; es su riesgo.
+   */
+  ignorarVentana?: boolean;
 }
 
 export interface GateSnapshot {
@@ -173,13 +183,20 @@ export function evaluateGates(intent: SendIntent, snapshot: GateSnapshot): GateD
     };
   }
 
-  // 4. Fuera de la ventana solo se puede mandar plantilla.
+  // 4. Fuera de la ventana solo se puede mandar plantilla. Es regla de Meta,
+  //    no nuestra: tampoco la salta un mensaje a mano (Meta lo acepta y luego
+  //    no lo entrega; en el chat se quedaba con un solo check, 10/11).
   const ventanaAplica = snapshot.serviceWindowApplies !== false;
-  if (!manual && ventanaAplica && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
+  //    Solo lo escrito por una persona en Chats (`respetarVentana`) se frena
+  //    aunque sea a mano; los demás envíos «a mano» del sistema (avisos al
+  //    supervisor, a la tienda...) siguen como siempre.
+  if (!intent.ignorarVentana && (!manual || intent.respetarVentana) && ventanaAplica && intent.kind !== 'template' && !isWithinServiceWindow(contact, now)) {
     return {
       allow: false,
       code: 'window_closed',
-      reason: 'la ventana de 24 h esta cerrada: hace falta una plantilla',
+      reason: manual
+        ? 'El cliente no te escribió en las últimas 24 h: por WhatsApp API Meta solo deja mandarle una plantilla aprobada. Cuando el cliente escriba, ya puedes contestarle. Si te escribió y no lo ves aquí, revisa el webhook de Meta (Nuestra API → Webhook de Meta).'
+        : 'la ventana de 24 h esta cerrada: hace falta una plantilla',
     };
   }
 

@@ -72,7 +72,8 @@ const CSS = `
   .cinta { display: inline-flex; align-items: center; gap: 10px; font: 600 12.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--tinta-suave); margin-bottom: 20px; }
   .cinta::before { content: ""; width: 34px; height: 10px; background: repeating-linear-gradient(-45deg, var(--senal) 0 6px, var(--asfalto) 6px 12px); border-radius: 2px; }
   h1 { font: 800 clamp(34px, 4.4vw, 56px)/1.03 var(--display); font-stretch: 125%; letter-spacing: -.035em; margin: 0 0 22px; text-wrap: balance; }
-  h1 em { font-style: normal; background: linear-gradient(transparent 62%, var(--senal) 62% 92%, transparent 92%); padding: 0 .06em; }
+  /* Subrayado grueso BAJO las letras: el fondo a media altura las cortaba como un tachado (10/11). */
+  h1 em { font-style: normal; text-decoration: underline; text-decoration-color: var(--senal); text-decoration-thickness: .13em; text-underline-offset: .1em; text-decoration-skip-ink: none; }
   .bajada { font-size: 18.5px; color: var(--tinta-suave); max-width: 530px; margin: 0 0 30px; }
   .acciones { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
   .canales { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13.5px; color: var(--tinta-suave); }
@@ -94,7 +95,8 @@ const CSS = `
   .barras { display: flex; align-items: stretch; gap: 0; height: 54px; padding: 12px 14px 4px; }
   .barras i { display: block; background: var(--tinta); }
   .barras-num { padding: 0 14px 12px; font: 500 11px/1 var(--mono); letter-spacing: .32em; color: var(--tinta-suave); }
-  .sello-ok { position: absolute; right: 14px; top: 52px; transform: rotate(-11deg); border: 3px solid var(--wa); color: var(--wa); border-radius: 8px; padding: 6px 12px; font: 800 14px/1.15 var(--display); font-stretch: 125%; text-transform: uppercase; letter-spacing: .03em; background: color-mix(in srgb, var(--papel) 82%, transparent); text-align: center; }
+  /* Sobre la fila del tracking (que a la derecha está vacía), sin tapar «Distrito» de la fila de abajo. */
+  .sello-ok { position: absolute; right: 16px; top: 44px; transform: rotate(-8deg); border: 3px solid var(--wa); color: var(--wa); border-radius: 8px; padding: 4px 10px; font: 800 12.5px/1.1 var(--display); font-stretch: 125%; text-transform: uppercase; letter-spacing: .03em; background: color-mix(in srgb, var(--papel) 82%, transparent); text-align: center; }
   .sello-ok small { display: block; font: 600 11px/1.3 var(--mono); letter-spacing: .04em; text-transform: none; }
 
   /* El chat, apoyado sobre la etiqueta */
@@ -120,7 +122,7 @@ const CSS = `
     .chat .anima:nth-of-type(4) { animation-delay: 1.8s; }
     .sello-ok { opacity: 0; animation: sella .35s cubic-bezier(.2,1.6,.4,1) 2.4s forwards; }
     @keyframes entra { to { opacity: 1; transform: none; } }
-    @keyframes sella { from { opacity: 0; transform: rotate(-11deg) scale(1.6); } to { opacity: 1; transform: rotate(-11deg) scale(1); } }
+    @keyframes sella { from { opacity: 0; transform: rotate(-8deg) scale(1.6); } to { opacity: 1; transform: rotate(-8deg) scale(1); } }
   }
 
   /* --- secciones --- */
@@ -179,7 +181,7 @@ const CSS = `
 
   @media (max-width: 980px) {
     .hero { grid-template-columns: minmax(0, 1fr); gap: 40px; padding-top: 44px; }
-    .sello-ok { font-size: 12px; top: 46px; }
+    .sello-ok { font-size: 11.5px; top: 42px; }
     .escena { max-width: 520px; }
     .ruta { grid-template-columns: minmax(0, 1fr); gap: 22px; }
     .ruta::before { left: 21px; right: auto; top: 22px; bottom: 22px; border-top: 0; border-left: 4px dashed var(--asfalto); }

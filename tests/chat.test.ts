@@ -383,15 +383,15 @@ describe('escribir desde el chat', () => {
     expect(messages.at(-1)).toMatchObject({ direction: 'out', body: 'Claro que si, te ayudo' });
   });
 
-  it('fuera de la ventana el chat se bloquea y lo explica', async () => {
+  it('fuera de la ventana el chat NO se bloquea: se escribe libre (decisión del dueño, 10/11)', async () => {
     await repos.contacts.upsertFromInbound('5215501010101', 'Viejo');
     await repos.contacts.setOptIn('5215501010101', 'formulario');
     const contact = (await repos.contacts.getByPhone('5215501010101'))!;
     await repos.messages.add({ contactId: contact.id, direction: 'out', kind: 'text', wamid: 'wamid.chat.viejo', body: 'Pedido registrado', status: 'sent', payload: { origen: 'sistema' } });
 
     const hilo = await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth });
-    expect(hilo.json().canWrite).toBe(false);
-    expect(hilo.json().blockedReason).toContain('24 h');
+    expect(hilo.json().canWrite).toBe(true);
+    expect(hilo.json().blockedReason).toBeNull();
 
     const intento = await app.inject({
       method: 'POST',
@@ -399,7 +399,14 @@ describe('escribir desde el chat', () => {
       headers: auth,
       payload: { contactId: contact.id, text: 'hola?' },
     });
-    expect(intento.json()).toMatchObject({ ok: false, code: 'window_closed' });
+    expect(intento.json()).toMatchObject({ ok: true });
+  });
+
+  it('el envío automático del sistema sí sigue respetando la ventana de 24 h', async () => {
+    await repos.contacts.upsertFromInbound('5215503030303', 'Otro');
+    await repos.contacts.setOptIn('5215503030303', 'formulario');
+    const r = await sender.send({ phone: '5215503030303', kind: 'freeform', category: 'UTILITY', text: 'aviso automático' });
+    expect(r).toMatchObject({ ok: false, code: 'window_closed' });
   });
 
   it('fuera de la ventana una plantilla aprobada si sale', async () => {

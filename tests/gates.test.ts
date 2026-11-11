@@ -293,6 +293,16 @@ describe('la ventana de servicio segun el proveedor', () => {
     ).toMatchObject({ allow: false, code: 'window_closed' });
   });
 
+  it('lo que escribe una persona en Chats por la Cloud API tampoco sale fuera de la ventana: Meta no lo entregaría, y se explica', () => {
+    const r = evaluateGates(intent({ contact: frio, kind: 'freeform', template: null, manual: true, respetarVentana: true }), snapshot());
+    expect(r).toMatchObject({ allow: false, code: 'window_closed' });
+    expect((r as { reason: string }).reason).toContain('últimas 24 h');
+    // Por QR (sin Cloud API) sigue saliendo, como el WhatsApp Web de siempre.
+    expect(evaluateGates(intent({ contact: frio, kind: 'freeform', template: null, manual: true, respetarVentana: true }), snapshot({ serviceWindowApplies: false })).allow).toBe(true);
+    // Los demás envíos «a mano» del sistema (avisos al supervisor...) siguen como siempre.
+    expect(evaluateGates(intent({ contact: frio, kind: 'freeform', template: null, manual: true }), snapshot()).allow).toBe(true);
+  });
+
   it('sin Cloud API detras, la ventana no frena nada', () => {
     expect(
       evaluateGates(

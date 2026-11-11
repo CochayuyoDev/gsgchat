@@ -346,7 +346,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       config,
       traerPlantillas: async () => {
         const cliente = await clienteDeMeta({ settings, wa, lineas: deps.lineas, registro: deps.registroClientes });
-        return cliente ? (await syncTemplates(cliente, repos)).length : null;
+        return cliente ? (await syncTemplates(cliente, repos, { marcarAusentes: true })).length : null;
       },
     });
   }

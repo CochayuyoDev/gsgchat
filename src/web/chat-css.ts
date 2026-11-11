@@ -154,6 +154,8 @@ export const CHAT_CSS = `
   .lista-filtro .lf-marca { flex: none; width: 14px; font-size: 12px; color: var(--accent); }
   .lista-filtro .lf-texto { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: 1.3; }
   .lista-filtro .lf-n { flex: none; min-width: 26px; padding: 1px 8px; border-radius: 999px; background: var(--gris-suave); color: inherit; font-size: 12px; font-weight: 600; text-align: center; }
+  .lista-filtro .lf-op.vacia { color: var(--texto-suave); }
+  .lista-filtro .lf-op.vacia .lf-n { background: transparent; font-weight: 400; }
   .punto { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gris); }
   .punto.rojo { background: var(--rojo); }
   .punto.ambar { background: var(--ambar); }

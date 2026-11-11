@@ -1977,7 +1977,8 @@ async function accionLinea(acc, id, valor) {
       var r = await api('/admin/lineas/' + id + '/credenciales', { method: 'PATCH', body: cuerpo });
       formsAbiertos[id] = false;
       var numero = r && r.linea && r.linea.numero ? ' Número: +' + r.linea.numero + '.' : '';
-      avisoLinea(id, 'Listo: Meta aceptó los datos y quedaron guardados.' + numero);
+      if (r && r.suscrita === false) avisoLinea(id, 'Meta aceptó los datos, pero no se pudo activar «Suscribir webhooks» (' + (r.suscripcionError || 'sin detalle') + '). Sin eso no te llega lo que escribe el cliente: actívalo en Meta → WhatsApp → Configuración de la API.', true);
+      else avisoLinea(id, 'Listo: Meta aceptó los datos y quedaron guardados.' + numero + (r && r.suscrita ? ' Suscrita a los avisos de Meta: lo que escriba el cliente llega aquí.' : ''));
     }
     lineasVistas = '';
     await cargarLineas();
@@ -2104,9 +2105,10 @@ async function cargarReparto() {
         try { await api('/admin/lineas/' + encodeURIComponent(creada.linea.id) + '/principal', { method: 'POST', body: {} }); principalOk = true; $('api-principal').checked = false; }
         catch (e) { principalError = e.message; }
       }
+      var suscritaTxt = creada && creada.suscrita === true ? ' Ya quedó suscrita a los avisos de Meta.' : creada && creada.suscrita === false ? ' No se pudo activar «Suscribir webhooks» (' + (creada.suscripcionError || 'sin detalle') + '): actívalo en Meta → WhatsApp → Configuración de la API.' : '';
       lineasMsg(proveedor === 'cloud'
-        ? 'Línea de la API agregada y comprobada con Meta' + (principalOk ? ', y ya es la principal' : '') + '. Falta un paso: en Meta pega la dirección del webhook y el verify token (abajo de los campos) y suscríbete a «messages».' + (principalError ? ' No se pudo hacer principal: ' + principalError : '')
-        : 'Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.', principalError ? 'rojo' : '');
+        ? 'Línea de la API agregada y comprobada con Meta' + (principalOk ? ', y ya es la principal' : '') + '.' + suscritaTxt + ' Falta un paso: en Meta pega la dirección del webhook y el verify token (abajo de los campos) y suscríbete a «messages».' + (principalError ? ' No se pudo hacer principal: ' + principalError : '')
+        : 'Línea agregada. Pulsa «Conectar y mostrar el QR» para vincularla.', principalError || (creada && creada.suscrita === false) ? 'rojo' : '');
       lineasVistas = '';
       await cargarLineas();
     } catch (error) {

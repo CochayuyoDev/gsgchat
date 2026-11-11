@@ -112,7 +112,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     const cliente = await clienteDeMeta(fuentesMeta).catch(() => null);
     if (!cliente) return;
     if (cliente === wa && !settings.isConfigured()) return;
-    await syncTemplates(cliente, repos).catch((error) =>
+    await syncTemplates(cliente, repos, { marcarAusentes: true }).catch((error) =>
       warn('fallo la sincronizacion de plantillas', { detalle: error instanceof Error ? error.message : String(error) }),
     );
   };

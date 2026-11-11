@@ -26,6 +26,7 @@ import { CATALOG, type CatalogTemplate } from '../templates/catalog.js';
 import { hasErrors, lintTemplate } from '../templates/lint.js';
 import { countVariables } from '../templates/render.js';
 import { syncTemplates } from '../templates/registry.js';
+import { clienteDeMeta } from '../templates/cliente-meta.js';
 import { pushTemplates } from '../templates/push.js';
 import { registerAutomationRoutes } from './automation-routes.js';
 import { registerChatRoutes } from './chat-routes.js';
@@ -721,8 +722,11 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   });
 
   app.post('/admin/templates/sync', async () => {
-    const templates = await syncTemplates(wa, repos);
-    return { synced: templates.length, templates };
+    // Con la principal por QR y una línea de API, a Meta se le pregunta por la
+    // línea: la conexión de QR solo devolvería el catálogo interno del sistema.
+    const deMeta = await clienteDeMeta({ settings, wa, lineas: deps.lineas, registro: deps.registroClientes }).catch(() => null);
+    const templates = deMeta ? await syncTemplates(deMeta, repos, { marcarAusentes: true }) : await syncTemplates(wa, repos);
+    return { synced: templates.length, templates, deMeta: Boolean(deMeta) };
   });
 
   app.post('/admin/templates/push', async (request, reply) => {

@@ -31,8 +31,31 @@ export interface LineasRoutesDeps {
    * numero. Inyectable para las pruebas; sin esto no se comprueba.
    */
   probarApi?: (cred: { token: string; phoneNumberId: string; businessAccountId: string }) => Promise<{ numero: string; nombre: string }>;
+  /**
+   * Suscribe la app a la cuenta de WhatsApp Business (lo mismo que el
+   * interruptor «Suscribir webhooks» de Meta). Sin esto Meta no avisa de lo
+   * que escribe el cliente: ni mensajes, ni fotos, ni si lo nuestro llegó.
+   */
+  suscribirApi?: (cred: { token: string; phoneNumberId: string; businessAccountId: string }) => Promise<void>;
   /** La direccion que hay que pegar en Meta como webhook. */
   webhookUrl?: () => string;
+}
+
+/** Intenta la suscripción; un fallo no tumba el alta: se dice qué falta. */
+async function suscribir(deps: { suscribirApi?: LineasRoutesDeps['suscribirApi'] }, cred: { token?: string; phoneNumberId?: string; businessAccountId?: string }): Promise<{ suscrita: boolean | null; suscripcionError?: string }> {
+  if (!deps.suscribirApi || !cred.token || !cred.phoneNumberId || !cred.businessAccountId) return { suscrita: null };
+  try {
+    await deps.suscribirApi({ token: cred.token, phoneNumberId: cred.phoneNumberId, businessAccountId: cred.businessAccountId });
+    return { suscrita: true };
+  } catch (error) {
+    const texto = error instanceof Error ? error.message : String(error);
+    return {
+      suscrita: false,
+      suscripcionError: /permission|permiso|200|10\b|OAuth|190/i.test(texto)
+        ? 'el token no tiene permiso para suscribir la app (necesita whatsapp_business_management)'
+        : texto.slice(0, 160),
+    };
+  }
 }
 
 const credencialesSchema = z.object({
@@ -258,9 +281,11 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
       await lineas.fijarCredenciales(linea.id, body);
       // Meta contesto: la linea queda conectada ya (sin esperar a la siguiente vuelta del registro).
       if (deps.probarApi) await lineas.sincronizar(linea.id, { estado: 'conectado', ...(numero ? { telefono: numero } : {}) });
+      // Y se suscribe a los avisos de Meta (lo que escribe el cliente).
+      const suscripcion = await suscribir(deps, juntas);
       // El cliente guardado se armo con los datos viejos.
       registro.olvidar(linea.id);
-      return { ok: true, linea: await vista((await lineas.obtener(linea.id))!) };
+      return { ok: true, ...suscripcion, linea: await vista((await lineas.obtener(linea.id))!) };
     } catch (error) {
       return responderError(error, reply);
     }
@@ -306,7 +331,8 @@ export async function registerLineasRoutes(app: FastifyInstance, deps: LineasRou
       // Una linea de la API que Meta acepto ya esta conectada.
       if (body.proveedor === 'cloud' && deps.probarApi) {
         await lineas.sincronizar(linea.id, { estado: 'conectado' });
-        return { ok: true, linea: await vista((await lineas.obtener(linea.id)) ?? linea) };
+        const suscripcion = await suscribir(deps, body.credenciales ?? {});
+        return { ok: true, ...suscripcion, linea: await vista((await lineas.obtener(linea.id)) ?? linea) };
       }
       return { ok: true, linea: await vista(linea) };
     } catch (error) {

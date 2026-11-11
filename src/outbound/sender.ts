@@ -57,6 +57,10 @@ export interface SendJob {
   claveEnvio?: string;
   /** Escrito a mano desde /chat: ver `SendIntent.manual` en gates. */
   manual?: boolean;
+  /** Lo escribió una persona en Chats: ver `SendIntent.respetarVentana` en gates. */
+  respetarVentana?: boolean;
+  /** Escrito en Chats: sale aunque la ventana de 24 h esté cerrada (ver gates). */
+  ignorarVentana?: boolean;
   /** Envío con cadencia propia: el transporte no añade escritura artificial. */
   programado?: boolean;
   /**
@@ -822,7 +826,7 @@ export function createSender(deps: SenderDeps): Sender {
       if (decidida.reserva && lineaId) await repos.usoLineas.anotarEntrega(clave, deliveryId);
 
       const decision = evaluateGates(
-        { contact, kind: job.kind, category: job.category, template, now: at, manual: job.manual, programado: job.programado },
+        { contact, kind: job.kind, category: job.category, template, now: at, manual: job.manual, programado: job.programado, respetarVentana: job.respetarVentana, ignorarVentana: job.ignorarVentana },
         {
           sinControlCuenta: politica?.soloRitmo,
           numberState,
