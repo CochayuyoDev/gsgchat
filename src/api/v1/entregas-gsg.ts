@@ -88,6 +88,12 @@ function referenciasDeEntrada(body: unknown): { total: number; referencias: stri
 }
 
 const textoOpc = z.union([z.string().max(200), z.number()]).nullable().optional();
+/**
+ * El producto (y su detalle) entra con cualquier largo (pedido del dueño, 11/11):
+ * GSG manda descripciones largas y rechazarlas dejaba el pedido sin mensaje.
+ * Se guarda entero; en la plantilla de Meta va acortado (textos.ts, variableMeta).
+ */
+const textoLibreOpc = z.union([z.string(), z.number()]).nullable().optional();
 
 /**
  * Los datos del envio que salen en el primer mensaje al cliente. Todos
@@ -101,7 +107,7 @@ export const CAMPOS_DATOS_ENVIO = {
   fecRegistro: textoOpc,
   fecRuta: textoOpc,
   observacionCliente: textoOpc,
-  detalleProducto: textoOpc,
+  detalleProducto: textoLibreOpc,
   telefono2: textoOpc,
   tamano: textoOpc,
   cantBultos: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).nullable().optional(),
@@ -112,7 +118,7 @@ export const CAMPOS_DATOS_ENVIO = {
   agenciaNombre: textoOpc,
   agenciaDestino: textoOpc,
   pagoEnDestino: z.union([z.boolean().transform(v => v ? 'si' : 'no'), z.string().max(200)]).nullable().optional(),
-  producto: textoOpc,
+  producto: textoLibreOpc,
   empresa: z.union([z.object({ codigo: textoOpc, nombre: textoOpc }).passthrough(), z.string().max(200)]).nullable().optional(),
   empresaCodigo: textoOpc,
   empresaNombre: textoOpc,
