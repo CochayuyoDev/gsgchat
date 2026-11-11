@@ -123,6 +123,14 @@ export const CAMPOS_DATOS_ENVIO = {
   metodoPago: textoOpc,
   monto: textoOpc,
   remitente: textoOpc,
+  /**
+   * Opcional: el motorizado que GSG asignó, {nombre, telefono} o el nombre
+   * suelto (o `telefonoMotorizado`). Con su teléfono, ese motorizado puede
+   * escribir «proceder cambio de ubicación» a la línea de GSGchat sin nombrar
+   * el pedido (pedido del dueño, 11/11). No se le escribe nada por tenerlo.
+   */
+  motorizado: z.union([z.object({ nombre: textoOpc, telefono: textoOpc }).passthrough(), z.string().max(120)]).nullable().optional(),
+  telefonoMotorizado: textoOpc,
   /** El texto del primer mensaje al cliente, ya redactado por GSG. Sin el, va el texto de GSGchat. */
   firstMessage: z.string().max(MAX_FIRST_MESSAGE, `como mucho ${MAX_FIRST_MESSAGE} caracteres (lo que WhatsApp admite en un mensaje con botones)`).nullable().optional(),
 };

@@ -77,6 +77,15 @@ export const ajustesEntregasSchema = z.object({
    */
   cambiosUbicacionMax: z.number().int().min(0).max(5).default(2),
   /**
+   * Números de GSG (motorizados, supervisores) que pueden ordenar «proceder
+   * cambio de ubicación» escribiendo a la línea de GSGchat (pedido del dueño,
+   * 11/11): se toma la última ubicación que mandó el cliente, aunque haya
+   * pasado la hora límite. Como no tienen pedidos asignados, nombran el
+   * tracking; sin nombrarlo vale solo si hay UN pedido de hoy esperando un
+   * cambio. El motorizado que GSG manda en el pedido no necesita estar aquí.
+   */
+  autorizadosCambioUbicacion: z.array(z.string().trim().max(30)).max(50).default([]),
+  /**
    * Ya no se usa: GSGchat nunca le pide nada a GSG (los pedidos llegan cuando
    * GSG los empuja). Se queda en el esquema para que un ajuste guardado de
    * antes se siga leyendo sin error.

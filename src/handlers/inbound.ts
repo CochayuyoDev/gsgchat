@@ -975,6 +975,28 @@ async function handleInboundMessageEnFila(
     createdAt: receivedAt,
   });
 
+  // «proceder cambio de ubicación» escrito por el MOTORIZADO de GSG (pedido del
+  // dueño, 11/11): se registra la última ubicación que mandó su cliente y se le
+  // contesta a él. Va antes que todo lo del cliente (privacidad, plazo, IA,
+  // bot callado): no es un cliente. Si quien escribe no es motorizado de
+  // ningún pedido de hoy, devuelve null y el mensaje sigue como siempre (un
+  // cliente que escribe el comando no cambia nada).
+  if (message.type === 'text' && deps.entregas?.comandoDeMotorizado) {
+    const comando = await deps.entregas.comandoDeMotorizado(phone, String(message.text?.body ?? '')).catch((error) => {
+      request_log(deps, 'no se pudo atender el cambio de ubicación del motorizado', error);
+      return null;
+    });
+    if (comando) {
+      console.log(`[comando] «proceder cambio de ubicación» del motorizado ${phone}: ${comando.resultado}`, comando.referencias);
+      if (comando.responder) {
+        await senderBase
+          .send({ phone, kind: 'freeform', category: 'UTILITY', manual: false, origen: 'sistema', text: comando.responder })
+          .catch((error) => request_log(deps, 'no se pudo contestar al motorizado', error));
+      }
+      return;
+    }
+  }
+
   // Una foto, un audio o un video (regla del dueño, 28/10): queda en el chat para
   // que lo vean aquí y GSG desde el historial, y nada más. No se transcribe, no
   // se contesta, no cuenta como respuesta ni mueve el pedido ni el recordatorio.
