@@ -518,13 +518,11 @@ describe('escribir desde el chat', () => {
     expect(readFileSync(join(mediaDir, ultimo.payload.media.id)).equals(png)).toBe(true);
   });
 
-  it('una nota de voz grabada en el navegador (data URI con codecs) sale como ogg/opus (nota de voz) y con todos sus bytes', async () => {
-    const hay = spawnSync('ffmpeg', ['-version']).status === 0;
-    if (!hay) return;
+  it('una nota de voz grabada en Chrome (data URI con codecs) llega entera y como ogg/opus, sin depender de ffmpeg', async () => {
     await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
     const contact = (await repos.contacts.getByPhone('5215500009999'))!;
-    const webm = spawnSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=d=1', '-c:a', 'libopus', '-f', 'webm', 'pipe:1'], { maxBuffer: 10_000_000 }).stdout;
-    expect(webm.length).toBeGreaterThan(100);
+    const webm = readFileSync(join(__dirname, 'fixtures', 'nota-de-voz-chrome.webm'));
+    // Tal cual lo entrega FileReader: el `=` de `codecs=opus` no debe cortar la decodificacion.
     const r = await app.inject({
       method: 'POST',
       url: '/admin/chat/adjunto',
@@ -532,10 +530,23 @@ describe('escribir desde el chat', () => {
       payload: { contactId: contact.id, datos: 'data:audio/webm;codecs=opus;base64,' + webm.toString('base64'), mimeType: 'audio/webm;codecs=opus', filename: 'nota-de-voz.webm', voz: true },
     });
     expect(r.json().ok).toBe(true);
-    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'audio', mimeType: 'audio/ogg', voz: true });
+    const salido = wa.sent.at(-1) as { bytes: number };
+    expect(salido).toMatchObject({ kind: 'media', tipo: 'audio', mimeType: 'audio/ogg', filename: 'nota-de-voz.ogg', voz: true });
+    // Sale con todo su sonido: no unos bytes sueltos.
+    expect(salido.bytes).toBeGreaterThan(webm.length * 0.8);
     const messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
-    // Lo guardado es el webm entero, no unos bytes sueltos.
+    // Lo guardado en el hilo es lo que grabo el navegador, entero.
     expect(readFileSync(join(mediaDir, messages.at(-1).payload.media.id)).equals(webm)).toBe(true);
+  });
+
+  it('un audio webm que no se puede preparar se dice y no sale roto', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const antes = wa.sent.length;
+    const roto = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from('no soy audio')]);
+    const r = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: roto.toString('base64'), mimeType: 'audio/webm', voz: true } });
+    expect(r.json().ok).not.toBe(true);
+    expect(wa.sent.length).toBe(antes);
   });
 
   it('un documento lleva su nombre; un GIF va como documento para que se mueva', async () => {
