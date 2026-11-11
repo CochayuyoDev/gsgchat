@@ -903,7 +903,8 @@ export function createSender(deps: SenderDeps): Sender {
           await repos.counters.increment(phoneId(), job.category, enviadoAt);
           await repos.contacts.anotarEnvioIniciado(contact.id, enviadoAt);
         }
-        if (automatico) deps.salud?.marcapasos.anotar(enviadoAt);
+        // Por una linea de la API con tandas: cuenta para la tanda y no mueve la pausa de las normales.
+        if (automatico) deps.salud?.marcapasos.anotar(enviadoAt, Boolean(politica?.tandas));
         // Una persona acaba de escribir en este chat: el bot se calla (lo atiende ella). Se reactiva a mano.
         if (job.atiendePersona) await repos.contacts.pausarBot(contact.id, true, enviadoAt).catch(() => undefined);
 

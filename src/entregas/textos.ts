@@ -114,14 +114,15 @@ export const ajustesEntregasSchema = z.object({
   usarBotones: z.boolean().default(true),
   /**
    * La plantilla aprobada por Meta para el primer mensaje (pedido del dueño,
-   * 10/11): con una línea de WhatsApp API en uso, el primer mensaje de un
+   * 10/11; desde el 11/11 la de fábrica es «solicitud_inicial», categoría
+   * Utilidad, 8 datos): con una línea de WhatsApp API en uso, el primer mensaje de un
    * pedido sale con ella si Meta ya la aprobó. Sus 8 datos, en orden, están
    * en `VARIABLES_PLANTILLA_ENTREGA`.
    */
   plantillaMeta: z
     .object({
       usar: z.boolean().default(true),
-      nombre: z.string().trim().regex(/^[a-z0-9_]{1,512}$/, 'El nombre de la plantilla va en minúsculas, números y guion bajo, como en Meta (por ejemplo solicitud_ubicacion_entrega).').default('solicitud_ubicacion_entrega'),
+      nombre: z.string().trim().regex(/^[a-z0-9_]{1,512}$/, 'El nombre de la plantilla va en minúsculas, números y guion bajo, como en Meta (por ejemplo solicitud_inicial).').default('solicitud_inicial'),
     })
     .default({}),
   /** Si al cliente se le avisa cuando el motorizado escribe "cerca" / "llegando". */

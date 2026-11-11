@@ -102,6 +102,8 @@ export function crearMotorLista(deps: MotorListaDeps): MotorLista {
   }
 
   function pausaEfectiva(): number {
+    // Envio por tandas (lineas de la API): la tanda la decide el marcapasos, no esta pausa.
+    if (deps.salud && deps.politica?.()?.tandas) return 0;
     const factor = deps.salud?.factor() ?? 1;
     return pausaActual / Math.max(factor, 0.05);
   }

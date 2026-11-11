@@ -69,7 +69,7 @@ describe('los 8 datos de la plantilla', () => {
   });
 
   it('el ajuste viene encendido con el nombre de la plantilla de GSG', () => {
-    expect(AJUSTES.plantillaMeta).toEqual({ usar: true, nombre: 'solicitud_ubicacion_entrega' });
+    expect(AJUSTES.plantillaMeta).toEqual({ usar: true, nombre: 'solicitud_inicial' });
     expect(ajustesEntregasSchema.safeParse({ plantillaMeta: { nombre: 'Con Espacios' } }).success).toBe(false);
   });
 });
@@ -181,7 +181,7 @@ describe('el primer mensaje con la principal por QR y una línea de WhatsApp API
 
 describe('una plantilla de Meta por mensaje, en orden (primer mensaje, recordatorio 1, recordatorio 2)', () => {
   const HORA_BUENA = new Date('2026-03-10T15:00:00Z');
-  const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, timezone: 'America/Lima' };
+  const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, timezone: 'America/Lima', maxIntentos: 3 }; // este bloque prueba el orden de 3 mensajes
   const DATOS = variablesPlantillaEntrega(CTX_ALI, AJUSTES);
 
   it('cada mensaje sale con SU plantilla y solo con los datos que ella lleva; el recordatorio nunca repite el primero', async () => {
@@ -217,27 +217,29 @@ describe('una plantilla de Meta por mensaje, en orden (primer mensaje, recordato
     expect(enviados[2]!.variables).toEqual(['Ali', 'Tienda Uno']);
   });
 
-  it('sin guardar nada en la pantalla, si la cuenta tiene aprobadas las dos de GSG salen en ese orden (seguimiento lleva nombre y empresa)', async () => {
+  it('de fabrica: solo 2 mensajes, solicitud_inicial y un recordatorio_inicial (nombre, producto y tienda)', async () => {
     const repos = createFakeRepos();
     const lote = await repos.rutas.crearLote({ nombre: 'Reparto de prueba' });
     await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '51987654321', phone: '51987654321', nombre: 'Ali', referencia: 'GSG-E-215' }]);
     await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
-    for (const [name, variables] of [['solicitud_ubicacion_entrega', 8], ['segundo_intento_seguimiento', 2], ['seguimiento', 2]] as const) {
+    for (const [name, variables] of [['solicitud_inicial', 8], ['recordatorio_inicial', 3]] as const) {
       await repos.templates.upsert(approvedTemplate({ name, language: 'es_PE', category: 'UTILITY', variables, quality: 'GREEN' }));
     }
     const enviados: SendJob[] = [];
     const sender: Sender = { async send(job) { enviados.push(job); return { ok: true, wamid: `w.${enviados.length}`, deliveryId: enviados.length } as SendOutcome; } };
     let ahora = HORA_BUENA;
     const motor = crearMotor({
-      repos, sender, gsg: crearPuertoEnEspera(), opciones, ahora: () => ahora, azar: () => 0,
+      repos, sender, gsg: crearPuertoEnEspera(), opciones: { ...opciones, maxIntentos: OPCIONES_POR_DEFECTO.maxIntentos }, ahora: () => ahora, azar: () => 0,
       usarPlantilla: () => false, plantillaMeta: async () => true,
-      plantillaSolicitud: async () => ({ name: 'solicitud_ubicacion_entrega', language: 'es_PE', variables: DATOS }),
+      plantillaSolicitud: async () => ({ name: 'solicitud_inicial', language: 'es_PE', variables: DATOS }),
       datosPedido: async () => DATOS,
     });
     for (let i = 0; i < 3; i++) { await motor.tick(); ahora = new Date(ahora.getTime() + 3 * 60 * 60 * 1000); }
-    expect(enviados.map((e) => e.templateName)).toEqual(['solicitud_ubicacion_entrega', 'segundo_intento_seguimiento', 'seguimiento']);
-    expect(enviados[1]!.variables).toEqual(['Ali', 'Zapatos']);
-    expect(enviados[2]!.variables).toEqual(['Ali', 'Tienda Uno']);
+    expect(OPCIONES_POR_DEFECTO.maxIntentos).toBe(2);
+    expect(enviados.map((e) => e.templateName)).toEqual(['solicitud_inicial', 'recordatorio_inicial']);
+    expect(enviados[0]!.variables).toHaveLength(8);
+    expect(enviados[1]!.variables).toEqual(['Ali', 'Zapatos', 'Tienda Uno']);
+    expect(enviados[1]!.templateLanguage).toBe('es_PE');
   });
 
   it('un primer mensaje con una plantilla de 2 datos recibe solo los 2 primeros (Meta rechaza parámetros de más)', async () => {

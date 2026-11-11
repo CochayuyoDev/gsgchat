@@ -94,6 +94,20 @@ export const ajustesGeneralesSchema = z.object({
     maxPorContactoDia: enteroONada(20),
     separacionContactoMin: enteroONada(24 * 60),
   }),
+  /**
+   * Envio por tandas, SOLO para las lineas de la API oficial de Meta: en vez de
+   * una pausa entre cada cliente, salen hasta `tamano` mensajes seguidos y
+   * despues se espera `pausaMin` minutos. Entre tanda y tanda el monitor ve los
+   * rechazos de Meta y puede frenar. Las lineas normales (QR) siguen siempre
+   * con la pausa entre clientes de siempre. null o activo:false = apagado.
+   */
+  tandasApi: z
+    .object({
+      activo: z.boolean(),
+      tamano: z.number().int().min(1).max(80).default(50),
+      pausaMin: z.number().int().min(2).max(60).default(3),
+    })
+    .nullable(),
   avisos: z.object({
     /** A quien se avisa por WhatsApp (nivel del numero, resumen del reparto). */
     supervisor: telefono.nullable().or(z.literal('').transform(() => null)),
@@ -185,6 +199,7 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
     maxPorContactoDia: null,
     separacionContactoMin: null,
   },
+  tandasApi: null,
   avisos: { supervisor: null },
   humanizar: null,
   autoPausa: null,
@@ -206,6 +221,7 @@ export const ajustesGeneralesPatchSchema = z.object({
   modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().refine(() => false, 'El modo de prueba fue retirado').optional(),
   horario: ajustesGeneralesSchema.shape.horario.partial().optional(),
   ritmo: ajustesGeneralesSchema.shape.ritmo.partial().optional(),
+  tandasApi: ajustesGeneralesSchema.shape.tandasApi.optional(),
   avisos: ajustesGeneralesSchema.shape.avisos.partial().optional(),
   humanizar: ajustesGeneralesSchema.shape.humanizar.optional(),
   autoPausa: ajustesGeneralesSchema.shape.autoPausa.optional(),
@@ -229,6 +245,7 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     modoPrueba: { ...base.modoPrueba, ...(patch.modoPrueba ?? {}) },
     horario: { ...base.horario, ...(patch.horario ?? {}) },
     ritmo: { ...base.ritmo, ...(patch.ritmo ?? {}) },
+    tandasApi: patch.tandasApi !== undefined ? patch.tandasApi : base.tandasApi,
     avisos: { ...base.avisos, ...(patch.avisos ?? {}) },
     humanizar: patch.humanizar !== undefined ? patch.humanizar : base.humanizar,
     autoPausa: patch.autoPausa !== undefined ? patch.autoPausa : base.autoPausa,
@@ -416,6 +433,11 @@ export async function crearServicioAjustes(deps: {
       if (a.avisos.supervisor !== null) p.avisarA = a.avisos.supervisor;
       if (a.humanizar !== null) p.humanizar = a.humanizar;
       if (a.autoPausa !== null) p.autoPausa = a.autoPausa;
+      // Las tandas son solo de la API oficial: una linea normal (perfil no_oficial)
+      // nunca las recibe y sigue con su pausa entre clientes.
+      p.tandas = p.perfil === 'cloud' && a.tandasApi?.activo
+        ? { tamano: a.tandasApi.tamano, ventanaMs: a.tandasApi.pausaMin * 60_000 }
+        : null;
       return p;
     },
     soloNumeros: () => [],

@@ -292,7 +292,7 @@ const schema = z.object({
   RUTAS_PEDIR_UBI_CADA_MIN: z.coerce.number().int().min(0).max(24 * 60).default(0),
 
   /** Mensajes por cliente antes de pasarlo al repartidor. */
-  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(4),
+  RUTAS_MAX_INTENTOS: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(2),
 
   /** Franja horaria en la que el motor puede escribir (hora del negocio). */
   RUTAS_HORA_INICIO: z.coerce.number().int().min(0).max(23).default(9),
