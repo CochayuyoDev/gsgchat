@@ -126,7 +126,8 @@ export interface MessagesRepo {
    */
   lineaDeLaConversacion(contactId: string): Promise<string | null>;
   /** Estado de entrega que llega por webhook. */
-  setStatusByWamid(wamid: string, status: string): Promise<void>;
+  /** El error de Meta (si lo hay) no se guarda aqui (va en deliveries): se pasa para quien observa el cambio. */
+  setStatusByWamid(wamid: string, status: string, error?: { code?: string; title?: string }): Promise<void>;
   listConversations(query: { q?: string; limit: number; offset: number; incluirApartados?: boolean; desde?: Date | null; alcance?: { afterId: string; retenidosDesde: Date } }): Promise<Conversation[]>;
   listMessages(contactId: string, limit: number, beforeId?: number, desde?: Date | null, alcance?: { afterId: string; retenidosDesde: Date }): Promise<Message[]>;
   /** Novedades posteriores al cursor más estados vigentes de IDs conocidos. */

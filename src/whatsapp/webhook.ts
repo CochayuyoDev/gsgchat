@@ -216,7 +216,7 @@ export async function processChange(
         const titulo = status.errors?.[0]?.title ?? status.errors?.[0]?.message;
         await repos.deliveries.updateByWamid(status.id, status.status, { code: codigo, title: titulo });
         // El doble check del chat sale de aqui.
-        await repos.messages.setStatusByWamid(status.id, status.status);
+        await repos.messages.setStatusByWamid(status.id, status.status, { code: codigo, title: titulo });
         // Un `failed` con codigo es un envio que Meta acepto y luego no
         // entrego: el 131049 (limite por usuario) y el 131026 llegan asi. El
         // monitor aplica la misma regla que a un error en caliente.

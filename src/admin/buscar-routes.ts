@@ -18,6 +18,8 @@ import { z } from 'zod';
 import type { DeliveryListItem, Repos } from '../db/repos.js';
 import type { Message } from '../db/messages.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
+import { errorDeEnvio, MOTIVOS_EN_PALABRAS } from '../whatsapp/errores-envio.js';
+export { MOTIVOS_EN_PALABRAS };
 
 export interface BuscarDeps {
   repos: Repos;
@@ -74,30 +76,6 @@ export async function buscarEnTodo(deps: BuscarDeps, q: string, limite = 6): Pro
 // --- la traza de un mensaje ------------------------------------------------
 
 /** Lo que cada guarda del sender significa para quien no programa. */
-export const MOTIVOS_EN_PALABRAS: Record<string, string> = {
-  allowlist: 'El sistema está en modo prueba y este número no está en la lista de permitidos.',
-  sin_conexion: 'WhatsApp no estaba conectado en ese momento.',
-  sin_lineas_disponibles: 'No había números vinculados habilitados con cupo disponible.',
-  limite_diario: 'La línea elegida había llegado a su máximo de mensajes por día.',
-  linea_fuera_de_modo: 'La línea elegida estaba en pausa por el modo de Conexión (solo WhatsApp normal o solo API) y el chat ya estaba cerrado.',
-  opt_out: 'El equipo lo dio de baja: no recibe más mensajes.',
-  no_opt_in: 'El cliente no dio su consentimiento para recibir mensajes iniciados por el negocio.',
-  number_paused: 'Los envíos del número estaban pausados.',
-  number_quality: 'La calidad del número estaba baja y Meta no deja mandar más.',
-  window_closed: 'Habían pasado más de 24 h desde el último mensaje del cliente: con la API de Meta solo puede salir una plantilla aprobada.',
-  template_missing: 'La plantilla que hacía falta no existe.',
-  template_not_approved: 'La plantilla todavía no está aprobada por Meta.',
-  template_quality: 'Meta marcó esa plantilla con calidad baja.',
-  template_paused: 'Meta tiene esa plantilla en pausa.',
-  frequency_cap: 'Ese cliente ya recibió el máximo de mensajes de marketing de la semana.',
-  daily_cap: 'Se llegó al cupo de mensajes del día del número.',
-  contact_suppressed: 'El monitor apartó a ese contacto (rebotes, quejas o silencio).',
-  risk_marketing_paused: 'El número estaba en riesgo y el marketing estaba frenado.',
-  fatigue: 'Ese cliente ya había recibido demasiados mensajes seguidos.',
-  contact_daily_cap: 'Ese cliente ya recibió el máximo de mensajes del día.',
-  contact_spacing: 'Hacía muy poco que se le había escrito a ese cliente.',
-  rhythm: 'El marcapasos del número lo dejó para más tarde (ritmo, horario o pausa).',
-};
 
 const QUE_ES: Record<string, string> = {
   text: 'un texto',
@@ -160,11 +138,22 @@ export function armarTraza(m: Message, d: DeliveryListItem | null, otros: Delive
   como += '.';
   pasos.push({ cuando: d?.queuedAt ?? m.createdAt, que: 'Se puso en la cola de salida.', tono: 'muted' });
   if (d) {
-    if (d.status === 'blocked_by_gate') pasos.push({ cuando: d.failedAt ?? d.queuedAt, que: `No salió: ${motivoEnPalabras(d.errorTitle)}`, tono: 'bad' });
+    if (d.status === 'blocked_by_gate') {
+      pasos.push({ cuando: d.failedAt ?? d.queuedAt, que: `No salió: ${motivoEnPalabras(d.errorTitle)}`, tono: 'bad' });
+      const e = errorDeEnvio(null, d.errorTitle);
+      if (e && e.tipo === 'interno') pasos.push({ cuando: null, que: `Qué hacer: ${e.queHacer}`, tono: 'muted' });
+    }
     if (d.sentAt || d.status === 'sent' || d.status === 'delivered' || d.status === 'read') pasos.push({ cuando: d.sentAt, que: 'Salió hacia WhatsApp.', tono: 'ok' });
     if (d.deliveredAt || d.status === 'delivered' || d.status === 'read') pasos.push({ cuando: d.deliveredAt, que: 'WhatsApp lo entregó al teléfono del cliente.', tono: 'ok' });
     if (d.readAt || d.status === 'read') pasos.push({ cuando: d.readAt, que: 'El cliente lo leyó.', tono: 'ok' });
-    if (d.status === 'failed') pasos.push({ cuando: d.failedAt, que: `WhatsApp lo rechazó${d.errorTitle ? `: ${d.errorTitle}` : ''}${d.errorCode ? ` (código ${d.errorCode})` : ''}.`, tono: 'bad' });
+    // Por que no llego y que hacer, en palabras (src/whatsapp/errores-envio.ts); el texto
+    // original de Meta queda al final, entre parentesis, por si hay que consultarlo.
+    if (d.status === 'failed') {
+      const e = errorDeEnvio(d.errorCode, d.errorTitle);
+      const original = d.errorTitle || d.errorCode ? ` (${d.errorTitle ?? 'Meta'}${d.errorCode ? `, código ${d.errorCode}` : ''})` : '';
+      pasos.push({ cuando: d.failedAt, que: `WhatsApp no se lo entregó al cliente. ${e ? e.motivo : 'No quedó apuntado el motivo.'}${original}`, tono: 'bad' });
+      if (e) pasos.push({ cuando: null, que: `Qué hacer: ${e.queHacer}`, tono: 'muted' });
+    }
     if (d.status === 'sent') pasos.push({ cuando: null, que: 'WhatsApp todavía no confirmó que llegara al teléfono (un solo check).', tono: 'warn' });
   } else {
     pasos.push({ cuando: m.createdAt, que: `Salió hacia WhatsApp${m.status ? ` (estado: ${m.status})` : ''}.`, tono: 'ok' });
@@ -177,7 +166,7 @@ export function armarTraza(m: Message, d: DeliveryListItem | null, otros: Delive
     como,
     estado,
     pasos,
-    otrosIntentos: otros.map((o) => ({ cuando: o.failedAt ?? o.queuedAt, que: `${QUE_ES[o.kind] ?? o.kind}${o.templateName ? ` «${o.templateName}»` : ''}`, motivo: o.status === 'failed' ? `WhatsApp lo rechazó${o.errorTitle ? `: ${o.errorTitle}` : ''}` : motivoEnPalabras(o.errorTitle) })),
+    otrosIntentos: otros.map((o) => ({ cuando: o.failedAt ?? o.queuedAt, que: `${QUE_ES[o.kind] ?? o.kind}${o.templateName ? ` «${o.templateName}»` : ''}`, motivo: o.status === 'failed' ? (errorDeEnvio(o.errorCode, o.errorTitle)?.motivo ?? 'WhatsApp no se lo entregó al cliente.') : motivoEnPalabras(o.errorTitle) })),
   };
 }
 
