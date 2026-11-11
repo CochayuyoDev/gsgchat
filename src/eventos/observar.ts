@@ -18,6 +18,7 @@ import { trackingDeEntrega } from '../entregas/repo.js';
 import { archivoDeMensaje, type ArchivoDeMensaje } from '../api/v1/archivos-gsg.js';
 import { payloadExterno } from '../util/payload-externo.js';
 import { errorDeEnvio } from '../whatsapp/errores-envio.js';
+import { entregaDelMensaje } from '../whatsapp/estado-entrega.js';
 import type { Message } from '../db/messages.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
@@ -126,7 +127,22 @@ export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: s
       await repos.messages.setStatusByWamid(wamid, status, error);
       // Si no salio, el porque ya explicado (codigo, motivo, que hacer): src/whatsapp/errores-envio.ts.
       const porQue = status === 'failed' ? errorDeEnvio(error?.code, error?.title) : null;
-      bus.emitir('mensaje.estado', { mensajeId: wamid, estado: status, fecha: iso(), ...(porQue ? { error: porQue } : {}) });
+      // Si llego al WhatsApp del cliente, lo mismo que dice el historial (src/whatsapp/estado-entrega.ts).
+      // El aviso sale aunque esto fallara: es un extra sobre el estado de siempre.
+      let entrega: ReturnType<typeof entregaDelMensaje> = null;
+      try {
+        entrega = entregaDelMensaje({ direction: 'out', status, createdAt: null }, porQue);
+      } catch {
+        entrega = null;
+      }
+      bus.emitir('mensaje.estado', {
+        mensajeId: wamid,
+        estado: status,
+        fecha: iso(),
+        llegoAWhatsapp: entrega?.llegoAWhatsapp ?? null,
+        ...(entrega ? { entrega: { estado: entrega.estado, descripcion: entrega.descripcion } } : {}),
+        ...(porQue ? { error: porQue } : {}),
+      });
     },
   };
 

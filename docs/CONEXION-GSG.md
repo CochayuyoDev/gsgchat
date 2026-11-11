@@ -180,6 +180,47 @@ En el mismo historial, cada mensaje que lleva un archivo trae `archivo`; los dem
 
 Ver `src/api/v1/archivos-gsg.ts`.
 
+### ¿Le llegó el mensaje al cliente? `llegoAWhatsapp` (11/11)
+
+**Un mensaje en el historial NO significa que le llegó.** GSGchat lo guarda en cuanto el proveedor lo acepta, y
+WhatsApp puede rechazarlo minutos después (más de 24 h sin que el cliente escriba, límite de marketing de Meta,
+número sin WhatsApp…). Pasó el 11/11 con el pedido GSG-E-269342: tres mensajes guardados, ninguno entregado, y GSG
+los pintaba como enviados. Por eso cada mensaje **saliente** del historial trae ahora:
+
+```json
+"estado": "failed",
+"llegoAWhatsapp": false,
+"entrega": { "llegoAWhatsapp": false, "estado": "no_entregado",
+             "descripcion": "No le llegó: WhatsApp no se lo entregó al cliente. Pasaron más de 24 horas…",
+             "minutosSinConfirmar": null, "error": { … } },
+"error": { "codigo": "131047", "tipo": "meta", "titulo": "Re-engagement message",
+           "motivo": "Pasaron más de 24 horas…", "queHacer": "Mandar una plantilla aprobada…", "reintentar": "no" }
+```
+
+| `llegoAWhatsapp` | `entrega.estado` | Qué pintar en GSG |
+|---|---|---|
+| `true` | `entregado` / `leido` | ✓✓ (le llegó) |
+| `null` | `sin_confirmar` / `enviado` | 🕓 esperando confirmación de WhatsApp |
+| `false` | `no_entregado` | ⚠ **No le llegó**, con `error.motivo` y `error.queHacer`: hay que llamar al cliente |
+
+- Los mensajes del cliente (`entrante`) llevan `llegoAWhatsapp: null` y `entrega: null`.
+- Un `null` que dura mucho lo avisa la propia `descripcion` (desde 30 minutos): teléfono apagado, sin internet o
+  número que ya no usa WhatsApp. `minutosSinConfirmar` da la cifra.
+- `estado` (sent, delivered, read, failed) sigue igual que antes, por compatibilidad; para decidir, usar
+  `llegoAWhatsapp`.
+- Lo mismo sale en `GET /api/v1/conversaciones/{telefono}`.
+- **Al escribir** (`POST /api/v1/chat`): `estado: "enviado"` quiere decir «aceptado». La respuesta trae
+  `llegoAWhatsapp: null` (todavía no se sabe); si quedó frenado o WhatsApp lo rechazó al momento, `false` con el
+  porqué en `entrega.error`; si el proveedor no respondió, `null` y hay que mirar el historial antes de reenviarlo.
+- **El aviso al momento:** el webhook `mensaje.estado` trae `llegoAWhatsapp` y `entrega` en cada cambio; con
+  `failed`, también `error`. Suscribiéndose a él, GSG se entera sin volver a pedir el historial.
+- **El pedido:** si el mensaje que no llegó era del reparto, ya no cuenta como intento: el pedido pasa a
+  incidencia con el motivo (llega como cualquier incidencia del reparto) y el primer mensaje del pedido
+  (`mensaje.estado` en `GET /api/v1/entregas`) queda `fallido`, con «Reintentar». Si fue un fallo pasajero de
+  WhatsApp (131000, 131016, 130429), se reintenta solo a los 5 minutos. Ver `src/rutas/no-llego.ts`.
+
+Ver `src/whatsapp/estado-entrega.ts` y `src/api/v1/entrega-mensajes.ts`.
+
 (Hasta el 28/10 hubo además un envío aparte, un POST a una «Ruta para etiquetas de chats» de GSG con reintentos.
 Se quitó: GSG lee la nota en el historial. Las columnas `sync_*` de la migración 014 quedan sin uso.)
 

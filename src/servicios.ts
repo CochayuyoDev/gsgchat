@@ -39,6 +39,7 @@ import { ventanaDeEntrega } from './entregas/horario-distrito.js';
 import { startArchiveSweeper } from './archive/service.js';
 import { catalogoVigente } from './chat/etiquetar.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
+import { vigilarMensajesNoEntregados } from './rutas/no-llego.js';
 import { crearPuertoGsg, despacharReportes, paradaPorClave } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
 
@@ -233,7 +234,12 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   const desconectarBus = bus ? encolarEventos(bus, repos.webhooks, warn) : () => undefined;
   const stopWebhooks = bus ? startDespachadorWebhooks({ repo: repos.webhooks, log: warn }) : () => undefined;
 
+  // Un mensaje del pedido que WhatsApp avisa DESPUES que no entrego: deja de
+  // contar como intento y el pedido pasa a incidencia con el motivo. Ver src/rutas/no-llego.ts.
+  const stopNoLlego = bus ? vigilarMensajesNoEntregados(bus, { repos, log: warn }) : () => undefined;
+
   return () => {
+    stopNoLlego();
     desconectarBus();
     stopWebhooks();
     stopScheduler();
