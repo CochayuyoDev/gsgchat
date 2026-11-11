@@ -74,7 +74,7 @@ const CSS = `
   /* --- filtros y lista ---------------------------------------------------- */
   .filtros { padding: 10px var(--esp-4); border-bottom: 1px solid var(--borde); display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; background: var(--superficie-2); }
   .filtros .ancho { grid-column: 1 / -1; }
-  .filtros .flt { display: block; margin: 0; font-size: 11.5px; color: var(--texto-suave); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .filtros .flt { display: block; margin: 0; font-size: 11.5px; color: var(--texto-suave); font-weight: 600; text-transform: none; letter-spacing: 0; }
   .filtros .flt span { display: block; margin: 0 0 3px 2px; }
   .filtros .flt input, .filtros .flt select { font-weight: 400; text-transform: none; letter-spacing: 0; min-height: 36px; font-size: 13.5px; }
   .filtros-mas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
@@ -135,6 +135,8 @@ const CSS = `
   .g .k { color: var(--texto-suave); font-style: italic; }
   .g .adj { display: block; max-width: 100%; max-height: 320px; border-radius: var(--radio-sm); margin-bottom: 4px; }
   .g img.adj { min-height: 40px; background: var(--superficie-2); cursor: zoom-in; }
+  .g .adj-video { max-width: 100%; margin-bottom: 4px; border-radius: var(--radio-sm); }
+  .g .adj-video video.adj { margin: 0; min-height: 120px; min-width: 180px; background: var(--superficie-2); }
   .g a.adj.doc { display: inline-block; max-height: none; padding: 6px 10px; background: var(--superficie-2); border-radius: var(--radio-sm); text-decoration: none; }
   .g mark { background: var(--ambar-suave); color: var(--ambar); border-radius: 3px; padding: 0 1px; }
   .g mark.aqui { background: var(--primario); color: var(--primario-texto); }
@@ -231,7 +233,7 @@ export function guardadosPage(opts: { demo: boolean; nombreNegocio: string; conI
         <button class="btn sm" id="l-buscar-antes" type="button" aria-label="Coincidencia anterior" disabled>‹</button>
         <button class="btn sm" id="l-buscar-despues" type="button" aria-label="Coincidencia siguiente" disabled>›</button>
       </div>
-      <div class="hilo" id="l-hilo"></div>
+      <div class="hilo" id="l-hilo" data-visor-grupo></div>
       <div class="notas">
         <label for="l-notas">Notas internas (no salen en el enlace de evidencia)</label>
         <textarea id="l-notas" placeholder="Ej.: se quejó del motorizado; se le ofreció descuento en el siguiente pedido"></textarea>
@@ -533,9 +535,13 @@ function adjuntoHtml(m) {
   if (!adj) return '<span class="k">' + tipo + ' (no se guardó' + (datos && datos.conAdjuntos === false ? ': este arranque no copia ficheros' : '') + ')</span>';
   if (adj.omitido) return '<span class="k">' + tipo + ' (no se guardó: ' + esc(adj.omitido) + ')</span>';
   var attrs = ' data-adj="' + esc(adj.id) + '" data-kind="' + esc(adj.kind) + '"';
-  if (adj.kind === 'image') return '<img class="adj"' + attrs + ' alt="Foto de la conversación" title="Abrir en grande">';
+  /* Foto y video se abren en el visor de la misma pagina (visor-medios.ts). La
+     direccion la pone cargarAdjuntos cuando llega el fichero; antes no abre nada. */
+  var titulo = esc((adj.kind === 'video' ? 'Video' : 'Foto') + (m.direction === 'in' ? ' del cliente' : ' enviado') + (m.createdAt ? ' · ' + fechaCorta(m.createdAt) : ''));
+  var visor = ' data-visor-titulo="' + titulo + '" data-visor-nombre="' + esc(adj.nombre || (adj.kind === 'video' ? 'video' : 'foto')) + '"';
+  if (adj.kind === 'image') return '<img class="adj"' + attrs + visor + ' data-visor="imagen" tabindex="0" role="button" alt="Foto de la conversación" title="Ver en grande">';
   if (adj.kind === 'audio') return '<audio class="adj"' + attrs + ' controls preload="none"></audio>';
-  if (adj.kind === 'video') return '<video class="adj"' + attrs + ' controls playsinline preload="none"></video>';
+  if (adj.kind === 'video') return '<button type="button" class="visor-video adj-video" data-visor="video"' + visor + ' title="Ver el video" aria-label="Ver el video"><video class="adj"' + attrs + ' muted playsinline preload="metadata"></video></button>';
   /* Sin href hasta que llega el fichero: asi el enlace nunca lleva a ninguna parte. */
   return '<a class="adj doc"' + attrs + ' download="' + esc(adj.nombre || 'documento') + '">📄 ' + esc(adj.nombre || 'documento') + ' <span class="k">(' + peso(adj.bytes) + ')</span></a>';
 }
@@ -543,7 +549,7 @@ function adjuntoHtml(m) {
 function ponerAdjunto(el, url) {
   if (el.tagName === 'A') el.href = url;
   else el.src = url;
-  if (el.tagName === 'IMG') el.onclick = function () { window.open(url, '_blank'); };
+  /* Abrir en grande lo hace el visor (data-visor): ya no se abre otra pestaña. */
 }
 
 /* Se sueltan los ficheros de la conversacion anterior: si no, el navegador los guarda hasta recargar. */

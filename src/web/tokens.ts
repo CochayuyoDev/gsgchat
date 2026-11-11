@@ -24,10 +24,10 @@ const OSCURO = `
     --texto: #e6efe9; --texto-suave: #9db0a7; --borde: #243129;
     --primario: #3ecf8e; --primario-texto: #04241a; --primario-suave: rgba(62,207,142,.15);
     --primario-hover: #5ad9a1;
-    --verde: #4ade80; --verde-suave: rgba(74,222,128,.14);
-    --ambar: #fbbf24; --ambar-suave: rgba(251,191,36,.16);
-    --rojo: #f87171; --rojo-suave: rgba(248,113,113,.16);
-    --azul: #60a5fa; --azul-suave: rgba(96,165,250,.16);
+    --verde: #6cc994; --verde-suave: rgba(108,201,148,.12);
+    --ambar: #e3b45e; --ambar-suave: rgba(227,180,94,.12);
+    --rojo: #ec8d84; --rojo-suave: rgba(236,141,132,.12);
+    --azul: #86aef0; --azul-suave: rgba(134,174,240,.12);
     --gris: #b3bdb8; --gris-suave: rgba(255,255,255,.07); --gris-claro: #6b7a73;
     --borde-fuerte: #34463d; --placeholder: #7f948a; --fila-hover: rgba(255,255,255,.03);
     --sombra: 0 1px 2px rgba(0,0,0,.45); --sombra-2: 0 12px 32px rgba(0,0,0,.55);
@@ -40,21 +40,24 @@ export const TOKENS_CSS = `
      --panel, --line, --s-*) siguen existiendo como alias para no romper nada. */
   :root {
     color-scheme: light;
-    --bg: #f3f7f5; --superficie: #ffffff; --superficie-2: #eef4f1;
-    --texto: #13201b; --texto-suave: #5a6b64; --borde: #dde7e2;
-    --primario: #0a7f55; --primario-texto: #ffffff; --primario-suave: #e2f4ea;
-    --primario-hover: #086a47;
-    --verde: #15803d; --verde-suave: #e3f5e9;
-    --ambar: #b45309; --ambar-suave: #fdf1df;
-    --rojo: #b91c1c; --rojo-suave: #fde8e8;
-    --azul: #1d4ed8; --azul-suave: #e4ecfd;
-    --gris: #4b5563; --gris-suave: #edf1ef; --gris-claro: #9aa8a1;
-    --borde-fuerte: #c8d6cf; --placeholder: #74857d; --fila-hover: #f7faf8;
+    /* Paleta serena (11/11): fondos casi neutros, bordes finos y estados en tonos
+       apagados. El rojo y el ambar siguen avisando (texto AA sobre su fondo y
+       sobre blanco), pero sin gritar: se tiñe, no se rellena. */
+    --bg: #f4f6f5; --superficie: #ffffff; --superficie-2: #f1f4f2;
+    --texto: #1c2924; --texto-suave: #5d6c66; --borde: #e3e9e6;
+    --primario: #157a56; --primario-texto: #ffffff; --primario-suave: #e8f3ee;
+    --primario-hover: #116548;
+    --verde: #1d7a45; --verde-suave: #edf6f0;
+    --ambar: #9a5a0c; --ambar-suave: #fbf4e7;
+    --rojo: #b3362b; --rojo-suave: #fbefed;
+    --azul: #2f56b5; --azul-suave: #eef2fb;
+    --gris: #4d5a55; --gris-suave: #f0f3f1; --gris-claro: #a3aea9;
+    --borde-fuerte: #d3dcd8; --placeholder: #78877f; --fila-hover: #f8faf9;
     /* Radios: tarjetas (--radio), controles y botones (--radio-sm), etiquetas (--radio-pill). */
-    --radio: 12px; --radio-sm: 8px; --radio-xs: 6px; --radio-pill: 999px;
-    --sombra: 0 1px 2px rgba(16,40,30,.05), 0 1px 3px rgba(16,40,30,.04);
-    --sombra-hover: 0 4px 14px rgba(16,40,30,.09);
-    --sombra-2: 0 12px 32px rgba(16,40,30,.12);
+    --radio: 14px; --radio-sm: 10px; --radio-xs: 7px; --radio-pill: 999px;
+    --sombra: 0 1px 2px rgba(20,40,32,.04);
+    --sombra-hover: 0 4px 16px rgba(20,40,32,.07);
+    --sombra-2: 0 14px 36px rgba(20,40,32,.10);
     --anillo: 0 0 0 3px var(--primario-suave);
     --esp-1: 4px; --esp-2: 8px; --esp-3: 12px; --esp-4: 16px; --esp-5: 24px; --esp-6: 32px;
     --fuente: "Inter", "Segoe UI Variable Text", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

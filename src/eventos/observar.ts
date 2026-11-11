@@ -17,6 +17,7 @@ import type { Bus, ContactoEvento, Eventos } from './bus.js';
 import { trackingDeEntrega } from '../entregas/repo.js';
 import { archivoDeMensaje, type ArchivoDeMensaje } from '../api/v1/archivos-gsg.js';
 import { payloadExterno } from '../util/payload-externo.js';
+import { errorDeEnvio } from '../whatsapp/errores-envio.js';
 import type { Message } from '../db/messages.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
@@ -121,9 +122,11 @@ export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: s
       }
       return id;
     },
-    async setStatusByWamid(wamid, status) {
-      await repos.messages.setStatusByWamid(wamid, status);
-      bus.emitir('mensaje.estado', { mensajeId: wamid, estado: status, fecha: iso() });
+    async setStatusByWamid(wamid, status, error) {
+      await repos.messages.setStatusByWamid(wamid, status, error);
+      // Si no salio, el porque ya explicado (codigo, motivo, que hacer): src/whatsapp/errores-envio.ts.
+      const porQue = status === 'failed' ? errorDeEnvio(error?.code, error?.title) : null;
+      bus.emitir('mensaje.estado', { mensajeId: wamid, estado: status, fecha: iso(), ...(porQue ? { error: porQue } : {}) });
     },
   };
 

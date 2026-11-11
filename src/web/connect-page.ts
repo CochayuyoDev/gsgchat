@@ -355,7 +355,10 @@ const CSS = `
 #con-avanzado[open] > summary::after { transform: translateY(-30%) rotate(-135deg); }
 #con-avanzado > summary:hover { border-color: var(--primario); }
 .con-resumen.una:has(> #gsg) { max-width: none; }
-#gsg .bloque.punteado { padding: var(--esp-4); border: 1px solid var(--borde); border-radius: 12px; background: var(--fondo, transparent); }
+/* Secciones de la tarjeta separadas por una linea, no cajas dentro de la caja (11/11). */
+#gsg .bloque.punteado { margin-top: var(--esp-5); padding: var(--esp-5) 0 0; border: 0; border-top: 1px solid var(--borde); border-radius: 0; background: transparent; }
+#gsg details.bloque.punteado { padding-top: var(--esp-3); margin-top: var(--esp-3); }
+#gsg .bloque.punteado .ep-form { max-width: 560px; }
 #gsg .bloque.punteado h3 { margin-top: 0; }
 .gsg-destinos { margin: 6px 0 10px; overflow-x: auto; font-size: 13px; color: var(--texto-suave); }
 .gsg-destinos table { border: 1px solid var(--borde); border-radius: var(--radio-sm); border-collapse: separate; border-spacing: 0; overflow: hidden; margin-bottom: 8px; }

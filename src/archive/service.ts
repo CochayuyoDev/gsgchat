@@ -29,6 +29,7 @@ import { loMandoUnaPersona, paresDeConversacion, type ParAprendido } from '../en
 import type { MensajeParaAprender } from '../entrenamiento/repo.js';
 import { taparDatosPersonales } from '../entrenamiento/texto.js';
 import { revisarTelefono } from '../rutas/telefono.js';
+import { VISOR_CSS, VISOR_JS } from '../web/visor-medios.js';
 import {
   ETIQUETAS,
   NOMBRE_ETIQUETA,
@@ -570,16 +571,19 @@ async function adjuntoHtml(deps: ArchiveDeps, a: ChatArchive, m: Message, opts: 
   if (!adjunto || adjunto.omitido) return `<span class="k">📎 ${escapar(tipo)} (adjunto no guardado${adjunto?.omitido ? `: ${escapar(adjunto.omitido)}` : ''})</span>`;
   if (opts.publico) {
     const url = escapar(opts.publico.adjuntoUrl(adjunto.id));
-    if (adjunto.kind === 'image') return `<a href="${url}" target="_blank"><img class="adj" src="${url}" alt="foto"></a>`;
+    // Foto y video se abren en el visor de la misma pagina (VISOR_JS), no en otra pestaña.
+    const nombre = escapar(adjunto.nombre ?? (adjunto.kind === 'video' ? 'video' : 'foto'));
+    const titulo = escapar(`${adjunto.kind === 'video' ? 'Video' : 'Foto'} · ${fechaHora(m.createdAt)}`);
+    if (adjunto.kind === 'image') return `<a href="${url}" data-visor="imagen" data-visor-titulo="${titulo}" data-visor-nombre="${nombre}" title="Ver en grande"><img class="adj" src="${url}" alt="foto"></a>`;
     if (adjunto.kind === 'audio') return `<audio class="adj" controls src="${url}"></audio>`;
-    if (adjunto.kind === 'video') return `<video class="adj" controls src="${url}"></video>`;
+    if (adjunto.kind === 'video') return `<button type="button" class="visor-video" data-visor="video" data-visor-src="${url}" data-visor-titulo="${titulo}" data-visor-nombre="${nombre}" title="Ver el video" aria-label="Ver el video"><video class="adj" muted playsinline preload="metadata" src="${url}#t=0.1"></video></button>`;
     return `<a class="adj doc" href="${url}" download="${escapar(adjunto.nombre ?? 'documento')}">📄 ${escapar(adjunto.nombre ?? 'documento')} (${pesoLegible(adjunto.bytes)})</a>`;
   }
   if (adjunto.kind === 'image') {
     if (adjunto.bytes > TOPE_FOTO_INCRUSTADA) return `<span class="k">🖼 foto de ${pesoLegible(adjunto.bytes)} no incluida (está en la conversación guardada)</span>`;
     const leido = await leerAdjunto(deps, a, adjunto.id);
     if (!leido) return `<span class="k">🖼 foto (el fichero ya no está)</span>`;
-    return `<img class="adj" src="data:${escapar(adjunto.mimeType.split(';')[0])};base64,${leido.datos.toString('base64')}" alt="foto">`;
+    return `<img class="adj" data-visor="imagen" tabindex="0" role="button" data-visor-titulo="${escapar(`Foto · ${fechaHora(m.createdAt)}`)}" src="data:${escapar(adjunto.mimeType.split(';')[0])};base64,${leido.datos.toString('base64')}" alt="foto">`;
   }
   const detalle = adjunto.kind === 'document' ? ` ${escapar(adjunto.nombre ?? '')}` : '';
   return `<span class="k">📎 ${escapar(tipo)}${detalle} (${pesoLegible(adjunto.bytes)}; está en la conversación guardada)</span>`;
@@ -606,12 +610,13 @@ export async function exportarHtml(deps: ArchiveDeps, id: number, opts: Opciones
       ? '<div class="aviso">Copia sin datos personales.</div>'
       : '';
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Conversación con ${escapar(v.quien)}</title>
-<style>body{font:14px/1.45 system-ui,sans-serif;color:#111;background:#fff;max-width:760px;margin:24px auto;padding:0 16px}h1{font-size:18px;margin:0 0 4px}.meta{color:#555;font-size:13px;margin-bottom:16px}.aviso{background:#e8f4ff;border:1px solid #b9dcff;border-radius:8px;padding:6px 12px;margin-bottom:12px;font-size:13px}.g{max-width:78%;padding:8px 11px;border-radius:12px;margin:6px 0;background:#f1f1f1;page-break-inside:avoid;word-break:break-word}.g.neg{margin-left:auto;background:#dcf8c6}.q{font-size:11px;color:#666;margin-bottom:2px}.h{font-size:11px;color:#777;text-align:right;margin-top:3px}.k{color:#666;font-style:italic}.adj{max-width:100%;max-height:360px;border-radius:8px;display:block}.res{background:#fff8e1;border:1px solid #f0d78c;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:13px}@media print{body{margin:0}}</style></head><body>
+<style>body{font:14px/1.45 system-ui,sans-serif;color:#111;background:#fff;max-width:760px;margin:24px auto;padding:0 16px}h1{font-size:18px;margin:0 0 4px}.meta{color:#555;font-size:13px;margin-bottom:16px}.aviso{background:#e8f4ff;border:1px solid #b9dcff;border-radius:8px;padding:6px 12px;margin-bottom:12px;font-size:13px}.g{max-width:78%;padding:8px 11px;border-radius:12px;margin:6px 0;background:#f1f1f1;page-break-inside:avoid;word-break:break-word}.g.neg{margin-left:auto;background:#dcf8c6}.q{font-size:11px;color:#666;margin-bottom:2px}.h{font-size:11px;color:#777;text-align:right;margin-top:3px}.k{color:#666;font-style:italic}.adj{max-width:100%;max-height:360px;border-radius:8px;display:block}.res{background:#fff8e1;border:1px solid #f0d78c;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:13px}.visor-video{max-width:100%}.visor-video video.adj{min-height:120px;min-width:180px;background:#ddd}@media print{body{margin:0}}${VISOR_CSS}</style></head><body>
 <h1>Conversación con ${escapar(v.quien)}</h1>
 ${aviso}
 <div class="meta">${escapar(v.telefono)} · ${a.messageCount} mensajes${a.pedido ? ` · pedido ${escapar(a.pedido)}` : ''} · guardada el ${escapar(fechaHora(a.createdAt))}${v.cerradoPor ? ` por ${escapar(v.cerradoPor)}` : ''}</div>
 ${v.resumen ? `<div class="res"><b>Resumen:</b> ${escapar(v.resumen)}${a.etiquetas.length ? `<br><b>Etiquetas:</b> ${escapar(a.etiquetas.map((e) => nombreDeEtiqueta(e)).join(', '))}` : ''}${v.notas ? `<br><b>Notas:</b> ${escapar(v.notas)}` : ''}</div>` : ''}
 ${globos.join('\n')}
+<script>${VISOR_JS}</script>
 </body></html>`;
   const sufijo = opts.anonimo ? '-sin-datos' : '';
   return { nombre: `conversacion-${opts.anonimo ? taparTelefono(a.phone).replace(/\D+/g, '') : a.phone}-${a.createdAt.toISOString().slice(0, 10)}${sufijo}.html`, html };

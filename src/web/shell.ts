@@ -17,6 +17,7 @@
 import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
 import { tiendaActual } from '../plataforma/contexto.js';
 import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
+import { VISOR_CSS, VISOR_JS } from './visor-medios.js';
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 import { SISTEMA_CSS } from './sistema-css.js';
 import { escapeHtml } from './login-page.js';
@@ -249,7 +250,7 @@ const CSS = `
   .s-grupo { margin-top: 2px; }
   /* Cada categoria separada por una linea fina: se ve donde empieza y acaba cada una. */
   .s-menu-gsg > .s-grupo + .s-grupo { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--s-line); }
-  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit;  }
+  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: 0; text-transform: none; cursor: pointer; border-radius: 8px; font-family: inherit;  }
   .s-grupo-cab:hover { background: var(--s-hover); color: var(--s-text); }
   .s-grupo.fijo > .s-grupo-cab { cursor: default; } .s-grupo.fijo > .s-grupo-cab:hover { background: transparent; color: var(--s-muted); } .s-grupo.fijo > .s-grupo-cab .s-ico { display: none; }
   .s-grupo-cab .s-ico { width: 15px; height: 15px;  }
@@ -299,9 +300,9 @@ const CSS = `
     .s-top .s-buscar-boton, .s-top .s-ayuda-boton { min-width: 0; width: 38px; padding: 0; justify-content: center; }
     .s-top .s-buscar-boton span, .s-top .s-buscar-boton kbd, .s-top .s-ayuda-boton span { display: none; }
   }
-  .s-miga { color: var(--s-muted); font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .s-miga { color: var(--s-muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-miga:empty { display: none; }
-  .s-titulo h1 { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+  .s-titulo .s-titulo-h { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
   .s-titulo p { margin: 0; color: var(--s-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-top-der { margin-left: auto; display: flex; align-items: center; gap: 10px; }
   .s-demo { font-size: 12px; font-weight: 700; color: var(--ambar); background: var(--ambar-suave); border: 1px solid transparent; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
@@ -327,7 +328,7 @@ const CSS = `
   .s-avisos { position: relative; }
   .s-avisos-caja { display: none; position: absolute; right: 0; top: 44px; width: 340px; max-width: calc(100vw - 32px); background: var(--s-top); border: 1px solid var(--s-line); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.18); z-index: 70; overflow: hidden; }
   .s-avisos.abierto .s-avisos-caja { display: block; }
-  .s-avisos-caja h4 { margin: 0; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--s-line); color: var(--s-muted); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .s-avisos-caja h4 { margin: 0; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--s-line); color: var(--s-muted); font-weight: 700; letter-spacing: 0; text-transform: none; }
   .s-aviso { display: flex; gap: 10px; align-items: flex-start; padding: 11px 14px; border-bottom: 1px solid var(--s-line); color: var(--s-text); text-decoration: none; font-size: 13.5px; line-height: 1.4; }
   .s-aviso:last-child { border-bottom: 0; }
   .s-aviso:hover { background: var(--s-hover); }
@@ -435,7 +436,7 @@ const CSS = `
   .s-pal-cab input:focus, .s-pal-cab input:focus-visible { border: 0; outline: 0; box-shadow: none; }
   .s-pal-cab kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; background: var(--s-kbd); border: 1px solid var(--s-line); border-radius: 5px; padding: 3px 5px; color: var(--s-muted); }
   .s-pal-lista { overflow: auto; padding: 6px 0 8px; min-height: 0; }
-  .s-pal-grupo { padding: 8px 14px 3px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--s-muted); }
+  .s-pal-grupo { padding: 8px 14px 3px; font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--s-muted); }
   .s-pal-item { display: flex; gap: 10px; align-items: center; padding: 8px 14px; text-decoration: none; color: var(--s-text); cursor: pointer; }
   .s-pal-item .s-ico { flex: none; color: var(--s-muted); }
   .s-pal-item .t { flex: 1; min-width: 0; line-height: 1.3; }
@@ -503,9 +504,54 @@ const CSS = `
   /* En el telefono la barra de arriba deja solo el titulo y los botones: sin miga, subtitulo ni señal de la IA. */
   @media (max-width: 560px) {
     .s-miga, .s-titulo p, .s-ia-senal { display: none !important; }
-    .s-titulo h1 { font-size: 16px; }
+    .s-titulo .s-titulo-h { font-size: 16px; }
     .s-top-der { gap: 4px; }
     .s-boton { width: 36px; height: 36px; }
+  }
+
+  /* --- cabecera de cada pantalla (11/11) ----------------------------------
+     Antes el titulo, la seccion y la explicacion se apretaban en la barra de
+     arriba junto a siete botones, y la explicacion salia cortada con «…».
+     Ahora la barra lleva solo la ruta (Operación › Pedidos GSG) y la pantalla
+     empieza con su titulo grande y la explicacion entera. El chat (lleno)
+     sigue con todo arriba: ahi cada centimetro de alto es del hilo. */
+  .s-app.con-cabecera .s-titulo { flex-direction: row; align-items: center; gap: 0; min-width: 0; }
+  .s-app.con-cabecera .s-titulo p { display: none; }
+  .s-app.con-cabecera .s-miga { text-transform: none; letter-spacing: 0; font-size: 13.5px; font-weight: 500; }
+  .s-app.con-cabecera .s-miga:not(:empty)::after { content: '›'; margin: 0 8px; color: var(--gris-claro); }
+  .s-app.con-cabecera .s-titulo .s-titulo-h { font-size: 13.5px; font-weight: 600; letter-spacing: 0; }
+  /* --- tono sereno del armazon (11/11): solo apariencia ------------------ */
+  .s-grupo-cab { text-transform: none; letter-spacing: 0; font-size: 12.5px !important; font-weight: 600; color: var(--gris-claro); }
+  .s-menu-gsg > .s-grupo + .s-grupo { border-top-color: transparent; margin-top: 10px; }
+  .s-item { font-weight: 500; color: var(--gris); }
+  .s-item.activo { background: var(--primario-suave); color: var(--primario); }
+  .s-item.activo::before { display: none; }
+  .s-avisos-caja h4, .s-pal-grupo { text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+  .s-plan { background: var(--ambar-suave); color: var(--ambar); border-bottom: 1px solid color-mix(in srgb, var(--ambar) 20%, transparent); }
+  .s-plan.bad { background: var(--rojo-suave); color: var(--rojo); border-bottom-color: color-mix(in srgb, var(--rojo) 20%, transparent); }
+  .s-plan a { color: inherit; }
+  .s-boton { border-color: var(--borde); }
+  .s-boton .s-num { background: var(--rojo); box-shadow: 0 0 0 2px var(--superficie); font-weight: 700; }
+  .s-ia-boton { border-color: transparent; }
+  /* El menu del celular, cerrado, proyectaba su sombra sobre el borde izquierdo de la pantalla. */
+  @media (max-width: 960px) { .s-app:not(.abierto) .s-side { box-shadow: none; } }
+  /* La barra en dos grupos: lo que informa (IA, tema, avisos) | lo que se hace (buscar, órdenes, ayuda). */
+  @media (min-width: 961px) {
+    .s-top-der .s-avisos { padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--s-line); }
+  }
+  .s-pag { max-width: var(--ancho-max); margin: 0 auto var(--esp-5); }
+  .s-pag-tit { margin: 0; font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -.015em; color: var(--texto); text-wrap: balance; }
+  .s-pag-sub { margin: 6px 0 0; max-width: 75ch; color: var(--texto-suave); font-size: 14.5px; line-height: 1.5; text-wrap: pretty; }
+  .s-pag-sub:empty { display: none; }
+  @media (max-width: 960px) {
+    /* En el movil la barra ya dice donde estas: la cabecera queda compacta. */
+    .s-pag { margin-bottom: var(--esp-4); }
+    .s-pag-tit { font-size: 20px; }
+    .s-pag-sub { font-size: 13.5px; }
+  }
+  @media (max-width: 560px) {
+    /* En el telefono el titulo grande va justo debajo: arriba no se repite. */
+    .s-app.con-cabecera .s-titulo { display: none; }
   }
 `;
 
@@ -1189,6 +1235,10 @@ const JS = String.raw`
   window.shellTitulo = function (titulo, sub) {
     document.getElementById('s-h1').textContent = titulo;
     document.getElementById('s-sub').textContent = sub || '';
+    /* La cabecera de la pagina (titulo grande y explicacion entera), si la hay. */
+    var pt = document.getElementById('s-pag-tit'), ps = document.getElementById('s-pag-sub');
+    if (pt) pt.textContent = titulo;
+    if (ps) ps.textContent = sub || '';
     document.title = titulo + ' - ' + document.getElementById('s-app').getAttribute('data-negocio');
     apuntarAyuda();
   };
@@ -1276,9 +1326,9 @@ ${TEMA_SCRIPT}
 <link rel="manifest" href="/manifest.webmanifest">
 <title>${escapeHtml(opts.titulo)} - ${negocio} · ${NOMBRE_SISTEMA}</title>
 ${ICONOS_HEAD}
-<style>${CSS}${DIALOGO_CSS}${DIALOGO_ELEGIR_CSS}${opts.css ?? ''}</style>
+<style>${CSS}${DIALOGO_CSS}${DIALOGO_ELEGIR_CSS}${VISOR_CSS}${opts.css ?? ''}</style>
 </head><body>
-<div class="s-app modo-${modo}" id="s-app" data-negocio="${negocio}" data-modo="${modo}" data-gsg="${conGsg ? '1' : '0'}">
+<div class="s-app modo-${modo}${opts.lleno ? '' : ' con-cabecera'}" id="s-app" data-negocio="${negocio}" data-modo="${modo}" data-gsg="${conGsg ? '1' : '0'}">
   <div class="s-backdrop" id="s-backdrop"></div>
   <div class="s-panel-fondo" id="s-panel-fondo"></div>
   <aside class="s-side">
@@ -1311,7 +1361,7 @@ ${ICONOS_HEAD}
     <div id="s-plan" class="s-plan hidden"></div>
     <header class="s-top">
       <button class="s-menu" id="s-menu" type="button" title="Menú" aria-label="Abrir el menú">${icono('menu')}</button>
-      <div class="s-titulo"><div class="s-miga" id="s-miga"></div><h1 id="s-h1">${escapeHtml(opts.titulo)}</h1><p id="s-sub">${escapeHtml(opts.subtitulo ?? '')}</p></div>
+      <div class="s-titulo"><div class="s-miga" id="s-miga"></div>${opts.lleno ? '<h1' : '<div'} class="s-titulo-h" id="s-h1">${escapeHtml(opts.titulo)}${opts.lleno ? '</h1>' : '</div>'}<p id="s-sub">${escapeHtml(opts.subtitulo ?? '')}</p></div>
       <span id="state" class="pill hidden"></span>
       <div class="s-top-der">${demo}
         <a class="s-ia-senal hidden" id="s-ia-senal" href="/panel#ia" data-estado="" title="Asistente IA" aria-label="Estado de la IA"><i></i><span>IA</span></a>
@@ -1327,6 +1377,7 @@ ${ICONOS_HEAD}
       </div>
     </header>
     <div class="s-content${opts.lleno ? ' lleno' : ' s-base'}" id="s-content">
+${opts.lleno ? '' : `<header class="s-pag"><h1 class="s-pag-tit" id="s-pag-tit">${escapeHtml(opts.titulo)}</h1><p class="s-pag-sub" id="s-pag-sub">${escapeHtml(opts.subtitulo ?? '')}</p></header>`}
 ${opts.contenido}
     </div>
     <nav class="s-nav-movil" id="s-nav-movil" aria-label="Ir a">
@@ -1363,6 +1414,7 @@ ${FILTRO_TABLA_JS}
 ${EVENTOS_PANEL_JS}
 ${DIALOGO_JS}
 ${DIALOGO_ELEGIR_JS}
+${VISOR_JS}
 ${JS}
 ${opts.script ?? ''}
 </script>

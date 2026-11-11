@@ -32,6 +32,7 @@ import { payloadExterno } from '../../util/payload-externo.js';
 import { trackingDeEntrega } from '../../entregas/repo.js';
 import { nombreDeEtiqueta } from '../../archive/clasificar.js';
 import { catalogoVigente, numeroNormalizado } from '../../chat/etiquetar.js';
+import { errorDeEnvio, type ErrorDeEnvio } from '../../whatsapp/errores-envio.js';
 
 export interface ApiConversacionesGsgDeps {
   repos: Repos;
@@ -196,12 +197,30 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     // luego los demas en curso. Todos comparten este chat.
     const vivos = await repos.entregas.vivasPorTelefono(entrega.phone).catch(() => []);
     const tracking = [...new Set([trackingDe(entrega), ...vivos.map(trackingDe)])];
+    // Los salientes que no salieron llevan `error` (codigo, motivo, queHacer, reintentar):
+    // lo mismo que se ve en GSGchat en «Qué pasó con este mensaje». Solo se consultan los
+    // envios si hay alguno asi, para no cargar cada lectura del historial.
+    const conError = new Map<string, ErrorDeEnvio>();
+    if (messages.some((m) => m.direction === 'out' && m.status === 'failed')) {
+      const envios = await repos.deliveries.listRecent({ phone: contact.phone, limit: 300, offset: 0 }).catch(() => []);
+      for (const d of envios) {
+        if (d.status !== 'failed' && d.status !== 'blocked_by_gate') continue;
+        const e = errorDeEnvio(d.errorCode, d.errorTitle);
+        if (!e) continue;
+        if (d.wamid) conError.set('w:' + d.wamid, e);
+        conError.set('d:' + d.id, e);
+      }
+    }
+    const errorDe = (m: (typeof messages)[number]) =>
+      m.direction === 'out' && m.status === 'failed'
+        ? (m.wamid ? conError.get('w:' + m.wamid) : undefined) ?? (m.deliveryId ? conError.get('d:' + m.deliveryId) : undefined) ?? errorDeEnvio(null, 'No salió y no quedó apuntado el motivo.')
+        : null;
     return {
       tracking,
       contacto: { id: contact.id, telefono: contact.phone, nombre: contact.name },
       nota: await notaDe(contact.phone),
       linea: await lineaDe(contact.id),
-      mensajes: messages.map(mensajeDeChat),
+      mensajes: messages.map((m) => ({ ...mensajeDeChat(m), error: errorDe(m) })),
       hayMas: messages.length === q.limite,
     };
   };

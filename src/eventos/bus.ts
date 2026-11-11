@@ -56,7 +56,7 @@ export interface Eventos {
     trackings: string[];
   };
   /** Meta (o el proveedor) dice como va: sent, delivered, read, failed. */
-  'mensaje.estado': { mensajeId: string; estado: string; fecha: string };
+  'mensaje.estado': { mensajeId: string; estado: string; fecha: string; /** Solo con estado failed: por que no salio (ver src/whatsapp/errores-envio.ts). */ error?: import('../whatsapp/errores-envio.js').ErrorDeEnvio };
   /** Se consiguio una ubicacion (pin nativo o link de mapa). */
   'ubicacion.recibida': {
     contacto: ContactoEvento;
@@ -133,7 +133,7 @@ export const NOMBRES_EVENTOS: NombreEvento[] = [
 export const DESCRIPCION_EVENTOS: Record<NombreEvento, string> = {
   'mensaje.recibido': 'El cliente escribio (texto, ubicacion, foto, audio...).',
   'mensaje.enviado': 'Salio un mensaje hacia el cliente, lo mandara quien lo mandara.',
-  'mensaje.estado': 'Un mensaje enviado cambio de estado: sent, delivered, read o failed.',
+  'mensaje.estado': 'Un mensaje enviado cambio de estado: sent, delivered, read o failed. Con failed trae error: codigo, motivo, queHacer y reintentar.',
   'ubicacion.recibida': 'Se consiguio la ubicacion de un cliente (pin o link de mapa).',
   'contacto.alta': 'Un contacto dio su consentimiento para recibir mensajes.',
   'contacto.baja': 'Un contacto pidio no recibir mas mensajes.',

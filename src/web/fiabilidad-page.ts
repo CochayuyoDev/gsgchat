@@ -50,9 +50,9 @@ const CSS = `
   /* El veredicto: lo primero que se lee y lo unico que hace falta si va todo bien. */
   /* El veredicto se lee por el tono de toda la tarjeta (borde y fondo), no por una franja lateral. */
   .veredicto { margin: var(--esp-4) 0; }
-  .veredicto.verde { border-color: color-mix(in srgb, var(--verde) 35%, var(--borde)); background: color-mix(in srgb, var(--verde-suave) 45%, var(--superficie)); }
-  .veredicto.ambar { border-color: color-mix(in srgb, var(--ambar) 35%, var(--borde)); background: color-mix(in srgb, var(--ambar-suave) 45%, var(--superficie)); }
-  .veredicto.rojo { border-color: color-mix(in srgb, var(--rojo) 35%, var(--borde)); background: color-mix(in srgb, var(--rojo-suave) 45%, var(--superficie)); }
+  .veredicto.verde { border-color: color-mix(in srgb, var(--verde) 16%, var(--borde)); background: color-mix(in srgb, var(--verde-suave) 45%, var(--superficie)); }
+  .veredicto.ambar { border-color: color-mix(in srgb, var(--ambar) 16%, var(--borde)); background: color-mix(in srgb, var(--ambar-suave) 45%, var(--superficie)); }
+  .veredicto.rojo { border-color: color-mix(in srgb, var(--rojo) 16%, var(--borde)); background: color-mix(in srgb, var(--rojo-suave) 45%, var(--superficie)); }
   .veredicto .cabecera { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .veredicto h2 { font-size: var(--fs-h2); font-weight: 700; margin: 0; }
   .veredicto p { margin: var(--esp-2) 0 0; font-size: var(--fs-small); }
@@ -106,7 +106,7 @@ const CSS = `
   #numeros-pie { margin-top: var(--esp-2); }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
+  th { font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
   tr:last-child td { border-bottom: 0; }
   td.num, th.num { text-align: right; white-space: nowrap; }
 
@@ -137,12 +137,13 @@ export function fiabilidadPage(opts: { disponible: boolean; demo: boolean; nombr
   const contenido = `
 <div class="wrap" id="wrap" data-disponible="${opts.disponible ? '1' : '0'}">
 
-<section class="tarjeta"><h2>API y conexión</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones"><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a href="/panel#historial">Historial</a></div></section>
+<!-- Primero el veredicto (si hay que hacer algo, es lo que se busca al entrar); después el resumen de la API. -->
 <section class="tarjeta veredicto" id="veredicto" aria-live="polite">
   <div class="cabecera"><span class="chip tono-gris" id="veredicto-chip">Comprobando</span><h2 id="veredicto-titulo">Mirando cómo está todo…</h2></div>
   <p class="muted" id="veredicto-pie">El sistema se vigila a sí mismo cada pocos segundos. Si algo falla, aquí sale qué pasa y a dónde ir.</p>
   <ul id="veredicto-acciones"></ul>
 </section>
+<section class="tarjeta"><h2>API y conexión</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones" style="display:flex;flex-wrap:wrap;gap:var(--esp-2);align-items:center"><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a class="btn fantasma" href="/panel#historial">Ver historial</a></div></section>
 
 <p class="aviso ambar hidden" id="aviso-red" role="status"></p>
 
