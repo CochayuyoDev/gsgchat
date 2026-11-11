@@ -771,6 +771,12 @@ export function openApi(baseUrl: string): Json {
             metodoPago: { type: 'string', nullable: true, description: '"YAPE", "Efectivo", "Pagado"...' },
             monto: { oneOf: [{ type: 'number' }, { type: 'string' }], nullable: true, description: 'Lo que el motorizado cobra: 85 o "85.00" (un numero sale con 2 decimales)' },
             remitente: { type: 'string', nullable: true, description: 'Quien firma el envío ("Juan Quispe"). El primer mensaje al cliente dice "Somos GSG Courier"' },
+            motorizado: {
+              nullable: true,
+              description: 'Opcional. El motorizado que GSG asignó: {"nombre": "Juan Pérez", "telefono": "999555111"} (o solo el nombre). Con su teléfono, ese motorizado puede escribir «proceder cambio de ubicación» a la línea de GSGchat y se registra la última ubicación que mandó el cliente, aunque haya pasado la hora límite. No se le escribe nada al motorizado por venir aquí.',
+              oneOf: [{ type: 'object', properties: { nombre: { type: 'string', nullable: true }, telefono: { type: 'string', nullable: true } } }, { type: 'string' }],
+            },
+            telefonoMotorizado: { type: 'string', nullable: true, description: 'Lo mismo que motorizado.telefono, suelto.' },
             firstMessage: { type: 'string', nullable: true, maxLength: 1024, description: 'El texto exacto del PRIMER mensaje que se le manda al cliente por WhatsApp. Si viene, sale tal cual en lugar del texto editable de GSGchat (con el mismo botón de ubicación o de SÍ/NO); si no viene, va el de siempre. Solo cambia ese primer mensaje: los recordatorios y el resto del flujo no cambian. Con la API oficial de Meta fuera de la ventana de 24 h se manda la plantilla aprobada, no este texto.' },
           },
         },

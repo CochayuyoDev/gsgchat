@@ -450,6 +450,9 @@ export function rutasPage(opts: RutasOpts): string {
         <p class="aj-frase">El cliente puede cambiar su ubicación diciendo «Cambio de Ubicación» hasta las <input id="aj-cu-hora" type="time" aria-label="Hora límite para cambiar la ubicación"> (por defecto 15:00, hora de Lima).</p>
         <label style="display:block;margin-top:8px"><strong>Después de esa hora, el mensaje de cambio de ubicación pasa a:</strong> <span class="muted">Variables: {horaLimite} {soporte}</span>
           <textarea id="aj-cu-texto" rows="4" style="width:100%"></textarea></label>
+        <label style="display:block;margin-top:12px"><strong>Números de GSG que pueden ordenar el cambio aunque haya pasado la hora:</strong>
+          <textarea id="aj-cu-autorizados" rows="2" maxlength="900" placeholder="999555111, 987654321" style="width:100%;box-sizing:border-box"></textarea></label>
+        <p class="muted">Si un motorizado o alguien de GSG escribe <b>proceder cambio de ubicación</b> (con o sin tilde) a este WhatsApp, se registra la última ubicación que mandó el cliente y al cliente le llega «ubicación registrada». Escriben el tracking detrás: <b>proceder cambio de ubicación GSG-123</b> (sin tracking vale si solo un cliente espera un cambio). Separa los números con comas. El motorizado que GSG manda con el pedido puede hacerlo sin estar aquí, y un cliente nunca puede.</p>
         <div class="fila" style="margin-top:8px"><button type="button" class="btn primario" id="aj-cu-guardar">Guardar cambio de ubicación</button> <button type="button" class="btn" id="aj-cu-fabrica">Texto de fábrica</button> <span class="muted" id="aj-cu-estado" role="status"></span></div>
       </section>
 
@@ -1919,6 +1922,7 @@ async function cargarCambioUbicacion() {
     cuFabrica = ((d.textos || {}).porDefecto || {}).cambioUbicacionTarde || '';
     document.getElementById('aj-cu-hora').value = aj.cambioUbicacionHasta || '15:00';
     document.getElementById('aj-cu-texto').value = (guardados.cambioUbicacionTarde || '').trim() ? guardados.cambioUbicacionTarde : cuFabrica;
+    document.getElementById('aj-cu-autorizados').value = (aj.autorizadosCambioUbicacion || []).join(', ');
     estado.textContent = '';
   } catch (e) { estado.textContent = e.message; }
 }
@@ -1929,10 +1933,20 @@ async function guardarCambioUbicacion(fabrica) {
   var texto = fabrica ? '' : document.getElementById('aj-cu-texto').value;
   if (!/^\d{2}:\d{2}$/.test(hora)) { estado.textContent = 'Pon una hora válida.'; return; }
   if (texto.trim() === cuFabrica.trim()) texto = '';
+  // Los números de GSG autorizados: solo dígitos, sin repetir; uno mal escrito no se guarda a medias.
+  // «51 999 777 888» y «999777888» son el mismo número: se comparan los últimos 9 dígitos.
+  var autorizados = [], vistos = [], malos = [];
+  document.getElementById('aj-cu-autorizados').value.split(/[,;\n]+/).forEach(function (p) {
+    var t = p.trim(); if (!t) return;
+    var d = t.replace(/\D/g, '');
+    if (d.length < 9 || d.length > 15) { malos.push(t); return; }
+    if (vistos.indexOf(d.slice(-9)) < 0) { vistos.push(d.slice(-9)); autorizados.push(d); }
+  });
+  if (malos.length) { estado.textContent = 'Estos números no se entienden (tienen que tener entre 9 y 15 dígitos): ' + malos.join(', '); return; }
   boton.disabled = true;
   estado.textContent = 'Guardando…';
   try {
-    await api('/admin/entregas/ajustes', { method: 'POST', body: { cambioUbicacionHasta: hora, textos: { cambioUbicacionTarde: texto } } });
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { cambioUbicacionHasta: hora, textos: { cambioUbicacionTarde: texto }, autorizadosCambioUbicacion: autorizados } });
     toast('Cambio de ubicación guardado.');
     await cargarCambioUbicacion();
   } catch (e) { estado.textContent = e.message; }

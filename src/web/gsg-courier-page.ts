@@ -35,6 +35,7 @@ export const CAMPOS: Array<[string, string, boolean, string]> = [
   ['Teléfono 2', 'telefono2', false, ''],
   ['Producto', 'producto', false, ''],
   ['Cant Bultos', 'cantBultos', false, 'Entero no negativo.'],
+  ['Motorizado', 'motorizado', false, '{nombre, telefono}. Con su teléfono, ese motorizado puede escribir «proceder cambio de ubicación» a este WhatsApp y se registra la última ubicación que mandó el cliente. No se le escribe nada por venir aquí.'],
 ];
 
 /** Los campos de antes: se siguen aceptando para no romper envíos anteriores, pero no son parte del contrato. */

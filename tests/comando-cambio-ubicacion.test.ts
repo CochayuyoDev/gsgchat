@@ -1,7 +1,9 @@
+import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
+import { registerEntregasRoutes } from '../src/entregas/routes.js';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
 import { setFakeClock } from './fakes.js';
-import { COMANDOS_CHAT, esComandoCambioUbicacion } from '../src/entregas/comando-cambio-ubicacion.js';
+import { COMANDOS_CHAT, esComandoCambioUbicacion, leerComandoDeMotorizado } from '../src/entregas/comando-cambio-ubicacion.js';
 import { comandoDesdeTelefono } from '../src/web/local-routes.js';
 
 /**
@@ -228,6 +230,264 @@ describe('«proceder cambio de ubicación»', () => {
     try {
       const r = await e.api.get<{ comandos: Array<{ atajo: string; texto: string }> }>('/admin/chat/atajos');
       expect(r.body.comandos).toEqual([expect.objectContaining({ atajo: 'cambio', texto: 'proceder cambio de ubicación' })]);
+    } finally {
+      await e.cerrar();
+    }
+  });
+});
+
+/**
+ * El motorizado de GSG (el `telefonoMotorizado` que GSG manda en el pedido)
+ * escribe el comando por WhatsApp a la línea de GSGchat (pedido del dueño,
+ * 11/11): pasada la hora límite el cliente ya no puede cambiar su ubicación
+ * solo, pero si el motorizado lo ordena vale la última que mandó el cliente.
+ */
+describe('leer el comando del motorizado', () => {
+  it('con o sin tilde, y con el pedido delante o detrás', () => {
+    expect(leerComandoDeMotorizado('proceder cambio de ubicación')).toEqual({ senas: [] });
+    expect(leerComandoDeMotorizado('Proceder cambio de ubicacion')).toEqual({ senas: [] });
+    expect(leerComandoDeMotorizado('PROCEDER CAMBIO DE UBICACIÓN 👍')).toEqual({ senas: [] });
+    expect(leerComandoDeMotorizado('proceder cambio de ubicación GSG-COMANDO-1')).toEqual({ senas: ['gsg-comando-1'] });
+    expect(leerComandoDeMotorizado('P-1001 proceder al cambio de ubicacion')).toEqual({ senas: ['p-1001'] });
+    expect(leerComandoDeMotorizado('proceder cambio de ubicación del pedido 987601455')).toEqual({ senas: ['987601455'] });
+    expect(leerComandoDeMotorizado('proceder cambio de ubicación: GSG-1, GSG-2')).toEqual({ senas: ['gsg-1', 'gsg-2'] });
+  });
+  it('otras palabras, una negación o una frase cualquiera, no', () => {
+    for (const t of ['puedes proceder cambio de ubicación?', 'no proceder cambio de ubicación', 'proceder cambio de ubicación mañana', 'quiero cambiar la ubicación', 'proceder', 'cambio de ubicación GSG-1', '', null]) {
+      expect(leerComandoDeMotorizado(t as string), String(t)).toBeNull();
+    }
+  });
+});
+
+describe('«proceder cambio de ubicación» escrito por el motorizado por WhatsApp', () => {
+  const MOTO = '999555111';
+  const conMoto = (extra: Record<string, unknown> = {}) => ({ ...pedido, motorizado: { nombre: 'Juan Pérez', telefono: MOTO }, ...extra });
+
+  it('pasada la hora el cliente ya no puede; el motorizado lo ordena y vale la última ubicación del cliente', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
+    try {
+      await e.api.post('/api/v1/entregas', conMoto());
+      await e.trabajar();
+      await e.contesta(telefono, { pin: A });
+      e.avanzar(10);
+      // Pasada la hora límite el cliente pide cambiarla: el sistema le dice que ya no puede.
+      await e.contesta(telefono, { texto: 'quiero cambiar mi ubicación' });
+      expect(e.textosA(telefono).at(-1)).toMatch(/al ser después de la/);
+      e.avanzar(2);
+      // Y aunque mande la nueva, no se registra sola.
+      await e.contesta(telefono, { pin: B });
+      expect((await e.entrega(TRACKING))!.lat).not.toBe(B.lat);
+      e.avanzar(10);
+      const antesCliente = e.mensajesA(telefono).length;
+
+      // El motorizado, sin tilde, desde su WhatsApp.
+      await e.contesta(MOTO, { texto: 'proceder cambio de ubicacion' });
+
+      const ent = (await e.entrega(TRACKING))!;
+      expect(ent).toMatchObject({ ubicacionEstado: 'recibida', lat: B.lat, lng: B.lng });
+      // Al cliente: el mensaje automático de ubicación registrada, nunca el comando.
+      const alCliente = cuerpos(e.mensajesA(telefono).slice(antesCliente));
+      expect(alCliente).toHaveLength(1);
+      expect(alCliente[0]).toMatch(/nueva ubicación se registró correctamente/);
+      // Al motorizado: lo que se hizo, con el enlace nuevo.
+      const alMoto = e.textosA(MOTO).at(-1)!;
+      expect(alMoto).toMatch(/✅ GSG-COMANDO-1 \(Lucía/);
+      expect(alMoto).toMatch(/ubicación cambiada a la última que mandó el cliente/);
+      expect(alMoto).toContain(String(B.lat));
+      // En el historial del pedido queda quién lo ordenó.
+      const detalle = (await e.entregas.entrega(ent.id))!;
+      expect(detalle.eventos.some((x) => /proceder cambio de ubicación» de Juan Pérez \(motorizado, por WhatsApp desde el 999555111\)/.test(x.detalle ?? ''))).toBe(true);
+      // GSG la recibe como cambio, con la anterior.
+      const aGsg = await reportesUbicacion(e);
+      expect(aGsg.find((p) => p.lat === B.lat)).toMatchObject({ cambioUbicacion: true, anterior: { lat: A.lat, lng: A.lng } });
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('el mismo texto desde un número que no es motorizado de ningún pedido no cambia nada', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
+    try {
+      await e.api.post('/api/v1/entregas', conMoto());
+      await e.trabajar();
+      await e.contesta(telefono, { pin: A });
+      e.avanzar(10);
+      await e.contesta(telefono, { pin: B });
+      e.avanzar(10);
+      await e.contesta('999555222', { texto: `proceder cambio de ubicación ${TRACKING}` });
+      expect((await e.entrega(TRACKING))!.lat).not.toBe(B.lat);
+      // Ni el propio cliente, aunque nombre su pedido.
+      await e.contesta(telefono, { texto: `proceder cambio de ubicación ${TRACKING}` });
+      expect((await e.entrega(TRACKING))!.lat).not.toBe(B.lat);
+      expect(e.textosA('999555222').some((t) => /ubicación cambiada/.test(t))).toBe(false);
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('con dos clientes: vale el único que mandó una ubicación nueva; si hay dudas, pregunta; nombrando el tracking, ese', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
+    const OTRO = '987601466';
+    const T2 = 'GSG-COMANDO-2';
+    const C = { lat: -12.0911, lng: -77.0501 };
+    const D = { lat: -12.0712, lng: -77.0612 };
+    try {
+      await e.api.post('/api/v1/entregas', conMoto());
+      await e.api.post('/api/v1/entregas', conMoto({ tracking: T2, cliente: 'Mario', telefono: OTRO }));
+      await e.trabajar();
+      await e.contesta(telefono, { pin: A });
+      await e.contesta(OTRO, { pin: C });
+      e.avanzar(10);
+
+      // Ninguno mandó otra: se le pregunta cuál, con sus pedidos.
+      await e.contesta(MOTO, { texto: 'proceder cambio de ubicación' });
+      expect(e.textosA(MOTO).at(-1)).toMatch(/ninguno de tus clientes de hoy ha mandado una ubicación nueva/);
+      expect(e.textosA(MOTO).at(-1)).toMatch(/GSG-COMANDO-1/);
+      expect(e.textosA(MOTO).at(-1)).toMatch(/GSG-COMANDO-2/);
+
+      // Solo Lucía mandó otra: sin decir cuál, es ella.
+      await e.contesta(telefono, { pin: B });
+      e.avanzar(5);
+      await e.contesta(MOTO, { texto: 'Proceder cambio de ubicación' });
+      expect((await e.entrega(TRACKING))!.lat).toBe(B.lat);
+      expect((await e.entrega(T2))!.lat).toBe(C.lat);
+
+      // Mario manda otra y Lucía otra más: dos con ubicación nueva, se pregunta.
+      await e.contesta(OTRO, { pin: D });
+      await e.contesta(telefono, { pin: A });
+      e.avanzar(5);
+      await e.contesta(MOTO, { texto: 'proceder cambio de ubicación' });
+      expect(e.textosA(MOTO).at(-1)).toMatch(/tienes 2 clientes que mandaron una ubicación nueva/);
+      expect((await e.entrega(T2))!.lat).not.toBe(D.lat);
+      expect((await e.entrega(TRACKING))!.lat).not.toBe(A.lat);
+
+      // Nombrando el tracking (en minúsculas y sin tilde), solo ese.
+      await e.contesta(MOTO, { texto: 'proceder cambio de ubicacion gsg-comando-2' });
+      expect((await e.entrega(T2))!.lat).toBe(D.lat);
+      expect((await e.entrega(TRACKING))!.lat).not.toBe(A.lat);
+      expect(e.textosA(MOTO).at(-1)).toMatch(/✅ GSG-COMANDO-2 \(Mario/);
+      // Y el de Lucía con su teléfono como seña.
+      await e.contesta(MOTO, { texto: `proceder cambio de ubicación ${telefono}` });
+      expect((await e.entrega(TRACKING))!.lat).toBe(A.lat);
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('un pedido que no es suyo no se toca: se le dice y se le enseñan los suyos', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
+    try {
+      await e.api.post('/api/v1/entregas', conMoto());
+      // Otro pedido de otro motorizado.
+      await e.api.post('/api/v1/entregas', { ...OBLIGATORIOS_GSG, tracking: 'GSG-AJENO-1', cliente: 'Rosa', telefono: '987601477', distrito: 'Lima', motorizado: { nombre: 'Pedro', telefono: '999555333' } });
+      await e.trabajar();
+      await e.contesta('987601477', { pin: A });
+      e.avanzar(10);
+      await e.contesta('987601477', { pin: B });
+      e.avanzar(10);
+      await e.contesta(MOTO, { texto: 'proceder cambio de ubicación GSG-AJENO-1' });
+      expect((await e.entrega('GSG-AJENO-1'))!.lat).not.toBe(B.lat);
+      expect(e.textosA(MOTO).at(-1)).toMatch(/no encuentro GSG-AJENO-1 entre tus pedidos de hoy/);
+      expect(e.textosA(MOTO).at(-1)).toMatch(/GSG-COMANDO-1/);
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('si el cliente nunca mandó ubicación por WhatsApp, se le dice al motorizado y no se toca nada', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
+    try {
+      await e.api.post('/api/v1/entregas', conMoto());
+      await e.trabajar();
+      const antes = e.mensajesA(telefono).length;
+      await e.contesta(MOTO, { texto: 'proceder cambio de ubicación' });
+      expect(e.textosA(MOTO).at(-1)).toMatch(/todavía no ha mandado ninguna ubicación/);
+      expect(e.mensajesA(telefono)).toHaveLength(antes);
+      expect((await e.entrega(TRACKING))!.ubicacionEstado).toBe('pendiente');
+    } finally {
+      await e.cerrar();
+    }
+  });
+});
+
+/**
+ * Los números de GSG autorizados en Pedidos GSG → ajustes: motorizados que
+ * GSG no manda en el pedido, supervisores. Pueden ordenar el cambio de
+ * cualquier pedido de hoy nombrando el tracking (o sin nombrarlo si solo un
+ * cliente espera un cambio).
+ */
+describe('«proceder cambio de ubicación» desde un número de GSG autorizado', () => {
+  const GSG_SUPERVISOR = '999777888';
+
+  it('se guarda desde la pantalla y vale con el tracking; sin estar en la lista, no', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
+    try {
+      await clienteMandoOtraTarde(e);
+      // Sin autorizar: es un mensaje cualquiera.
+      await e.contesta(GSG_SUPERVISOR, { texto: `proceder cambio de ubicación ${TRACKING}` });
+      expect((await e.entrega(TRACKING))!.lat).not.toBe(B.lat);
+      expect(e.textosA(GSG_SUPERVISOR).some((t) => /ubicación cambiada/.test(t))).toBe(false);
+
+      // Lo autoriza un administrador por la ruta de la pantalla (con el 51 y espacios, como lo pegaría una persona).
+      const admin = Fastify();
+      admin.decorateRequest('usuario', null);
+      admin.addHook('onRequest', async (request) => {
+        (request as unknown as { usuario: unknown }).usuario = { rol: 'admin', nombre: 'Ali' };
+      });
+      await registerEntregasRoutes(admin, { entregas: e.entregas, config: { bbox: null } as never });
+      try {
+        const g = await admin.inject({ method: 'POST', url: '/admin/entregas/ajustes', payload: { autorizadosCambioUbicacion: ['51 999 777 888'] } });
+        expect(g.statusCode).toBe(200);
+        expect((g.json() as { ajustes: { autorizadosCambioUbicacion: string[] } }).ajustes.autorizadosCambioUbicacion).toEqual(['51 999 777 888']);
+        // La pantalla lo vuelve a leer del resumen.
+        const resumen = (await admin.inject({ method: 'GET', url: '/admin/entregas' })).json() as { ajustes?: { autorizadosCambioUbicacion?: string[] } };
+        expect(resumen.ajustes?.autorizadosCambioUbicacion).toEqual(['51 999 777 888']);
+      } finally {
+        await admin.close();
+      }
+
+      const antes = e.mensajesA(telefono).length;
+      await e.contesta(GSG_SUPERVISOR, { texto: `Proceder cambio de ubicacion ${TRACKING}` });
+      expect(await e.entrega(TRACKING)).toMatchObject({ ubicacionEstado: 'recibida', lat: B.lat, lng: B.lng });
+      expect(cuerpos(e.mensajesA(telefono).slice(antes))).toEqual([expect.stringMatching(/nueva ubicación se registró correctamente/)]);
+      expect(e.textosA(GSG_SUPERVISOR).at(-1)).toMatch(/^✅ GSG-COMANDO-1 \(Lucía/);
+      const ent = (await e.entrega(TRACKING))!;
+      const detalle = (await e.entregas.entrega(ent.id))!;
+      expect(detalle.eventos.some((x) => /de el 999777888 \(número de GSG autorizado, por WhatsApp\)/.test(x.detalle ?? ''))).toBe(true);
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('sin tracking: vale si solo un cliente espera un cambio; si no, pregunta cuál', async () => {
+    const e = await crearEscenarioEntregas({ agente: true, arranque: TARDE });
+    try {
+      await e.entregas.guardarAjustes({ autorizadosCambioUbicacion: [GSG_SUPERVISOR] });
+      // Nadie espera un cambio todavía.
+      await e.api.post('/api/v1/entregas', pedido);
+      await e.trabajar();
+      await e.contesta(telefono, { pin: A });
+      e.avanzar(5);
+      await e.contesta(GSG_SUPERVISOR, { texto: 'proceder cambio de ubicación' });
+      expect(e.textosA(GSG_SUPERVISOR).at(-1)).toMatch(/^Ningún pedido de hoy está esperando un cambio de ubicación/);
+
+      // Uno espera: sin tracking, ese.
+      await e.contesta(telefono, { pin: B });
+      e.avanzar(5);
+      await e.contesta(GSG_SUPERVISOR, { texto: 'proceder cambio de ubicación' });
+      expect((await e.entrega(TRACKING))!.lat).toBe(B.lat);
+
+      // Dos esperando: se pregunta.
+      const OTRO = '987601488';
+      await e.api.post('/api/v1/entregas', { ...pedido, tracking: 'GSG-COMANDO-3', cliente: 'Ana', telefono: OTRO });
+      await e.trabajar();
+      await e.contesta(OTRO, { pin: A });
+      e.avanzar(5);
+      await e.contesta(OTRO, { pin: B });
+      await e.contesta(telefono, { pin: A });
+      e.avanzar(5);
+      await e.contesta(GSG_SUPERVISOR, { texto: 'proceder cambio de ubicación' });
+      expect(e.textosA(GSG_SUPERVISOR).at(-1)).toMatch(/^Hay 2 clientes esperando un cambio de ubicación/);
     } finally {
       await e.cerrar();
     }
