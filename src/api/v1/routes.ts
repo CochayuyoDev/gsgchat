@@ -48,6 +48,8 @@ import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
 import { obtenerMedia } from './media-saliente.js';
 import { archivoDeMensaje } from './archivos-gsg.js';
 import { crearIdempotencia } from './idempotencia.js';
+import { entregaDelMensaje, type EntregaDelMensaje } from '../../whatsapp/estado-entrega.js';
+import { camposDeEntrega, entregasDelHilo } from './entrega-mensajes.js';
 
 export interface ApiV1Deps {
   /** Las lineas de WhatsApp: `/estado` dice cada una y «conectado» = queda alguna viva. */
@@ -167,7 +169,22 @@ export function respuestaDeEnvio(outcome: SendOutcome) {
     const { nombre, ...resultado } = outcome.comando;
     return { codigo: 200, cuerpo: { ok: true, estado: 'comando', mensajeId: outcome.wamid, entregaId: null, comando: { nombre, ...resultado } } };
   }
-  if (outcome.ok) return { codigo: 200, cuerpo: { ok: true, estado: 'enviado', mensajeId: outcome.wamid, entregaId: outcome.deliveryId } };
+  // `estado: 'enviado'` se queda por compatibilidad: quiere decir que el proveedor lo ACEPTO.
+  // Si llego al WhatsApp del cliente lo dicen `llegoAWhatsapp` y `entrega` (ver src/whatsapp/estado-entrega.ts):
+  // al enviar todavia no se sabe; la confirmacion llega despues por el evento `mensaje.estado` y en el historial.
+  if (outcome.ok) {
+    return {
+      codigo: 200,
+      cuerpo: {
+        ok: true,
+        estado: 'enviado',
+        mensajeId: outcome.wamid,
+        entregaId: outcome.deliveryId,
+        llegoAWhatsapp: null,
+        entrega: entregaAlEnviar(),
+      },
+    };
+  }
   if (outcome.blocked) {
     return {
       codigo: 202,
@@ -178,10 +195,37 @@ export function respuestaDeEnvio(outcome: SendOutcome) {
         motivo: outcome.reason,
         reintentarEnMs: outcome.retryAfterMs ?? null,
         entregaId: outcome.deliveryId,
+        llegoAWhatsapp: false,
+        entrega: entregaFallida(outcome.code, `${outcome.code}: ${outcome.reason}`),
       },
     };
   }
-  return { codigo: 502, cuerpo: { ok: false, estado: 'error', error: outcome.error, reintentable: outcome.retryable, entregaId: outcome.deliveryId } };
+  // Sin respuesta del proveedor no se sabe si salio: decir «no llego» seria mentir.
+  return {
+    codigo: 502,
+    cuerpo: {
+      ok: false,
+      estado: 'error',
+      error: outcome.error,
+      reintentable: outcome.retryable,
+      entregaId: outcome.deliveryId,
+      llegoAWhatsapp: outcome.incierto ? null : false,
+      entrega: outcome.incierto
+        ? { llegoAWhatsapp: null, estado: 'sin_confirmar' as const, descripcion: 'No se sabe si salió: WhatsApp no respondió. Revisa el historial antes de volver a mandarlo, para no duplicarlo.', minutosSinConfirmar: 0, error: null }
+        : entregaFallida(outcome.code ?? null, outcome.error),
+    },
+  };
+}
+
+/** Recien aceptado por el proveedor: todavia sin confirmacion de WhatsApp. */
+function entregaAlEnviar(): EntregaDelMensaje {
+  const e = entregaDelMensaje({ direction: 'out', status: null, createdAt: new Date() });
+  return { ...e!, descripcion: `${e!.descripcion} La confirmación llega con el evento mensaje.estado y en el historial.` };
+}
+
+/** No salio o WhatsApp lo rechazo: con el porque explicado. */
+function entregaFallida(codigo: string | null, titulo: string | null): EntregaDelMensaje {
+  return entregaDelMensaje({ direction: 'out', status: 'failed' }, { code: codigo, title: titulo })!;
 }
 
 const contactoHaciaFuera = (c: { id: string; phone: string; name: string | null; optInAt: Date | null; optInSource: string | null; optOutAt: Date | null; lastInboundAt: Date | null }) => ({
@@ -413,6 +457,8 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   /** El hilo de un contacto: lo comparten la consulta por telefono y la consulta por tracking. */
   const hiloDe = async (contact: NonNullable<Awaited<ReturnType<typeof repos.contacts.getByPhone>>>, q: z.infer<typeof hiloSchema>) => {
     const messages = await repos.messages.listMessages(contact.id, q.limite, q.antesDe);
+    // Si cada saliente llego al WhatsApp del cliente: igual que el historial de GSG.
+    const entregas = await entregasDelHilo(repos, contact.phone, messages);
     const ventanaAbierta = Boolean(contact.lastInboundAt && Date.now() - contact.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
     const puedeEscribir = (ventanaAbierta || !ventanaObliga()) && !contact.optOutAt;
     return {
@@ -442,6 +488,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           datos: payloadExterno(m.payload),
           estado: m.status,
           fecha: m.createdAt,
+          ...camposDeEntrega(entregas, m),
         };
       }),
       hayMas: messages.length === q.limite,

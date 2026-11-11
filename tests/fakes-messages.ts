@@ -1,7 +1,7 @@
 /** Doble en memoria del repositorio de mensajes. */
 
 import type { Contact } from '../src/db/repos.js';
-import type { Conversation, Message, MessagesRepo, NewMessage } from '../src/db/messages.js';
+import { EstadosAdelantados, type Conversation, type Message, type MessagesRepo, type NewMessage } from '../src/db/messages.js';
 import type { CambioDeLinea, LineasContactoRepo, MotivoCambioLinea } from '../src/db/lineas-contacto.js';
 
 let seq = 1;
@@ -13,10 +13,20 @@ export interface FakeMessages extends MessagesRepo {
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/** Volver a guardar un mensaje no le baja el estado (igual que el `on duplicate key` del repo de verdad). */
+function sinRetroceder(actual: string | null, nuevo: string): string {
+  if (!actual) return nuevo;
+  if (nuevo === 'failed') return 'failed';
+  if (actual === 'failed') return actual;
+  const rango = (s: string) => ({ read: 3, delivered: 2, sent: 1 } as Record<string, number>)[s] ?? 0;
+  return rango(nuevo) > rango(actual) ? nuevo : actual;
+}
+
 export function createFakeMessages(
   contacts: () => Array<Contact & { chatReadAt?: Date | null }>,
 ): FakeMessages {
   const all: Message[] = [];
+  const adelantados = new EstadosAdelantados();
   const asignadas = new Map<string, { linea: string; desde: Date }>();
   const cambiosDeLinea: CambioDeLinea[] = [];
   const moverLinea = (contactId: string, desde: string | null, a: string, motivo: MotivoCambioLinea, at: Date) => {
@@ -52,7 +62,7 @@ export function createFakeMessages(
   const controls = new Map<string, { expiresAt: Date; estado: 'procesando' | 'aceptado' | 'fallido' | 'incierto'; wamid: string | null }>();
   const visible = (m: Message, desde?: Date | null) => !desde || (m.createdAt >= desde && !m.payload?.historial && m.payload?.autorNombre !== 'Teléfono');
   const visibleScope = (m: Message, scope?: { afterId: string; retenidosDesde: Date }) => !scope || (BigInt(m.id) > BigInt(scope.afterId) && Boolean(m.storedAt && m.storedAt > scope.retenidosDesde) && visible(m));
-  const iniciadoScope = (contactId: string, scope?: { afterId: string; retenidosDesde: Date }) => !scope || all.some(m => m.contactId === contactId && m.direction === 'out' && Boolean(m.wamid) && !['failed', 'blocked_by_gate'].includes(m.status ?? '') && visibleScope(m, scope));
+  const iniciadoScope = (contactId: string, scope?: { afterId: string; retenidosDesde: Date }) => !scope || all.some(m => m.contactId === contactId && m.direction === 'out' && Boolean(m.wamid) && m.status !== 'blocked_by_gate' && visibleScope(m, scope));
   const inicio = (contactId: string, desde: Date) => all.filter(m => m.contactId === contactId && m.direction === 'out' && m.wamid && visible(m, desde)).sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime())[0]?.createdAt ?? null;
 
   const repo: FakeMessages = {
@@ -157,7 +167,8 @@ export function createFakeMessages(
       if (message.wamid) {
         const existing = all.find((m) => m.wamid === message.wamid);
         if (existing) {
-          if (message.status) existing.status = message.status;
+          // Igual que el repo de verdad: el estado no retrocede y un «failed» se queda.
+          if (message.status) existing.status = sinRetroceder(existing.status, message.status);
           return existing.id;
         }
       }
@@ -178,6 +189,11 @@ export function createFakeMessages(
         lineaNumero: message.lineaNumero ?? null,
       };
       all.push(row);
+      // El acuse que llego antes que la fila (ver EstadosAdelantados en el repo de verdad).
+      if (row.direction === 'out' && row.wamid) {
+        const pendiente = adelantados.tomar(row.wamid);
+        if (pendiente) await repo.setStatusByWamid(row.wamid, pendiente.status, pendiente.error);
+      }
       // Igual que seguirLineaDelMensaje: un mensaje anterior a la asignacion no mueve nada.
       if (message.lineaId && !message.conservarLinea) {
         const actual = asignadas.get(message.contactId);
@@ -195,9 +211,12 @@ export function createFakeMessages(
       return ultimo?.lineaId ?? null;
     },
 
-    async setStatusByWamid(wamid, status) {
+    async setStatusByWamid(wamid, status, error) {
       const row = all.find((m) => m.wamid === wamid);
-      if (!row) return;
+      if (!row) {
+        adelantados.guardar(wamid, status, error);
+        return;
+      }
       const rango = (s: unknown) => ({ read: 3, delivered: 2, sent: 1 })[String(s)] ?? 0;
       if (status === 'failed' || rango(status) > rango(row.status)) row.status = status;
     },
