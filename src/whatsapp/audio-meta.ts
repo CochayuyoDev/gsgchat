@@ -9,11 +9,14 @@
  */
 
 import { spawn } from 'node:child_process';
+import { webmOpusAOgg } from './audio-saliente.js';
 
 export interface AudioListo {
   datos: Buffer;
   mimeType: string;
   filename?: string;
+  /** true = sale como nota de voz (solo un ogg/opus puede serlo); false = audio normal con su tipo. */
+  voz: boolean;
 }
 
 /** Ya es ogg con opus dentro (un ogg con vorbis no vale): se mira la cabecera "OpusHead". */
@@ -54,12 +57,46 @@ export function convertirAOggOpus(datos: Buffer, timeoutMs = 60_000): Promise<Bu
   });
 }
 
-/** Deja el audio siempre en ogg/opus. */
+const FIRMA_WEBM = Buffer.from([0x1a, 0x45, 0xdf, 0xa3]);
+
+/** Los formatos que Meta y WhatsApp reproducen tal cual (aac, m4a, mp3, amr): si no se pueden pasar a ogg, salen como audio normal. */
+function formatoNativo(datos: Buffer, mimeType: string): { mimeType: string; extension: string } | null {
+  const tipo = mimeType.split(';')[0]!.trim().toLowerCase();
+  const cab = datos.subarray(0, 12);
+  const esMp3 = tipo === 'audio/mpeg' || tipo === 'audio/mp3' || cab.subarray(0, 3).toString('latin1') === 'ID3' || (cab[0] === 0xff && ((cab[1] ?? 0) & 0xe0) === 0xe0);
+  if (esMp3) return { mimeType: 'audio/mpeg', extension: 'mp3' };
+  if (['audio/mp4', 'audio/x-m4a', 'audio/m4a'].includes(tipo) || cab.subarray(4, 8).toString('latin1') === 'ftyp') return { mimeType: 'audio/mp4', extension: 'm4a' };
+  if (tipo === 'audio/aac' || tipo === 'audio/x-aac') return { mimeType: 'audio/aac', extension: 'aac' };
+  if (tipo === 'audio/amr' || cab.subarray(0, 5).toString('latin1') === '#!AMR') return { mimeType: 'audio/amr', extension: 'amr' };
+  return null;
+}
+
+/**
+ * Deja el audio listo para que WhatsApp lo entregue y lo reproduzca:
+ * 1. ogg/opus: tal cual, como nota de voz.
+ * 2. webm/opus (lo que graba Chrome): se pasa a ogg/opus sin ffmpeg ni recodificar.
+ * 3. Otro formato: ffmpeg a ogg/opus; si no esta o falla, y el formato ya lo acepta
+ *    WhatsApp (mp3, m4a, aac, amr), sale como audio normal con su tipo.
+ * Nunca sale un audio que WhatsApp no pueda reproducir: si no hay forma, falla y se dice.
+ */
 export async function audioParaMeta(media: { datos: Buffer; mimeType: string; filename?: string; voz?: boolean }): Promise<AudioListo> {
   if (!audioNecesitaConversion(media.datos)) {
-    return { datos: media.datos, mimeType: 'audio/ogg', filename: media.filename };
+    return { datos: media.datos, mimeType: 'audio/ogg', filename: media.filename, voz: true };
   }
-  const datos = await convertirAOggOpus(media.datos);
   const base = (media.filename ?? 'audio').replace(/\.[^.]+$/, '') || 'audio';
-  return { datos, mimeType: 'audio/ogg', filename: `${base}.ogg` };
+  const esWebm = media.datos.subarray(0, 4).equals(FIRMA_WEBM) || media.mimeType.split(';')[0]!.trim().toLowerCase() === 'audio/webm';
+  if (esWebm) {
+    const ogg = webmOpusAOgg(media.datos);
+    if (ogg && esOggOpus(ogg)) return { datos: ogg, mimeType: 'audio/ogg', filename: `${base}.ogg`, voz: true };
+  }
+  try {
+    const datos = await convertirAOggOpus(media.datos);
+    if (esOggOpus(datos)) return { datos, mimeType: 'audio/ogg', filename: `${base}.ogg`, voz: true };
+    throw new Error('ffmpeg no dejo un ogg con opus');
+  } catch (error) {
+    const nativo = esWebm ? null : formatoNativo(media.datos, media.mimeType);
+    if (nativo) return { datos: media.datos, mimeType: nativo.mimeType, filename: `${base}.${nativo.extension}`, voz: false };
+    if (esWebm) throw new Error('No se pudo preparar este audio para WhatsApp. Grábalo de nuevo o usa un fichero mp3, m4a u ogg.');
+    throw error;
+  }
 }
