@@ -31,7 +31,7 @@ const datosDe = (i: number) =>
     AJUSTES,
   );
 
-async function simular(politica: Politica, pedidos: number, minutos: number) {
+async function simular(politica: Politica, pedidos: number, minutos: number, op: OpcionesMotor = opciones) {
   const repos = createFakeRepos();
   const lote = await repos.rutas.crearLote({ nombre: 'Lista del día' });
   await repos.rutas.agregarSolicitudes(
@@ -57,7 +57,7 @@ async function simular(politica: Politica, pedidos: number, minutos: number) {
     },
   };
   const motor = crearMotor({
-    repos, sender, gsg: crearPuertoEnEspera(), opciones, ahora: () => ahora, azar: () => 0.5,
+    repos, sender, gsg: crearPuertoEnEspera(), opciones: op, ahora: () => ahora, azar: () => 0.5,
     usarPlantilla: () => false, plantillaMeta: async () => true,
     plantillaSolicitud: async (s) => ({ name: 'solicitud_inicial', language: 'es_PE', variables: datosDe(Number((s.referencia ?? '').slice(6)) - 1000) }),
     datosPedido: async (s) => datosDe(Number((s.referencia ?? '').slice(6)) - 1000),
@@ -115,6 +115,16 @@ describe('simulacion: envio por tandas en la API (sin WhatsApp)', () => {
     expect([...new Set(salidas.map((s) => s.job.templateName))].sort()).toEqual(['recordatorio_inicial', 'solicitud_inicial']);
     for (const s of salidas) expect(salidas.filter((o) => o.t >= s.t && o.t < s.t + 3 * MIN).length).toBeLessThanOrEqual(50);
   }, 240_000);
+
+  it('como en «Prueba Meta GSG»: solo 2 mensajes por cliente, solicitud_inicial y un recordatorio_inicial', async () => {
+    const dos: OpcionesMotor = { ...opciones, maxIntentos: 2, esperaRespuestaMinutos: 1, esperasMensajesMinutos: [1] } as OpcionesMotor;
+    const salidas = await simular({ ...API_CON_TANDAS }, 10, 30, dos);
+    const porCliente = new Map<string, string[]>();
+    for (const s of salidas) porCliente.set(s.job.phone, [...(porCliente.get(s.job.phone) ?? []), s.job.templateName ?? '']);
+    expect(porCliente.size).toBe(10);
+    for (const lista of porCliente.values()) expect(lista).toEqual(['solicitud_inicial', 'recordatorio_inicial']);
+    console.log(`[simulacion 2 mensajes] ${salidas.length} mensajes a 10 clientes: 1 solicitud_inicial + 1 recordatorio_inicial cada uno`);
+  }, 120_000);
 
   it('una linea normal (QR) sigue con la pausa entre clientes: nada de tandas', async () => {
     const normal: Politica = { ...POLITICA_NO_OFICIAL, soloRitmo: true, autoPausa: false, horaInicio: 0, horaFin: 24, diasPermitidos: [0, 1, 2, 3, 4, 5, 6], pausaMinMs: 15_000, pausaMaxMs: 30_000 };

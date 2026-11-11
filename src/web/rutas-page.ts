@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Pantalla de ubicaciones para reparto.
  *
  * Es la pantalla de quien coordina el reparto por la manana: pega la lista
@@ -1992,7 +1992,7 @@ function opcionesMeta(elegida) {
     segMeta.aprobadas.map(function (t) { return '<option value="' + esc(t.name) + '"' + (t.name === elegida ? ' selected' : '') + '>' + esc(t.name) + ' (' + t.variables + ' datos)</option>'; }).join('');
 }
 var ROTULOS_DATO = ['nombre del cliente', 'producto', 'empresa', 'código', 'método de pago', 'monto a cobrar', 'dirección', 'horario de entrega'];
-var SEG_DEFECTO = ['recordatorio_inicial', 'recordatorio_inicial'];
+var SEG_DEFECTO = ['recordatorio_inicial'];
 var DATOS_DEFECTO = { seguimiento: [1, 3] };
 function mapaDe(nombre, n) { var m = segMeta.datos[nombre] || DATOS_DEFECTO[nombre] || [1, 2, 3, 4, 5, 6, 7, 8]; return m.slice(0, n); }
 function previaMeta(t, mapa) {

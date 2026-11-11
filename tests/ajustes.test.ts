@@ -44,9 +44,9 @@ describe('ajustes: puros', () => {
 
   it('sin nada guardado, los ajustes son los de la configuracion', () => {
     const a = ajustesPorDefecto(opciones);
-    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 4, esperasMensajesMinutos: [30, 25, 20], esperaFinalMinutos: 20, horaInicio: 9, horaFin: 19 });
+    expect(a).toMatchObject({ pausaMinSegundos: 15, pausaMaxSegundos: 30, esperaRespuestaMinutos: 30, maxIntentos: 2, esperasMensajesMinutos: [30], esperaFinalMinutos: 30, horaInicio: 9, horaFin: 19 });
     expect(a.plantillas.solicitud).toEqual([]);
-    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20], esperasMensajesSegundos: [1800, 1500, 1200], esperaPrimerMensajeMinutos: 0, esperaPrimerMensajeSegundos: 0, maxIntentos: 4, esperaFinalMinutos: 20, esperaFinalSegundos: 1200 });
+    expect(aplicarAjustes(opciones, a)).toEqual({ ...opciones, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30], esperasMensajesSegundos: [1800], esperaPrimerMensajeMinutos: 0, esperaPrimerMensajeSegundos: 0, maxIntentos: 2, esperaFinalMinutos: 30, esperaFinalSegundos: 1800 });
   });
 
   it('aplicar corrige un maximo por debajo del minimo y un fin antes del inicio', () => {
@@ -307,7 +307,7 @@ describe('ajustes y plantillas propias: la API', () => {
     const r = await app.inject({ method: 'GET', url: '/admin/rutas/ajustes', headers: auth });
     expect(r.statusCode).toBe(200);
     const body = r.json();
-    expect(body.ajustes).toMatchObject({ maxIntentos: 4, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30, 25, 20] });
+    expect(body.ajustes).toMatchObject({ maxIntentos: 2, esperaRespuestaMinutos: 30, esperasMensajesMinutos: [30] });
     expect(body.catalogo.solicitud).toEqual(['solicitud_ubicacion', 'solicitud_ubicacion_b']);
     expect(body.plantillas.map((t: { name: string }) => t.name)).toContain('solicitud_ubicacion');
     // Para la pantalla: un cliente de ejemplo y como le llegaria cada paso, en cristiano.
@@ -355,7 +355,7 @@ describe('ajustes y plantillas propias: la API', () => {
     const reset = await app.inject({ method: 'DELETE', url: '/admin/rutas/ajustes', headers: auth });
     expect(reset.statusCode).toBe(200);
     const despues = await app.inject({ method: 'GET', url: '/admin/rutas', headers: auth });
-    expect(despues.json().motor).toMatchObject({ espera: 30, maxIntentos: 4, horario: [9, 19] });
+    expect(despues.json().motor).toMatchObject({ espera: 30, maxIntentos: 2, horario: [9, 19] });
 
     const secuencia = await app.inject({ method: 'POST', url: '/admin/rutas/ajustes', headers: auth, payload: { esperasMensajesMinutos: [30, 20, 10, 5], textosAdicionales: [['Hola {nombre}, mensaje 4.']] } });
     expect(secuencia.statusCode).toBe(200);

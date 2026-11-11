@@ -48,9 +48,9 @@ import {
 
 /** Las plantillas de recordatorio de GSG, en orden: recordatorio 1 y recordatorio 2. */
 // Las dos plantillas del dueño (11/11): «solicitud_inicial» para el primer mensaje
-// (entregas/textos.ts) y «recordatorio_inicial» para los dos recordatorios. Las de
+// (entregas/textos.ts) y «recordatorio_inicial» para el recordatorio (si hay mas, se repite). Las de
 // antes eran de categoría Marketing y Meta las frenaba (131049).
-export const SEGUIMIENTOS_POR_DEFECTO = ['recordatorio_inicial', 'recordatorio_inicial'] as const;
+export const SEGUIMIENTOS_POR_DEFECTO = ['recordatorio_inicial'] as const;
 /** Qué dato va en cada {{n}} (1 nombre, 2 producto, 3 empresa...): «seguimiento» lleva nombre y empresa. */
 /** Que datos del pedido van en cada variable: recordatorio_inicial = {{1}} nombre, {{2}} producto, {{3}} tienda. */
 export const DATOS_POR_DEFECTO: Record<string, number[]> = { seguimiento: [1, 3], recordatorio_inicial: [1, 2, 3] };
@@ -86,7 +86,8 @@ export const OPCIONES_POR_DEFECTO: OpcionesMotor = {
   pausaMinSegundos: 15,
   pausaMaxSegundos: 30,
   esperaRespuestaMinutos: 30,
-  maxIntentos: 4,
+  // Solo 2 mensajes por pedido (pedido del dueño, 11/11): «solicitud_inicial» y un «recordatorio_inicial».
+  maxIntentos: 2,
   pedirUbicacionCadaMinutos: 0,
   horaInicio: 9,
   horaFin: 19,
