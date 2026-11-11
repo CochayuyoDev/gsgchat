@@ -338,6 +338,15 @@ export async function registerRutasRoutes(
         if (falta) return reply.code(400).send({ error: `La plantilla "${falta}" no esta en el registro.` });
       }
     }
+    // Lo mismo con la plantilla de cada recordatorio: tiene que existir y estar aprobada por Meta.
+    if (body.plantillasSeguimientos?.length) {
+      const registro = new Map((await repos.templates.list()).map((t) => [t.name, t] as const));
+      for (const nombre of body.plantillasSeguimientos) {
+        const t = registro.get(nombre);
+        if (!t) return reply.code(400).send({ error: `La plantilla "${nombre}" no esta en el registro. Pulsa «Traer el estado desde Meta».` });
+        if (t.status !== 'APPROVED') return reply.code(400).send({ error: `La plantilla "${nombre}" todavia no esta aprobada por Meta (estado: ${t.status}).` });
+      }
+    }
     // El horario se guarda donde vive la franja unica (ajustes generales), no
     // en la clave del reparto: si no, convivirian dos horarios y ganaria el
     // mas estricto sin decirlo.

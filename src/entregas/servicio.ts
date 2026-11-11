@@ -556,6 +556,8 @@ export interface ServicioEntregas {
    */
   textoSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<string | null>;
   plantillaSolicitudUbicacion(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<{ name: string; language?: string; variables: string[] } | null>;
+  /** Los 8 datos del pedido (nombre, producto, empresa, código, pago, monto, dirección, horario) para llenar cualquier plantilla; null si la solicitud no es de un pedido. */
+  datosPlantillaPedido(solicitud: { phone: string | null; referencia?: string | null; loteId?: string | null }): Promise<string[] | null>;
   /** Si la plantilla de Meta de los ajustes está activada y aprobada (entonces el primer mensaje sale con ella por la API). */
   usaPlantillaMeta(): Promise<boolean>;
   /** Lo que muestra «Plantillas aprobadas por Meta» en Ajustes de chat. */
@@ -5372,6 +5374,12 @@ ${lista}
       }
       if (pedidos.length === 1 && meta) return { name: meta.name, language: meta.language, variables: variablesPlantillaEntrega(contexto(pedidos[0]!), ajustes) };
       return null;
+    },
+    async datosPlantillaPedido(solicitud) {
+      const pedidos = await pedidosDelMensaje(solicitud);
+      if (!pedidos.length) return null;
+      const listas = pedidos.map((e) => variablesPlantillaEntrega(contexto(e), ajustes));
+      return listas.length === 1 ? listas[0]! : juntarVariablesPlantilla(listas);
     },
     async usaPlantillaMeta() {
       return Boolean(await plantillaMetaAprobada());

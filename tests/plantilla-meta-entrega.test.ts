@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { ajustesEntregasSchema, juntarVariablesPlantilla, montoParaPlantilla, variablesPlantillaEntrega, VARIABLES_PLANTILLA_ENTREGA } from '../src/entregas/textos.js';
 import { crearMotor, OPCIONES_POR_DEFECTO, type OpcionesMotor } from '../src/rutas/motor.js';
+import { ajustesPorDefecto } from '../src/rutas/ajustes.js';
 import { crearPuertoEnEspera } from '../src/rutas/gsg.js';
 import type { SendJob, SendOutcome, Sender } from '../src/outbound/sender.js';
 import { approvedTemplate, createFakeRepos, type FakeRepos } from './fakes.js';
@@ -175,5 +176,85 @@ describe('el primer mensaje con la principal por QR y una línea de WhatsApp API
     });
     await motor.tick();
     expect(enviados[0]).toMatchObject({ kind: 'interactive', interactive: { locationRequest: true } });
+  });
+});
+
+describe('una plantilla de Meta por mensaje, en orden (primer mensaje, recordatorio 1, recordatorio 2)', () => {
+  const HORA_BUENA = new Date('2026-03-10T15:00:00Z');
+  const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, timezone: 'America/Lima' };
+  const DATOS = variablesPlantillaEntrega(CTX_ALI, AJUSTES);
+
+  it('cada mensaje sale con SU plantilla y solo con los datos que ella lleva; el recordatorio nunca repite el primero', async () => {
+    const repos = createFakeRepos();
+    const lote = await repos.rutas.crearLote({ nombre: 'Reparto de prueba' });
+    await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '51987654321', phone: '51987654321', nombre: 'Ali', referencia: 'GSG-E-215' }]);
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    await repos.templates.upsert(approvedTemplate({ name: 'solicitud_ubicacion_entrega', language: 'es_PE', category: 'UTILITY', variables: 8, quality: 'GREEN' }));
+    await repos.templates.upsert(approvedTemplate({ name: 'segundo_intento_seguimiento', language: 'es_PE', category: 'UTILITY', variables: 2, quality: 'GREEN' }));
+    await repos.templates.upsert(approvedTemplate({ name: 'seguimiento', language: 'es_PE', category: 'UTILITY', variables: 2, quality: 'GREEN' }));
+    // Como lo deja la pantalla: recordatorio 1 y 2 con su plantilla; en «seguimiento» el {{2}} es la empresa.
+    await repos.rutas.ajustes.set(
+      { plantillasSeguimientos: ['segundo_intento_seguimiento', 'seguimiento'], datosPlantillas: { seguimiento: [1, 3] } },
+      ajustesPorDefecto(opciones),
+    );
+    const enviados: SendJob[] = [];
+    const sender: Sender = { async send(job) { enviados.push(job); return { ok: true, wamid: `w.${enviados.length}`, deliveryId: enviados.length } as SendOutcome; } };
+    let ahora = HORA_BUENA;
+    const motor = crearMotor({
+      repos, sender, gsg: crearPuertoEnEspera(), opciones, ahora: () => ahora, azar: () => 0,
+      usarPlantilla: () => false,
+      plantillaMeta: async () => true,
+      plantillaSolicitud: async () => ({ name: 'solicitud_ubicacion_entrega', language: 'es_PE', variables: DATOS }),
+      datosPedido: async () => DATOS,
+    });
+    for (let i = 0; i < 3; i++) {
+      await motor.tick();
+      ahora = new Date(ahora.getTime() + 3 * 60 * 60 * 1000);
+    }
+    expect(enviados.map((e) => e.templateName)).toEqual(['solicitud_ubicacion_entrega', 'segundo_intento_seguimiento', 'seguimiento']);
+    expect(enviados[0]!.variables).toEqual(DATOS);
+    expect(enviados[1]!.variables).toEqual(['Ali', 'Zapatos']);
+    expect(enviados[2]!.variables).toEqual(['Ali', 'Tienda Uno']);
+  });
+
+  it('sin guardar nada en la pantalla, si la cuenta tiene aprobadas las dos de GSG salen en ese orden (seguimiento lleva nombre y empresa)', async () => {
+    const repos = createFakeRepos();
+    const lote = await repos.rutas.crearLote({ nombre: 'Reparto de prueba' });
+    await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '51987654321', phone: '51987654321', nombre: 'Ali', referencia: 'GSG-E-215' }]);
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    for (const [name, variables] of [['solicitud_ubicacion_entrega', 8], ['segundo_intento_seguimiento', 2], ['seguimiento', 2]] as const) {
+      await repos.templates.upsert(approvedTemplate({ name, language: 'es_PE', category: 'UTILITY', variables, quality: 'GREEN' }));
+    }
+    const enviados: SendJob[] = [];
+    const sender: Sender = { async send(job) { enviados.push(job); return { ok: true, wamid: `w.${enviados.length}`, deliveryId: enviados.length } as SendOutcome; } };
+    let ahora = HORA_BUENA;
+    const motor = crearMotor({
+      repos, sender, gsg: crearPuertoEnEspera(), opciones, ahora: () => ahora, azar: () => 0,
+      usarPlantilla: () => false, plantillaMeta: async () => true,
+      plantillaSolicitud: async () => ({ name: 'solicitud_ubicacion_entrega', language: 'es_PE', variables: DATOS }),
+      datosPedido: async () => DATOS,
+    });
+    for (let i = 0; i < 3; i++) { await motor.tick(); ahora = new Date(ahora.getTime() + 3 * 60 * 60 * 1000); }
+    expect(enviados.map((e) => e.templateName)).toEqual(['solicitud_ubicacion_entrega', 'segundo_intento_seguimiento', 'seguimiento']);
+    expect(enviados[1]!.variables).toEqual(['Ali', 'Zapatos']);
+    expect(enviados[2]!.variables).toEqual(['Ali', 'Tienda Uno']);
+  });
+
+  it('un primer mensaje con una plantilla de 2 datos recibe solo los 2 primeros (Meta rechaza parámetros de más)', async () => {
+    const repos = createFakeRepos();
+    const lote = await repos.rutas.crearLote({ nombre: 'Reparto de prueba' });
+    await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '51987654321', phone: '51987654321', nombre: 'Ali', referencia: 'GSG-E-215' }]);
+    await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
+    await repos.templates.upsert(approvedTemplate({ name: 'segundo_intento_seguimiento', language: 'es_PE', category: 'UTILITY', variables: 2, quality: 'GREEN' }));
+    const enviados: SendJob[] = [];
+    const sender: Sender = { async send(job) { enviados.push(job); return { ok: true, wamid: 'w.1', deliveryId: 1 } as SendOutcome; } };
+    const motor = crearMotor({
+      repos, sender, gsg: crearPuertoEnEspera(), opciones, ahora: () => HORA_BUENA, azar: () => 0,
+      usarPlantilla: () => false,
+      plantillaMeta: async () => true,
+      plantillaSolicitud: async () => ({ name: 'segundo_intento_seguimiento', language: 'es_PE', variables: DATOS }),
+    });
+    await motor.tick();
+    expect(enviados[0]!.variables).toEqual(['Ali', 'Zapatos']);
   });
 });

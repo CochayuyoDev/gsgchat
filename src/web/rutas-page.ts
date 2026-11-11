@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Pantalla de ubicaciones para reparto.
  *
  * Es la pantalla de quien coordina el reparto por la manana: pega la lista
@@ -263,6 +263,13 @@ const CSS = `${REPARTO_CSS}
 #aj-plantilla-meta .pm-aviso { margin: 10px 0 0; padding: 9px 12px; border-radius: var(--radio-sm, 8px); font-size: 13.5px; font-weight: 600; border: 1px solid var(--borde); }
 #aj-plantilla-meta .pm-aviso.ok { color: var(--primario); border-color: color-mix(in srgb, var(--primario) 40%, transparent); background: color-mix(in srgb, var(--primario) 10%, transparent); }
 #aj-plantilla-meta .pm-aviso.mal { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); background: var(--rojo-suave); }
+#aj-plantilla-meta .pm-orden-t { margin: 4px 0 8px; }
+#aj-plantilla-meta .pm-paso { display: grid; gap: 6px; max-width: 560px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--borde); border-radius: var(--radio-sm, 8px); }
+#aj-plantilla-meta .pm-paso-cab { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+#aj-plantilla-meta .pm-paso select { font-family: var(--mono, ui-monospace, monospace); max-width: 100%; }
+#aj-plantilla-meta .pm-previa-paso { font-size: 13px; white-space: pre-wrap; max-height: 150px; overflow: auto; }
+#aj-plantilla-meta .pm-vars { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; align-items: center; }
+#aj-plantilla-meta .pm-vars select { font-family: inherit; }
 #aj-plantilla-meta .pm-datos { margin-top: 12px; }
 #aj-plantilla-meta .pm-datos summary { cursor: pointer; font-weight: 600; color: var(--primario); }
 #aj-plantilla-meta .pm-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 8px; }
@@ -384,15 +391,15 @@ export function rutasPage(opts: RutasOpts): string {
         <div class="pm-cab"><h3 class="aj-titulo">Plantillas aprobadas por Meta</h3><span id="pm-chip" class="chip" role="status">Revisando…</span></div>
         <p class="muted pm-intro">Con WhatsApp API, Meta solo deja escribirle primero a un cliente con una plantilla aprobada. El primer mensaje de cada pedido sale con esta plantilla y sus datos; si el cliente ya escribió en las últimas 24 h, sale el texto de siempre.</p>
         <label class="pm-usar"><input type="checkbox" id="pm-usar"> Usar la plantilla aprobada por Meta en el primer mensaje</label>
-        <div class="pm-fila">
-          <label for="pm-nombre">Nombre de la plantilla en Meta</label>
-          <input id="pm-nombre" maxlength="512" spellcheck="false" autocomplete="off" placeholder="solicitud_ubicacion_entrega">
+        <p class="pm-orden-t"><b>Orden en que salen</b> <span class="muted">(cada mensaje usa la plantilla que elijas; si el cliente ya escribió en las últimas 24 h, sale el texto normal del bot)</span></p>
+        <div class="pm-paso">
+          <div class="pm-paso-cab"><span class="aj-paso-num">1</span><div><b>Primer mensaje</b><span class="muted"> · sale al llegar el pedido de GSG</span></div></div>
+          <select id="pm-nombre" aria-label="Plantilla del primer mensaje"></select>
+          <div class="previa pm-previa-paso" id="pm-previa-primero"></div>
         </div>
-        <div class="pm-fila">
-          <label for="pm-recordatorio">Plantilla de los recordatorios</label>
-          <select id="pm-recordatorio"><option value="">La misma del primer mensaje (con los datos del pedido)</option></select>
-          <span class="muted pm-nota">Solo salen las aprobadas por Meta. Si creas en Meta una de recordatorio ({{1}} nombre, {{2}} pedido, {{3}} negocio), elígela aquí.</span>
-        </div>
+        <div id="pm-seguimientos"></div>
+        <p class="muted pm-nota" id="pm-sin-aprobadas" hidden>Todavía no hay plantillas aprobadas en la lista. Pulsa «Traer el estado desde Meta» para cargarlas.</p>
+        <p class="muted pm-nota">Los tiempos de los recordatorios se cambian más abajo, en «Recordatorios y seguimientos». Si hay más recordatorios que plantillas, se repite la última.</p>
         <div class="fila pm-acciones">
           <button type="button" class="btn primario sm" id="pm-guardar">Guardar</button>
           <button type="button" class="btn sm" id="pm-traer">Traer el estado desde Meta</button>
@@ -1572,6 +1579,7 @@ function pintarSecuencia(esperas) {
   caja.innerHTML = esperas.map(function (segundos, indice) { return controlTiempoSecuenciaHtml(segundos, indice); }).join('');
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
   document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
+  if (typeof pintarSeguimientosMeta === 'function') pintarSeguimientosMeta(esperas);
 }
 
 function pintarTextosAdicionales(cantidad, textos) {
@@ -1672,6 +1680,7 @@ function quitarSeguimiento(indice) {
   var esperas = leerEsperasSecuencia();
   var textos = leerTextosAdicionales();
   esperas.splice(indice, 1);
+  segMeta.nombres = leerSegMeta(); segMeta.nombres.splice(indice, 1); segMeta.tocado = true; omitirLecturaSeg = true;
   if (indice >= 2) textos.splice(indice - 2, 1);
   pintarSecuencia(esperas);
   pintarTextosAdicionales(esperas.length, textos);
@@ -1901,7 +1910,9 @@ function rellenarPlantilla(cuerpo, datos) {
 }
 function pintarPlantillaMeta(d) {
   document.getElementById('pm-usar').checked = Boolean(d.usar);
-  if (document.activeElement !== document.getElementById('pm-nombre')) document.getElementById('pm-nombre').value = d.nombre || '';
+  segMeta.primero = d.nombre || '';
+  var selNombre = document.getElementById('pm-nombre');
+  if (document.activeElement !== selNombre) { selNombre.innerHTML = opcionesMeta(d.nombre || ''); if (d.nombre) selNombre.value = d.nombre; }
   var chip = document.getElementById('pm-chip');
   var t = d.plantilla;
   var e = t ? (ESTADO_PLANTILLA[t.estado] || ['gris', t.estado]) : ['gris', 'No está en Meta todavía'];
@@ -1916,39 +1927,117 @@ function pintarPlantillaMeta(d) {
     : 'Cuando Meta apruebe la plantilla y la traigas, aquí se ve cómo le llega al cliente.';
   var nota = document.getElementById('aj-con-meta');
   if (nota) nota.hidden = !(d.usar && t && t.estado === 'APPROVED');
-  if (t && t.variables && t.variables !== d.datos.length) avisoPlantilla('La plantilla de Meta tiene ' + t.variables + ' datos y el sistema llena ' + d.datos.length + ' (nombre, producto, empresa, código, método de pago, monto, dirección y horario, en ese orden). Revísala en Meta.', true);
+  if (t && t.variables > d.datos.length) avisoPlantilla('La plantilla de Meta tiene ' + t.variables + ' datos y el sistema solo sabe llenar ' + d.datos.length + ' (nombre, producto, empresa, código, método de pago, monto, dirección y horario). Revísala en Meta.', true);
+  else if (t && t.variables && t.variables < d.datos.length) avisoPlantilla('Esta plantilla lleva ' + t.variables + ' datos: el sistema llena los primeros ' + t.variables + ' en este orden y deja el resto. Si algún dato no es el que esperas, cámbialo en el mensaje donde la uses.', false);
+  segMeta.ejemplos = d.datos;
+  pintarPrimeroMeta();
 }
-/* La plantilla de los recordatorios: solo las aprobadas por Meta (las del catálogo que la cuenta no tiene salen desactivadas). */
+/* Una plantilla por mensaje, en orden: solo las aprobadas por Meta. */
 var plantillasRutas = { solicitud: [], recordatorio: [], insistencia: [] };
+var segMeta = { nombres: [], datos: {}, aprobadas: [], ejemplos: [], primero: '', tocado: false };
+var omitirLecturaSeg = false;
+function leerSegMeta() {
+  var out = [];
+  document.querySelectorAll('[data-seg-meta]').forEach(function (sel) { out[Number(sel.getAttribute('data-seg-meta'))] = sel.value; });
+  return out.filter(function (x) { return x !== undefined; });
+}
+function opcionesMeta(elegida) {
+  var hay = segMeta.aprobadas.some(function (t) { return t.name === elegida; });
+  return (elegida && !hay ? '<option value="' + esc(elegida) + '" selected>' + esc(elegida) + ' (no está aprobada en Meta)</option>' : '') +
+    segMeta.aprobadas.map(function (t) { return '<option value="' + esc(t.name) + '"' + (t.name === elegida ? ' selected' : '') + '>' + esc(t.name) + ' (' + t.variables + ' datos)</option>'; }).join('');
+}
+var ROTULOS_DATO = ['nombre del cliente', 'producto', 'empresa', 'código', 'método de pago', 'monto a cobrar', 'dirección', 'horario de entrega'];
+var SEG_DEFECTO = ['segundo_intento_seguimiento', 'seguimiento'];
+var DATOS_DEFECTO = { seguimiento: [1, 3] };
+function mapaDe(nombre, n) { var m = segMeta.datos[nombre] || DATOS_DEFECTO[nombre] || [1, 2, 3, 4, 5, 6, 7, 8]; return m.slice(0, n); }
+function previaMeta(t, mapa) {
+  if (!t) return '';
+  var ej = segMeta.ejemplos || [];
+  return String(t.body || '').replace(/[{][{](\d+)[}][}]/g, function (m, n) { var d = ej[(mapa[Number(n) - 1] || Number(n)) - 1]; return d ? d.ejemplo : m; });
+}
+function pintarSeguimientosMeta(esperas, soltarDom) {
+  var caja = document.getElementById('pm-seguimientos');
+  if (!caja || typeof segMeta === 'undefined' || !segMeta) return;
+  if (!omitirLecturaSeg && soltarDom !== false && segMeta.tocado) { var leidos = leerSegMeta(); if (leidos.length) segMeta.nombres = leidos; }
+  omitirLecturaSeg = false;
+  if (!esperas) { try { esperas = leerEsperasSecuencia(); } catch (e) { esperas = (ajustesCache && ajustesCache.ajustes && ajustesCache.ajustes.esperasMensajesSegundos) || []; } }
+  document.getElementById('pm-sin-aprobadas').hidden = segMeta.aprobadas.length > 0;
+  caja.innerHTML = esperas.map(function (seg, i) {
+    var nombre = segMeta.nombres[i] || segMeta.nombres[segMeta.nombres.length - 1] || '';
+    return '<div class="pm-paso"><div class="pm-paso-cab"><span class="aj-paso-num">' + (i + 2) + '</span><div><b>Recordatorio ' + (i + 1) + '</b><span class="muted"> · ' + duracionHumana(seg) + ' después ' + (i === 0 ? 'del primer mensaje' : 'del recordatorio ' + i) + '</span></div></div>' +
+      '<select data-seg-meta="' + i + '" aria-label="Plantilla del recordatorio ' + (i + 1) + '">' + opcionesMeta(nombre) + '</select>' +
+      '<div class="pm-vars" data-seg-vars="' + i + '"></div><div class="previa pm-previa-paso" data-seg-previa="' + i + '"></div></div>';
+  }).join('');
+  if (segMeta.aprobadas.length) segMeta.nombres = leerSegMeta();
+  pintarDatosSegMeta();
+  pintarPrimeroMeta();
+}
+function pintarPrimeroMeta() {
+  var sel = document.getElementById('pm-nombre');
+  var t = segMeta.aprobadas.find(function (x) { return x.name === sel.value; });
+  var caja = document.getElementById('pm-previa-primero');
+  caja.textContent = t ? previaMeta(t, [1, 2, 3, 4, 5, 6, 7, 8]) : '';
+  caja.hidden = !t;
+}
+function pintarDatosSegMeta() {
+  document.querySelectorAll('[data-seg-meta]').forEach(function (sel) {
+    var i = sel.getAttribute('data-seg-meta');
+    var t = segMeta.aprobadas.find(function (x) { return x.name === sel.value; });
+    var cajaVars = document.querySelector('[data-seg-vars="' + i + '"]');
+    var cajaPrevia = document.querySelector('[data-seg-previa="' + i + '"]');
+    var n = t ? t.variables : 0, mapa = t ? mapaDe(t.name, n) : [];
+    cajaVars.innerHTML = Array.from({ length: n }, function (_, j) {
+      return '<label>{{' + (j + 1) + '}} = <select data-seg-var="' + esc(t.name) + '|' + j + '">' + ROTULOS_DATO.map(function (r, k) { return '<option value="' + (k + 1) + '"' + (mapa[j] === k + 1 ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></label>';
+    }).join('');
+    cajaPrevia.textContent = t ? previaMeta(t, mapa) : 'Elige una plantilla aprobada.';
+  });
+}
+document.getElementById('pm-seguimientos').addEventListener('change', function (event) {
+  var el = event.target;
+  if (el.hasAttribute('data-seg-var')) {
+    var partes = el.getAttribute('data-seg-var').split('|');
+    var m = (segMeta.datos[partes[0]] || DATOS_DEFECTO[partes[0]] || [1, 2, 3, 4, 5, 6, 7, 8]).slice();
+    m[Number(partes[1])] = Number(el.value);
+    segMeta.datos[partes[0]] = m;
+    pintarDatosSegMeta();
+  } else if (el.hasAttribute('data-seg-meta')) {
+    segMeta.tocado = true;
+    segMeta.nombres = leerSegMeta();
+    pintarDatosSegMeta();
+  }
+});
+document.getElementById('pm-nombre').addEventListener('change', pintarPrimeroMeta);
 async function cargarRecordatorioMeta() {
   try {
     var r = await Promise.all([api('/admin/templates'), api('/admin/rutas/ajustes')]);
-    var aprobadas = (r[0] || []).filter(function (t) { return t.status === 'APPROVED'; });
-    plantillasRutas = (r[1] && r[1].ajustes && r[1].ajustes.plantillas) || plantillasRutas;
-    var elegida = (plantillasRutas.recordatorio || [])[0] || '';
-    var nombre = document.getElementById('pm-nombre').value.trim();
-    var sel = document.getElementById('pm-recordatorio');
-    sel.innerHTML = '<option value="">La misma del primer mensaje (con los datos del pedido)</option>' + aprobadas
-      .filter(function (t) { return t.name !== nombre; })
-      .map(function (t) { return '<option value="' + esc(t.name) + '">' + esc(t.name) + ' (' + esc(t.language) + ', ' + t.variables + ' datos)</option>'; }).join('');
-    sel.value = elegida === nombre ? '' : elegida;
-    if (sel.value !== (elegida === nombre ? '' : elegida)) sel.value = '';
-  } catch (e) { /* sin plantillas no hay nada que elegir: queda la del pedido */ }
+    segMeta.aprobadas = (r[0] || []).filter(function (t) { return t.status === 'APPROVED'; });
+    var a = (r[1] && r[1].ajustes) || {};
+    plantillasRutas = a.plantillas || plantillasRutas;
+    if (a.datosPlantillas) segMeta.datos = a.datosPlantillas;
+    if (!segMeta.tocado) {
+      segMeta.nombres = a.plantillasSeguimientos || [];
+      /* Sin nada guardado: las dos de GSG, si la cuenta las tiene aprobadas (el servidor hace lo mismo). */
+      if (!segMeta.nombres.length && SEG_DEFECTO.every(function (n) { return segMeta.aprobadas.some(function (t) { return t.name === n; }); })) segMeta.nombres = SEG_DEFECTO.slice();
+    }
+    /* El primer mensaje: la lista de aprobadas, con la guardada elegida. */
+    var sel = document.getElementById('pm-nombre');
+    var actual = sel.value || segMeta.primero || '';
+    sel.innerHTML = opcionesMeta(actual);
+    if (!actual && segMeta.aprobadas.length) sel.value = (segMeta.aprobadas.find(function (t) { return t.name === 'solicitud_ubicacion_entrega'; }) || segMeta.aprobadas[0]).name;
+    pintarSeguimientosMeta(a.esperasMensajesSegundos || [], false);
+  } catch (e) { /* sin plantillas no hay nada que elegir */ }
+}
+async function guardarRecordatorioMeta() {
+  var nombres = leerSegMeta().filter(Boolean);
+  var datos = {};
+  nombres.forEach(function (n) { if (segMeta.datos[n]) datos[n] = segMeta.datos[n]; });
+  var r = await api('/admin/rutas/ajustes', { method: 'POST', body: { plantillasSeguimientos: nombres, datosPlantillas: datos } });
+  segMeta.nombres = nombres;
+  return r;
 }
 async function cargarPlantillaMeta() {
   try { pintarPlantillaMeta(await api('/admin/entregas/plantilla-meta')); await cargarRecordatorioMeta(); }
   catch (e) { avisoPlantilla(e.message, true); }
-}
-async function guardarRecordatorioMeta() {
-  var v = document.getElementById('pm-recordatorio').value;
-  var lista = v ? [v] : [];
-  await api('/admin/rutas/ajustes', { method: 'POST', body: { plantillas: { solicitud: plantillasRutas.solicitud || [], recordatorio: lista, insistencia: lista } } });
-  plantillasRutas.recordatorio = lista; plantillasRutas.insistencia = lista;
-  /* El «Guardar» general reenvía las plantillas que tiene en memoria: que no deshaga esta elección. */
-  if (typeof ajustesCache !== 'undefined' && ajustesCache && ajustesCache.ajustes && ajustesCache.ajustes.plantillas) {
-    ajustesCache.ajustes.plantillas.recordatorio = lista;
-    ajustesCache.ajustes.plantillas.insistencia = lista;
-  }
 }
 async function conBotonPm(boton, texto, fn) {
   var antes = boton.textContent; boton.disabled = true; boton.textContent = texto;

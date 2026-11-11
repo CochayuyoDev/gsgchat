@@ -168,6 +168,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     // El primer mensaje de una entrega de GSG: la plantilla con producto, empresa, codigo, monto...
     textoSolicitud: entregas ? (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) : undefined,
     plantillaSolicitud: entregas ? (s) => entregas.plantillaSolicitudUbicacion(s) : undefined,
+    datosPedido: entregas ? (s) => entregas.datosPlantillaPedido(s) : undefined,
     // Principal por QR y una línea de API en uso: la plantilla aprobada de Ajustes de chat.
     plantillaMeta: entregas ? async () => (await entregas.usaPlantillaMeta()) && (await hayApiEnUso(fuentesMeta)) : undefined,
     primerMensaje: entregas?.primerMensajeReparto,
