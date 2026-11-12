@@ -27,6 +27,7 @@ export type CodigoIncidencia =
   | 'ya_en_curso'
   | 'envio_bloqueado'
   | 'error_envio'
+  | 'no_se_le_escribio'
   | 'incidencia_manual';
 
 export interface Incidencia {
@@ -180,6 +181,19 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     explicacion: 'El envío salió hacia WhatsApp y volvió con error.',
     queHacer: 'Se reintenta solo. Si insiste, mirar el detalle: suele ser la plantilla o el número.',
     requiereHumano: false,
+    reintentable: true,
+    reportable: true,
+  },
+  // El caso del 11/11: el pedido salió como «no contestó» y en su chat no
+  // había ningún mensaje. Antes de decir «no contestó» se mira que lo contado
+  // como intento esté de verdad en el chat del cliente y que WhatsApp no lo
+  // rechazara (ver `revisarEnviosContados` en motor.ts); si no hay ninguno, es esto.
+  no_se_le_escribio: {
+    codigo: 'no_se_le_escribio',
+    titulo: 'No se le llegó a escribir',
+    explicacion: 'El sistema contó mensajes a este cliente, pero ninguno está en su chat o WhatsApp no los entregó: el cliente no recibió nada, así que no es que no conteste.',
+    queHacer: 'Mirar el detalle (dice qué pasó con cada mensaje), reintentar el mensaje del pedido o llamar al cliente.',
+    requiereHumano: true,
     reintentable: true,
     reportable: true,
   },

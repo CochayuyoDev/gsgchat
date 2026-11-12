@@ -2240,7 +2240,13 @@ async function revisarConexion() {
     if (estado.connected) { caja.classList.add('hidden'); return; }
     /* La que se cayo es la conexion de /setup. Si otra linea sigue viva, los chats
        salen por la linea de cada cliente (o por otra viva): no es «no va a salir». */
-    var vivas = LINEAS.filter(function (l) { return l.estado === 'conectado'; });
+    var vivas = LINEAS.filter(function (l) { return l.estado === 'conectado' && l.enUso !== false; });
+    /* Si la de /setup no se usa (modo «Solo WhatsApp API») o la principal de uso es
+       otra linea que esta conectada (p. ej. la API), que la de /setup este sin
+       conectar no es ninguna caida: no se avisa. */
+    var deSetup = LINEAS.find(function (l) { return l.principal; });
+    var principalViva = LINEAS.some(function (l) { return l.preferida && !l.principal && l.enUso !== false && l.estado === 'conectado'; });
+    if (vivas.length && ((deSetup && deSetup.enUso === false) || principalViva)) { caja.classList.add('hidden'); return; }
     if (vivas.length) {
       caja.innerHTML = 'La línea de la conexión principal está caída' + (estado.detail ? ' (' + esc(estado.detail) + ')' : '') +
         '. Siguen activas: ' + vivas.map(function (l) { return esc(l.etiqueta || l.numero || 'línea'); }).join(', ') +

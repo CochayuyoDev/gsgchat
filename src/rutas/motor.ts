@@ -28,6 +28,7 @@ import type { Politica } from '../salud/politica.js';
 import { decidirRitmo } from '../salud/ritmo.js';
 import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import { anotarEsperaEnvio, anotarEsperaGlobal, limpiarEsperasEnvio } from './espera-envio.js';
+import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import { alDespertarMotorRutas } from './despertador.js';
 import { esLoteDePrueba } from './alertas.js';
 import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
@@ -304,6 +305,21 @@ export async function anotarIncidenciaDeSolicitud(
 /** Pasa el caso a una persona: se acabaron los intentos del bot y su espera final. */
 export async function derivarSolicitud(ctx: ContextoIncidencia, solicitud: Solicitud): Promise<void> {
   const respondio = Boolean(solicitud.primeraRespuestaAt);
+  // «No contestó» solo si de verdad le llegó algo: si ninguno de los mensajes
+  // contados está en su chat (o WhatsApp los rechazó), se dice eso, con el porqué.
+  if (!respondio) {
+    const revision = await revisarEnviosContados(ctx.repos, solicitud, ctx.ahora()).catch((error: unknown) => {
+      ctx.log?.('no se pudo revisar los mensajes contados antes de «no contestó»', { solicitud: solicitud.id, detalle: String(error) });
+      return null;
+    });
+    // Solo con pruebas: si de algún mensaje ya no queda registro, no se afirma nada.
+    if (revision && revision.visibles === 0 && revision.sinComprobar === 0 && revision.problemas.length > 0) {
+      const detalle = `se contaron ${solicitud.intentos} mensaje${solicitud.intentos === 1 ? '' : 's'}, pero no le llegó ninguno: ${revision.problemas.join('; ')}`.slice(0, 500);
+      await anotarIncidenciaDeSolicitud(ctx, solicitud, 'no_se_le_escribio', detalle, 'derivado');
+      await ctx.repos.rutas.registrarEvento(solicitud.id, 'derivacion', `Pendiente de atención: no se le llegó a escribir (${revision.problemas.length} problema${revision.problemas.length === 1 ? '' : 's'})`, { problemas: revision.problemas });
+      return;
+    }
+  }
   const codigo: CodigoIncidencia = respondio ? 'respondio_sin_ubicacion' : 'sin_respuesta';
   const detalle = respondio
     ? `contestó pero no envió ubicación después de ${solicitud.intentos} mensajes`
@@ -315,6 +331,88 @@ export async function derivarSolicitud(ctx: ContextoIncidencia, solicitud: Solic
     'derivacion',
     `Pendiente de atención: ${solicitud.intentos} mensajes sin ubicación`,
   );
+}
+
+/**
+ * Lo que pasó de verdad con los mensajes que el reparto contó como intentos.
+ *
+ * Un intento se cuenta cuando el proveedor acepta el envío, pero eso no
+ * asegura que el cliente lo tenga: el mensaje puede no haberse guardado,
+ * haber quedado en el chat de otro número o haberlo rechazado WhatsApp
+ * después. `visibles` son los que le llegaron o pudieron llegarle (en su
+ * chat sin fallar, o con WhatsApp confirmando el envío); `problemas`, qué pasó
+ * con cada uno de los demás, en palabras.
+ *
+ * Pedidos viejos: el chat se borra a las 72 h (RETENCION_CHAT_MS), pero los
+ * intentos de envío (`deliveries`) se guardan siempre, y se miran primero.
+ * Si de un mensaje ya no queda nada en ninguno de los dos, es `sinComprobar`:
+ * no se afirma que no se le escribió.
+ */
+export async function revisarEnviosContados(
+  repos: Repos,
+  solicitud: Solicitud,
+  ahora: Date = new Date(),
+): Promise<{ visibles: number; problemas: string[]; sinComprobar: number }> {
+  const eventos = await repos.rutas.eventos(solicitud.id, 500);
+  const envios = eventos.filter((e) => e.tipo === 'envio');
+  const problemas: string[] = [];
+  let visibles = 0;
+  let sinComprobar = 0;
+  // Lo que dice WhatsApp de cada envío a este teléfono (no se borra con el chat).
+  const porWamid = new Map<string, { status: string; errorCode: string | null; errorTitle: string | null }>();
+  if (solicitud.phone) {
+    const lista = await repos.deliveries.listRecent({ phone: solicitud.phone, limit: 500, offset: 0 }).catch(() => []);
+    for (const d of lista) if (d.wamid) porWamid.set(d.wamid, d);
+  }
+  for (const envio of envios) {
+    const wamid = typeof envio.payload?.wamid === 'string' && envio.payload.wamid.trim() ? envio.payload.wamid.trim() : null;
+    const cuando = horaDelNegocio(envio.createdAt);
+    if (!wamid) {
+      problemas.push(`el envío de las ${cuando} no trae identificador de WhatsApp`);
+      continue;
+    }
+    const envioRegistrado = porWamid.get(wamid);
+    if (envioRegistrado?.status === 'failed' || envioRegistrado?.status === 'blocked_by_gate') {
+      const motivo = envioRegistrado.errorTitle || envioRegistrado.errorCode;
+      problemas.push(`WhatsApp no entregó el mensaje de las ${cuando}${motivo ? ` (${String(motivo).slice(0, 120)})` : ''}`);
+      continue;
+    }
+    const ref = await repos.messages.referenciaVisiblePorWamid(wamid, new Date(0));
+    if (!ref) {
+      if (envioRegistrado) {
+        // Sin la fila del chat (borrada por antigüedad), pero WhatsApp lo aceptó.
+        visibles++;
+        continue;
+      }
+      if (ahora.getTime() - envio.createdAt.getTime() > RETENCION_CHAT_MS) {
+        sinComprobar++;
+        problemas.push(`del mensaje de las ${cuando} ya no queda registro para comprobarlo (el chat se borra a las 72 h)`);
+        continue;
+      }
+      problemas.push(`el mensaje de las ${cuando} no quedó guardado en ningún chat (${wamid})`);
+      continue;
+    }
+    if (solicitud.contactId && ref.contactId !== solicitud.contactId) {
+      const otro = await repos.contacts.getById(ref.contactId).catch(() => null);
+      problemas.push(`el mensaje de las ${cuando} quedó en el chat de otro número (${otro?.phone ?? ref.contactId})`);
+      continue;
+    }
+    const mensaje = await repos.messages.porId(ref.contactId, Number(ref.id));
+    if (mensaje?.status === 'failed') {
+      problemas.push(`WhatsApp no entregó el mensaje de las ${cuando}`);
+      continue;
+    }
+    visibles++;
+  }
+  function horaDelNegocio(d: Date): string {
+    try {
+      return new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    } catch {
+      return d.toISOString().slice(11, 16) + ' UTC';
+    }
+  }
+  if (!envios.length && solicitud.intentos > 0) problemas.push(`hay ${solicitud.intentos} intento${solicitud.intentos === 1 ? '' : 's'} contado${solicitud.intentos === 1 ? '' : 's'} sin ningún envío anotado en la bitácora`);
+  return { visibles, problemas, sinComprobar };
 }
 
 /**

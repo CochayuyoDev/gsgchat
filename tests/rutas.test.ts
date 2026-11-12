@@ -184,14 +184,24 @@ describe('preparar el lote', () => {
 
 const HORA_BUENA = new Date('2026-03-10T15:00:00Z'); // 10:00 en Lima
 
-function senderFalso(respuesta?: (job: SendJob) => SendOutcome) {
+/**
+ * Con `repos`, guarda en el chat lo que «sale», igual que el emisor de verdad
+ * (src/outbound/sender.ts): el reparto comprueba que lo contado esté en el
+ * chat antes de decir «no contestó».
+ */
+function senderFalso(respuesta?: (job: SendJob) => SendOutcome, repos?: Repos) {
   const enviados: SendJob[] = [];
   const sender: Sender = {
     async send(job) {
       enviados.push(job);
-      return respuesta
+      const salida = respuesta
         ? respuesta(job)
         : ({ ok: true, wamid: `wamid.${enviados.length}`, deliveryId: enviados.length } as SendOutcome);
+      if (repos && salida.ok && job.phone) {
+        const contacto = await repos.contacts.upsertFromInbound(job.phone);
+        await repos.messages.add({ contactId: contacto.id, direction: 'out', wamid: salida.wamid, kind: job.kind === 'interactive' ? 'interactive' : 'text', body: 'mensaje de prueba', status: 'sent' });
+      }
+      return salida;
     },
   };
   return { sender, enviados };
@@ -327,7 +337,7 @@ describe('el motor', () => {
 
   it('a los tres intentos deja de insistir y lo pasa a una persona', async () => {
     const lote = await loteListo(repos, ['51987654321']);
-    const { sender, enviados } = senderFalso();
+    const { sender, enviados } = senderFalso(undefined, repos);
     let momento = HORA_BUENA.getTime();
     const motor = crearMotor({
       repos,

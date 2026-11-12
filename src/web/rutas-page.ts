@@ -46,6 +46,37 @@ const CSS = `${REPARTO_CSS}
 .d-bloque .campo label { font-size: 13px; font-weight: 600; }
 .d-acciones { gap: 8px; flex-wrap: wrap; }
 .d-peligro { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--borde); }
+/* «Ver qué pasó con este pedido» */
+.qp-btn { width: 100%; margin: 10px 0 2px; font-weight: 600; }
+.qp-fondo { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 16px; background: rgba(11, 20, 26, .55); }
+.qp { font-family: var(--fuente, system-ui, sans-serif); background: var(--panel, #fff); color: var(--texto, #111b21); border-radius: 14px; width: min(640px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 20px; box-shadow: 0 18px 50px rgba(0,0,0,.28); }
+.qp h3 { margin: 0 0 4px; font-size: 17px; }
+.qp .qp-sub { margin: 0 0 14px; font-size: 13px; color: var(--texto-suave); overflow-wrap: anywhere; }
+.qp-diag { border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; border: 1px solid var(--borde); }
+.qp-diag b { display: block; font-size: 15.5px; margin-bottom: 4px; }
+.qp-diag p { margin: 0; font-size: 13.5px; line-height: 1.45; }
+.qp-diag .qp-hacer { margin-top: 8px; font-weight: 600; }
+.qp-diag.bad { background: #fef2f2; border-color: #fecaca; } .qp-diag.bad b { color: #b91c1c; }
+.qp-diag.warn { background: #fffbeb; border-color: #fde68a; } .qp-diag.warn b { color: #92400e; }
+.qp-diag.ok { background: #f0fdf4; border-color: #bbf7d0; } .qp-diag.ok b { color: #166534; }
+.qp-avisos { margin: 0 0 12px; padding: 0; list-style: none; display: grid; gap: 6px; }
+.qp-avisos li { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--gris-suave); line-height: 1.4; }
+.qp-avisos li.bad { background: #fef2f2; color: #991b1b; } .qp-avisos li.warn { background: #fffbeb; color: #92400e; }
+.qp-cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin: 0 0 14px; }
+.qp-cifras span { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--gris-suave); font-size: 15px; font-weight: 600; }
+.qp-cifras small { font-size: 11.5px; font-weight: 400; color: var(--texto-suave); }
+.qp-linea { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--borde); }
+.qp-linea li { position: relative; padding: 0 0 10px 14px; font-size: 13.5px; line-height: 1.4; }
+.qp-linea li::before { content: ''; position: absolute; left: -6px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: #9ca3af; }
+.qp-linea li.ok::before { background: #16a34a; } .qp-linea li.bad::before { background: #dc2626; } .qp-linea li.warn::before { background: #d97706; }
+.qp-linea small { display: block; color: var(--texto-suave); font-size: 12px; }
+.qp-linea .qp-det { display: block; color: var(--texto-suave); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.qp-pie { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+@media (prefers-color-scheme: dark) {
+  .qp-diag.bad, .qp-avisos li.bad { background: rgba(220,38,38,.14); border-color: rgba(220,38,38,.4); color: inherit; }
+  .qp-diag.warn, .qp-avisos li.warn { background: rgba(217,119,6,.14); border-color: rgba(217,119,6,.4); color: inherit; }
+  .qp-diag.ok { background: rgba(22,163,74,.14); border-color: rgba(22,163,74,.4); }
+}
 .d-peligro .btn { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 35%, transparent); }
 .d-peligro .btn:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
 .d-linea { list-style: none; margin: 0 0 0 6px !important; padding: 0 0 0 16px !important; border-left: 2px solid var(--borde); display: grid; gap: 10px; }
@@ -1087,6 +1118,8 @@ function pintarDetalle(data) {
   var puede = accionesDeEstado(s.estado);
   var enlaceChat = '<a class="btn sm fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>' +
     (sinTelefono ? '' : '<a href="#" class="btn sm fijo" id="d-incidencia">Enviar incidencia manual</a>');
+  // Siempre a mano, en cualquier estado: la historia del pedido y el porqué.
+  var botonQuePaso = '<button type="button" class="btn sm qp-btn" id="d-que-paso">🔎 Ver qué pasó con este pedido</button>';
   var abrirIncidencia = function (evento) {
     if (evento) evento.preventDefault();
     abrirIncidenciaManual({ phone: s.phone, tracking: s.referencia || '', alTerminar: function () { detalleId = null; refrescar(); } });
@@ -1098,12 +1131,14 @@ function pintarDetalle(data) {
     document.getElementById('detalle-acciones').innerHTML =
       '<div class="aviso" style="margin:12px 0 8px"><div><b>Quitada de esta automatización</b><br>' +
         'No se le volverá a escribir por esta solicitud. El chat, el contacto y el historial se conservan.</div></div>' +
-      '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>';
+      '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>' + botonQuePaso;
     if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
+    document.getElementById('d-que-paso').onclick = function () { abrirQuePaso(s.id); };
     return;
   }
 
   document.getElementById('detalle-acciones').innerHTML =
+    botonQuePaso +
     '<div class="d-bloque"><h3 class="d-titulo">Corregir datos</h3>' +
     '<div class="campo"><label for="d-telefono">Teléfono</label>' +
       '<div class="fila"><input id="d-telefono" value="' + esc(s.telefonoCrudo) + '">' +
@@ -1127,6 +1162,7 @@ function pintarDetalle(data) {
       : '');
 
   if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
+  document.getElementById('d-que-paso').onclick = function () { abrirQuePaso(s.id); };
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
   document.getElementById('d-guardar-ubi').onclick = function () { guardarUbicacion(s.id); };
   document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.', this); };
@@ -1139,6 +1175,71 @@ function pintarDetalle(data) {
   if (puede.quitar) {
     document.getElementById('d-quitar').onclick = function () { quitarDeAutomatizacion(s, this); };
   }
+}
+
+/**
+ * «Ver qué pasó con este pedido»: el diagnóstico arriba (qué pasó y por qué),
+ * los avisos, las cifras y la línea de tiempo. Solo lee: no cambia nada.
+ */
+async function abrirQuePaso(id) {
+  var viejo = document.getElementById('qp-fondo');
+  if (viejo) viejo.remove();
+  var fondo = document.createElement('div');
+  fondo.className = 'qp-fondo';
+  fondo.id = 'qp-fondo';
+  fondo.innerHTML = '<div class="qp" role="dialog" aria-modal="true" aria-labelledby="qp-titulo"><h3 id="qp-titulo">Qué pasó con este pedido</h3><p class="qp-sub">Leyendo todo lo que quedó guardado…</p></div>';
+  var cerrar = function () { fondo.remove(); document.removeEventListener('keydown', alTeclear); };
+  var alTeclear = function (ev) { if (ev.key === 'Escape') cerrar(); };
+  fondo.onclick = function (ev) { if (ev.target === fondo) cerrar(); };
+  document.addEventListener('keydown', alTeclear);
+  document.body.appendChild(fondo);
+  var caja = fondo.querySelector('.qp');
+  try {
+    var d = await api('/admin/rutas/solicitudes/' + id + '/que-paso');
+    caja.innerHTML = pintarQuePaso(d);
+  } catch (error) {
+    caja.innerHTML = '<h3 id="qp-titulo">Qué pasó con este pedido</h3><div class="qp-diag bad"><b>No se pudo leer la historia</b><p>' + esc(error && error.message ? error.message : 'Error desconocido') + '</p></div><div class="qp-pie"><button type="button" class="btn sm" data-qp-cerrar>Cerrar</button></div>';
+  }
+  var b = caja.querySelector('[data-qp-cerrar]');
+  if (b) { b.onclick = cerrar; b.focus(); }
+}
+
+function pintarQuePaso(d) {
+  var s = d.solicitud || {};
+  var g = d.diagnostico || {};
+  var c = d.cifras || {};
+  var hora = function (iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return iso; }
+  };
+  var cifra = function (n, texto) { return '<span>' + esc(n) + '<small>' + esc(texto) + '</small></span>'; };
+  var html = '<h3 id="qp-titulo">Qué pasó con este pedido</h3>' +
+    '<p class="qp-sub">' + esc([s.nombre, s.referencia, s.telefono].filter(Boolean).join(' · ')) + '</p>' +
+    '<div class="qp-diag ' + esc(g.tono || 'muted') + '"><b>' + esc(g.titulo || '') + '</b><p>' + esc(g.porque || '') + '</p>' +
+      (g.queHacer ? '<p class="qp-hacer">Qué hacer: ' + esc(g.queHacer) + '</p>' : '') + '</div>';
+  if (d.avisos && d.avisos.length) {
+    html += '<ul class="qp-avisos">' + d.avisos.map(function (a) { return '<li class="' + esc(a.tono) + '">' + esc(a.texto) + '</li>'; }).join('') + '</ul>';
+  }
+  html += '<div class="qp-cifras">' +
+    cifra(c.intentosContados, 'intentos contados') +
+    cifra(c.mensajesEnSuChat, 'mensajes en su chat') +
+    cifra(c.leLlegaron, 'le llegaron') +
+    cifra(c.leidos, 'leídos') +
+    cifra(c.noLlegaron, 'no le llegaron') +
+    cifra(c.envioFrenado, 'no salieron') +
+    cifra(c.escribioElCliente, 'mensajes del cliente') +
+    '</div>';
+  html += '<h3 class="d-titulo" style="margin-top:0">Paso a paso</h3>';
+  html += d.linea && d.linea.length
+    ? '<ul class="qp-linea">' + d.linea.map(function (p) {
+        return '<li class="' + esc(p.tono) + '">' + esc(p.que) + (p.detalle ? '<span class="qp-det">' + esc(p.detalle) + '</span>' : '') + (p.cuando ? '<small>' + esc(hora(p.cuando)) + '</small>' : '') + '</li>';
+      }).join('') + '</ul>'
+    : '<p class="muted" style="margin:0">No quedó nada apuntado de este pedido.</p>';
+  if (d.faltan && d.faltan.length) {
+    html += '<p class="muted" style="margin:12px 0 0;font-size:12.5px">No se pudo leer: ' + esc(d.faltan.join(', ')) + '.</p>';
+  }
+  html += '<div class="qp-pie"><button type="button" class="btn sm" data-qp-cerrar>Cerrar</button></div>';
+  return html;
 }
 
 /**

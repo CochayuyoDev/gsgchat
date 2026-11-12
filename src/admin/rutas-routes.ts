@@ -42,6 +42,7 @@ import type { Monitor } from '../salud/monitor.js';
 import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
 import { horaEnPalabras, horarioEnPalabras } from '../entregas/textos.js';
 import { esperaDeEnvio, limpiarEsperasEnvio } from '../rutas/espera-envio.js';
+import { quePasoConSolicitud } from '../rutas/que-paso.js';
 import { alCambiarHorario, despertarMotorRutas } from '../rutas/despertador.js';
 
 export interface RutasRoutesDeps {
@@ -520,6 +521,14 @@ export async function registerRutasRoutes(
     };
   });
 
+  /** «Ver qué pasó con este pedido»: la historia y el porqué, en palabras. Solo lee. */
+  app.get<{ Params: { id: string } }>('/admin/rutas/solicitudes/:id/que-paso', async (request, reply) => {
+    const id = Number(request.params.id);
+    const solicitud = Number.isInteger(id) ? await repos.rutas.solicitud(id) : null;
+    if (!solicitud) return reply.code(404).send({ error: 'Ese cliente ya no está en la lista.' });
+    return { solicitud: { id: solicitud.id, nombre: solicitud.nombre, referencia: solicitud.referencia, telefono: solicitud.phone ?? solicitud.telefonoCrudo, estado: solicitud.estado }, ...(await quePasoConSolicitud(repos, solicitud)) };
+  });
+
   /**
    * Correcciones a mano.
    *
@@ -664,8 +673,9 @@ export async function registerRutasRoutes(
       estado: 'derivado',
       requiereHumano: true,
       asignadoA: body.asignadoA ?? solicitud.asignadoA,
-      incidencia: solicitud.incidencia ?? (solicitud.primeraRespuestaAt ? 'respondio_sin_ubicacion' : 'sin_respuesta'),
-      incidenciaDetalle: body.motivo ?? solicitud.incidenciaDetalle ?? 'derivada a mano por el operador',
+      // Sin ningún mensaje enviado no es «no contestó»: no se le llegó a escribir.
+      incidencia: solicitud.incidencia ?? (solicitud.primeraRespuestaAt ? 'respondio_sin_ubicacion' : solicitud.intentos > 0 ? 'sin_respuesta' : 'no_se_le_escribio'),
+      incidenciaDetalle: body.motivo ?? solicitud.incidenciaDetalle ?? (!solicitud.primeraRespuestaAt && solicitud.intentos === 0 ? 'derivada a mano por el operador antes de escribirle' : 'derivada a mano por el operador'),
       proximoIntentoAt: null,
     });
     await repos.rutas.registrarEvento(
