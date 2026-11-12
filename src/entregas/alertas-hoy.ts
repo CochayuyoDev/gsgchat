@@ -44,7 +44,7 @@ export const TITULO_ALERTA: Record<TipoAlertaHoy, (n: number) => string> = {
 
 const FINALES = new Set(['entregada', 'terminada', 'cancelada']);
 /** Las apartadas que siguen siendo «solo le falta la ubicación». */
-const INCIDENCIAS_DE_UBICACION = new Set(['sin_respuesta', 'sin_ubicacion', 'respondio_sin_ubicacion', 'consulta_ajena', 'ya_en_curso']);
+const INCIDENCIAS_DE_UBICACION = new Set(['sin_respuesta', 'sin_ubicacion', 'respondio_sin_ubicacion', 'consulta_ajena', 'ya_en_curso', 'no_se_le_escribio']);
 
 /** "HH:MM" de ese momento en el reloj del negocio. */
 function horaMinutos(fecha: Date, tz: string): string {

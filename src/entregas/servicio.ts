@@ -1015,7 +1015,7 @@ const ESTADOS_FINALES: EstadoEntrega[] = ['entregada', 'terminada', 'cancelada']
  * manda su pin, la entrega sale de «necesita a alguien» y sigue sola. Las
  * demas («no soy yo», baja, un cambio...) las sigue viendo una persona.
  */
-const LIBERA_CON_PIN = new Set(['sin_ubicacion', 'sin_respuesta', 'respondio_sin_ubicacion', 'consulta_ajena', 'ya_en_curso', 'ubicacion_fuera_de_zona', 'sin_whatsapp', 'envio_bloqueado', 'error_envio']);
+const LIBERA_CON_PIN = new Set(['sin_ubicacion', 'sin_respuesta', 'respondio_sin_ubicacion', 'consulta_ajena', 'ya_en_curso', 'ubicacion_fuera_de_zona', 'sin_whatsapp', 'envio_bloqueado', 'error_envio', 'no_se_le_escribio']);
 
 /** «No soy yo»: la incidencia con la que se aparta el pedido (y lo que cuenta la bitacora). */
 const INCIDENCIA_NO_SOY_YO = 'no_soy_yo';

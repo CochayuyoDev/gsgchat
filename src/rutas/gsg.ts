@@ -913,7 +913,7 @@ async function despacharAhora(
     // Un pin tardío supera la falta de respuesta. No enviar el problema viejo
     // después de las coordenadas ni fingir que GSG recibió ese problema.
     const codigo = String(reporte.payload.codigo ?? reporte.payload.error ?? '');
-    if (reporte.tipo === 'incidencia' && reporte.solicitudId && ['sin_respuesta', 'respondio_sin_ubicacion'].includes(codigo)) {
+    if (reporte.tipo === 'incidencia' && reporte.solicitudId && ['sin_respuesta', 'respondio_sin_ubicacion', 'no_se_le_escribio'].includes(codigo)) {
       const vigente = await repos.rutas.solicitud(reporte.solicitudId);
       if (vigente?.estado === 'resuelto' && vigente.lat != null && vigente.lng != null) {
         await repos.rutas.marcarReporte(reporte.id, 'superado');

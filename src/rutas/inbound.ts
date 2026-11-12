@@ -491,7 +491,7 @@ export async function cerradaPorPlazo(deps: RutaInboundDeps, contact: Contact, m
       return null;
     } else if (
       s.estado === 'derivado' &&
-      (s.incidencia === 'sin_respuesta' || s.incidencia === 'respondio_sin_ubicacion') &&
+      (s.incidencia === 'sin_respuesta' || s.incidencia === 'respondio_sin_ubicacion' || s.incidencia === 'no_se_le_escribio') &&
       // Lo derivo el plazo (agoto sus mensajes), no una persona a mano. Sin
       // ajustes legibles (NaN) se da por agotado.
       !(s.intentos < maxIntentos) &&

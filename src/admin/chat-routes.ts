@@ -513,7 +513,7 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
   // ------------------------------------------------------------ lineas
 
   /** Lo que la pantalla sabe de una linea: rotulo, estado y lo que su proveedor permite. */
-  const vistaDeLinea = (l: import('../whatsapp/lineas.js').Linea, modo: ModoLineas = MODO_LINEAS_POR_DEFECTO) => {
+  const vistaDeLinea = (l: import('../whatsapp/lineas.js').Linea, modo: ModoLineas = MODO_LINEAS_POR_DEFECTO, preferida: string | null = null) => {
     // Normal o API (la principal, la que diga /setup) y si el modo de Conexion la deja en uso.
     const tipo = tipoDeProveedor(l.principal ? providerOf(settings.current()) : l.proveedor);
     return {
@@ -525,13 +525,18 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       proveedor: l.proveedor,
       tipo,
       enUso: admiteTipo(modo, tipo),
+      // La principal de uso («Hacer principal» en Conexión): puede ser otra que la de /setup.
+      preferida: preferida ? l.id === preferida : l.principal,
       puede: capacidadesDelChat(l.proveedor),
     };
   };
   /** Las vistas de varias lineas con el modo vigente (una sola lectura). */
   const vistasDeLineas = async (ls: import('../whatsapp/lineas.js').Linea[]) => {
-    const modo = (await deps.lineas?.modo?.().catch(() => null)) ?? MODO_LINEAS_POR_DEFECTO;
-    return ls.map((l) => vistaDeLinea(l, modo));
+    const [modo, preferida] = await Promise.all([
+      deps.lineas?.modo?.().catch(() => null),
+      deps.lineas?.preferida?.().catch(() => null),
+    ]);
+    return ls.map((l) => vistaDeLinea(l, modo ?? MODO_LINEAS_POR_DEFECTO, preferida ?? null));
   };
 
   /** Las lineas con las que se puede responder (habilitadas), la principal primero. */
