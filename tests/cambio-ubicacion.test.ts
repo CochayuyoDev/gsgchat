@@ -56,14 +56,16 @@ describe('cambio de ubicación antes y después de la 1:00 PM', () => {
     expect(c1?.lat).toBeCloseTo(OTRO_PIN.lat, 5);
   });
 
-  it('después de la 1:00 PM: que coordine con el motorizado, con el número que manda GSG', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('después de la 1:00 PM: que coordine con el motorizado, con el número que manda GSG', async () => {
     e.avanzar(5 * 60); // ~14:0x en Lima
     const r = await pide({ texto: 'oe la ubi q te mande esta mal' });
     expect(r).toHaveLength(1);
     expect(r[0]).toMatch(/^Entiendo que deseas cambiar tu ubicación, pero al ser después de la 1:00 PM, por favor comunícate directamente con el motorizado para coordinar la entrega\. Número del motorizado: .*999 ?888 ?777/);
   });
 
-  it('después de la 1:00 PM un pin nuevo NO se registra, se le contesta lo mismo y al motorizado no se le escribe', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('después de la 1:00 PM un pin nuevo NO se registra, se le contesta lo mismo y al motorizado no se le escribe', async () => {
     const antes = alMotorizado();
     const r = await pide({ pin: TARDE_PIN });
     const c1 = await e.entrega('C-1');

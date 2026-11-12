@@ -40,10 +40,10 @@ const CSS = `
   label.linea { display: flex; align-items: center; gap: var(--esp-2); color: var(--texto); font-size: var(--fs-cuerpo); font-weight: 400; cursor: pointer; }
 
   /* Arriba del todo: que esta haciendo el sistema ahora mismo y como pararlo. */
-  .estado { margin-bottom: var(--esp-3); border-left: 4px solid var(--gris); }
-  .estado.verde { border-left-color: var(--verde); }
-  .estado.ambar { border-left-color: var(--ambar); }
-  .estado.rojo { border-left-color: var(--rojo); }
+  .estado { margin-bottom: var(--esp-3); }
+  .estado.verde { border-color: color-mix(in srgb, var(--verde) 35%, var(--borde)); background: color-mix(in srgb, var(--verde-suave) 45%, var(--superficie)); }
+  .estado.ambar { border-color: color-mix(in srgb, var(--ambar) 35%, var(--borde)); background: color-mix(in srgb, var(--ambar-suave) 45%, var(--superficie)); }
+  .estado.rojo { border-color: color-mix(in srgb, var(--rojo) 35%, var(--borde)); background: color-mix(in srgb, var(--rojo-suave) 45%, var(--superficie)); }
   .estado .cabecera { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .estado h2 { font-size: var(--fs-h2); font-weight: 700; margin: 0; flex: 1; min-width: 240px; }
   .estado p { margin: var(--esp-2) 0 0; font-size: var(--fs-small); }
@@ -56,7 +56,7 @@ const CSS = `
   .tarjeta.ambar .n { color: var(--ambar); }
 
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: var(--esp-3); align-items: start; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
   .caja { padding: 0; overflow: hidden; margin-bottom: var(--esp-3); min-width: 0; }
   .caja > h2 { font-size: var(--fs-h3); font-weight: 700; margin: 0; padding: var(--esp-3) var(--esp-4); border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .caja > h2 .sep { flex: 1; }
@@ -65,7 +65,7 @@ const CSS = `
 
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); position: sticky; top: 0; z-index: 1; }
+  th { font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); position: sticky; top: 0; z-index: 1; }
   tbody tr:hover > td { background: var(--superficie-2); }
   tr:last-child td { border-bottom: 0; }
   td .sub { color: var(--texto-suave); font-size: var(--fs-small); margin-top: 2px; }

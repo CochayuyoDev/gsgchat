@@ -21,13 +21,16 @@ import type { Sender } from '../outbound/sender.js';
 import { extractLocation } from '../geo/extract.js';
 import type { SettingsService } from '../settings/service.js';
 import type { WhatsAppClient } from '../whatsapp/client.js';
+import { algunaLineaConectada, algunaLineaConfigurada, estadoConexion, nombrarLineas } from '../whatsapp/estado-conexion.js';
 import { CATALOG, type CatalogTemplate } from '../templates/catalog.js';
 import { hasErrors, lintTemplate } from '../templates/lint.js';
 import { countVariables } from '../templates/render.js';
 import { syncTemplates } from '../templates/registry.js';
+import { clienteDeMeta } from '../templates/cliente-meta.js';
 import { pushTemplates } from '../templates/push.js';
 import { registerAutomationRoutes } from './automation-routes.js';
 import { registerChatRoutes } from './chat-routes.js';
+import { registerPrivacidadRoutes } from './privacidad-routes.js';
 import { responderLectura } from '../web/cache-lectura.js';
 import { registerLeadsRoutes } from './leads-routes.js';
 import { registerRutasRoutes } from './rutas-routes.js';
@@ -38,7 +41,9 @@ import { opcionesDesdeConfig } from '../rutas/motor.js';
 import type { Monitor } from '../salud/monitor.js';
 import { politicaDesdeConfig, type Politica } from '../salud/politica.js';
 import { VERSION } from '../version.js';
-import { ZONAS_HORARIAS, ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, type ServicioAjustes } from '../ajustes/generales.js';
+import { ZONAS_HORARIAS, ajustesGeneralesPatchSchema, ATAJOS_POR_DEFECTO, fechaDelNegocio, type ServicioAjustes } from '../ajustes/generales.js';
+import { COMANDOS_CHAT } from '../entregas/comando-cambio-ubicacion.js';
+import { horaLocal } from '../salud/ritmo.js';
 import type { ServicioStickers } from '../stickers/stickers.js';
 import { aCsvCon } from './csv.js';
 import { providerOf } from '../settings/service.js';
@@ -53,6 +58,9 @@ import { atenderRespuestaDeRuta } from '../rutas/inbound.js';
 import { crearPuertoEnEspera } from '../rutas/gsg.js';
 import { registrarEventosPanel } from '../web/eventos-panel-routes.js';
 
+/** El dia de la semana como lo lee una persona (0 = domingo, como Date#getDay). */
+const NOMBRES_DIA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
 export interface AdminDeps {
   /**
    * La clave de `number_state` del numero vigente (src/salud/numero.ts). Tiene
@@ -66,6 +74,9 @@ export interface AdminDeps {
   entrenamiento?: import('../entrenamiento/servicio.js').ServicioEntrenamiento;
   /** La voz del asistente: desde el chat, un texto puede salir como nota de voz. */
   voz?: import('../voz/servicio.js').ServicioVoz;
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
+  /** El cliente de cada linea: con varias, «conectado» es que quede alguna viva, no solo la principal. */
+  registroClientes?: import('../whatsapp/registro.js').RegistroClientes;
   /** La puerta a GSG (la configurable desde la pantalla). Sin ella, la del .env. */
   gsg?: import('../rutas/gsg.js').PuertoGsg;
   /** Las entregas del dia: ligan cada conversacion guardada a su pedido. Ver src/entregas. */
@@ -167,12 +178,16 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // monitor de salud (ver src/salud/numero.ts). Sin la de la tienda, la de
   // siempre: solo el id de Meta, o 'local'.
   const phoneNumberId = deps.numeroDeSalud ?? (() => settings.current().phoneNumberId || 'local');
+  // Con varias lineas, «conectado» = queda alguna viva (ver src/whatsapp/estado-conexion.ts).
+  const fuentesConexion = { settings, wa, registro: deps.registroClientes ?? null, preferida: deps.lineas?.preferida ? () => deps.lineas!.preferida!() : null };
 
   // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
   await registerAutomationRoutes(app, { repos, sender });
   const gsg = deps.gsg ?? crearPuertoGsg(config);
-  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes });
+  await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes, ia: deps.ia, lineas: deps.lineas });
+  // BAJA y «borren mis datos»: lo atiende el equipo (src/privacidad).
+  await registerPrivacidadRoutes(app, { repos, mediaDir: deps.mediaDir, sender });
   await registerLeadsRoutes(app, {
     repos,
     // Lo que se conecto desde la pantalla manda; el .env es el valor inicial.
@@ -256,9 +271,29 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     return { ok: true, guardado: await deps.ajustes.restablecer() };
   });
 
+  /** Si hoy toca escribir por el dia (los domingos, de fabrica, no). La pantalla de pedidos lo pregunta. */
+  app.get('/admin/ajustes/hoy', async () => {
+    const p = politicaVigente();
+    const ahora = new Date();
+    const { dia } = horaLocal(ahora, p.timezone);
+    return { tocaHoy: p.diasPermitidos.length === 0 || p.diasPermitidos.includes(dia), dia: NOMBRES_DIA[dia], fecha: fechaDelNegocio(ahora, p.timezone) };
+  });
+
+  /** «Enviar aunque sea domingo»: solo hoy (fecha del negocio). Mañana vuelve la regla de los dias. */
+  app.post('/admin/ajustes/escribir-hoy', async (_request, reply) => {
+    if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
+    const p = politicaVigente();
+    const fecha = fechaDelNegocio(new Date(), p.timezone);
+    await deps.ajustes.guardar({ horario: { diaExtra: fecha } });
+    // Lo que esperaba «al dia siguiente» sale ya.
+    await alCambiarHorario(repos);
+    return { ok: true, fecha, detalle: 'Listo: hoy se escribe a los clientes aunque sea ' + NOMBRES_DIA[horaLocal(new Date(), p.timezone).dia] + '.' };
+  });
+
   // --- respuestas rapidas del chat ("/atajo") --------------------------------
 
-  app.get('/admin/chat/atajos', async () => ({ atajos: deps.ajustes?.atajos() ?? ATAJOS_POR_DEFECTO, deFabrica: !deps.ajustes || deps.ajustes.actual().atajos === null }));
+  // `comandos`: atajos fijos que no se le mandan al cliente, los ejecuta el sistema («/cambio»).
+  app.get('/admin/chat/atajos', async () => ({ atajos: deps.ajustes?.atajos() ?? ATAJOS_POR_DEFECTO, deFabrica: !deps.ajustes || deps.ajustes.actual().atajos === null, comandos: COMANDOS_CHAT }));
 
   app.post('/admin/chat/atajos', async (request, reply) => {
     if (!deps.ajustes) return reply.code(404).send({ error: 'los ajustes generales no estan activos en este arranque' });
@@ -281,16 +316,37 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     // El plan va el primero: si esta vencido, explica por que lo demas esta parado.
     const avisoPlan = deps.plan?.estado().aviso ?? null;
     if (avisoPlan) avisos.push({ tipo: 'plan', nivel: avisoPlan.nivel, texto: avisoPlan.texto, href: '/panel#configuracion' });
-    const configurado = settings.isConfigured();
-    const conectado = configurado && (wa.conectado?.() ?? true);
-    if (!configurado) avisos.push({ tipo: 'sin_configurar', nivel: 'bad', texto: 'WhatsApp sin conectar: no sale ni entra nada', href: '/setup' });
-    else if (!conectado) avisos.push({ tipo: 'desconectado', nivel: 'bad', texto: 'WhatsApp desconectado: vuelve a vincular el telefono', href: '/setup' });
-    if (estado.paused) avisos.push({ tipo: 'pausado', nivel: 'warn', texto: `Envios pausados${estado.pausedReason ? ': ' + estado.pausedReason : ''}`, href: '/panel#estado' });
+    const conexion = await estadoConexion(fuentesConexion);
+    const caidas = conexion.lineas.filter((l) => !l.conectada);
+    const vivas = conexion.lineas.filter((l) => l.conectada);
+    if (!conexion.configurado) avisos.push({ tipo: 'sin_configurar', nivel: 'bad', texto: 'WhatsApp sin conectar: no sale ni entra nada', href: '/setup' });
+    else if (!conexion.conectado) avisos.push({ tipo: 'desconectado', nivel: 'bad', texto: 'WhatsApp desconectado: vuelve a vincular el teléfono', href: '/setup' });
+    else if (caidas.length && vivas.length) {
+      // Con alguna viva NO es «WhatsApp desconectado»: cada chat sale por su linea, y si esa cae, por otra viva.
+      avisos.push({
+        tipo: 'linea_caida',
+        nivel: 'warn',
+        texto: `${caidas.length === 1 ? 'Caída la línea' : 'Caídas las líneas'} ${nombrarLineas(caidas)}. Siguen activas ${nombrarLineas(vivas)}: cada chat sale por su número y, si el suyo está caído, por otro activo.`,
+        href: '/setup',
+      });
+    }
+    if (estado.paused) avisos.push({ tipo: 'pausado', nivel: 'warn', texto: `Envíos pausados${estado.pausedReason ? ': ' + estado.pausedReason : ''}`, href: '/panel#estado' });
     const nivel = estado.nivel ?? 'verde';
-    if (nivel === 'rojo') avisos.push({ tipo: 'riesgo', nivel: 'bad', texto: 'El numero esta en rojo: todo pausado hasta que mejore', href: '/panel#salud' });
-    else if (nivel === 'naranja') avisos.push({ tipo: 'riesgo', nivel: 'warn', texto: 'El numero esta en naranja: solo sale lo imprescindible', href: '/panel#salud' });
-    else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El numero esta en amarillo: el marketing va mas lento', href: '/panel#salud' });
-    if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} conversacion${esperando === 1 ? '' : 'es'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
+    if (nivel === 'rojo') avisos.push({ tipo: 'riesgo', nivel: 'bad', texto: 'El número está en rojo: todo pausado hasta que mejore', href: '/panel#salud' });
+    else if (nivel === 'naranja') avisos.push({ tipo: 'riesgo', nivel: 'warn', texto: 'El número está en naranja: solo sale lo imprescindible', href: '/panel#salud' });
+    else if (nivel === 'amarillo') avisos.push({ tipo: 'riesgo', nivel: 'info', texto: 'El número está en amarillo: el marketing va más lento', href: '/panel#salud' });
+    if (esperando > 0) avisos.push({ tipo: 'chats', nivel: 'info', texto: `${esperando} ${esperando === 1 ? 'conversación' : 'conversaciones'} espera${esperando === 1 ? '' : 'n'} respuesta`, href: '/chat', n: esperando });
+    // BAJA o «borren mis datos»: el sistema no lo hace solo, lo atiende una persona desde Chats.
+    const privacidad = await repos.privacidad?.contarPendientes().catch(() => 0) ?? 0;
+    if (privacidad > 0) {
+      avisos.push({
+        tipo: 'privacidad',
+        nivel: 'bad',
+        texto: `${privacidad} cliente${privacidad === 1 ? '' : 's'} pidi${privacidad === 1 ? 'ó' : 'eron'} la baja o borrar sus datos: atiéndelo${privacidad === 1 ? '' : 's'} en Chats`,
+        href: '/chat?filtro=privacidad',
+        n: privacidad,
+      });
+    }
     // Las entregas del dia: lo que necesita a alguien, GSG sin conectar, ningun motorizado.
     const modoGsg = (deps.ajustes?.modo() ?? 'gsg') === 'gsg';
     if (deps.entregas) {
@@ -438,8 +494,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       },
       semana,
       numero: {
-        conectado: settings.isConfigured() && (wa.conectado?.() ?? true),
-        configurado: settings.isConfigured(),
+        conectado: algunaLineaConectada(fuentesConexion),
+        configurado: algunaLineaConfigurada(fuentesConexion),
         calidad: estado.quality,
         pausado: estado.paused,
         motivoPausa: estado.pausedReason,
@@ -458,7 +514,7 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
       // Para la lista de "primeros pasos" del inicio: que esta hecho y que no.
       primerosPasos: {
         proveedor: providerOf(settings.current()),
-        conectado: settings.isConfigured() && (wa.conectado?.() ?? true),
+        conectado: algunaLineaConectada(fuentesConexion),
         usuarios,
         plantillas: plantillas.length,
         contactos: contactos.total,
@@ -666,8 +722,11 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   });
 
   app.post('/admin/templates/sync', async () => {
-    const templates = await syncTemplates(wa, repos);
-    return { synced: templates.length, templates };
+    // Con la principal por QR y una línea de API, a Meta se le pregunta por la
+    // línea: la conexión de QR solo devolvería el catálogo interno del sistema.
+    const deMeta = await clienteDeMeta({ settings, wa, lineas: deps.lineas, registro: deps.registroClientes }).catch(() => null);
+    const templates = deMeta ? await syncTemplates(deMeta, repos, { marcarAusentes: true }) : await syncTemplates(wa, repos);
+    return { synced: templates.length, templates, deMeta: Boolean(deMeta) };
   });
 
   app.post('/admin/templates/push', async (request, reply) => {
@@ -912,6 +971,8 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
     const body = z.object({ phone: phoneSchema }).parse(request.body);
     const contacto = await repos.contacts.upsertFromInbound(body.phone);
     await repos.contacts.setOptOut(body.phone);
+    // Si el cliente lo había pedido por WhatsApp, su solicitud queda atendida (antes que lo lento de abajo).
+    await repos.privacidad?.atender(contacto.phone, 'baja', request.usuario?.nombre || request.usuario?.usuario || null, 'baja').catch(() => 0);
     // Si se le estaba pidiendo la ubicacion, el reparto deja de insistirle y
     // GSG se entera (la baja la da el equipo, no el cliente escribiendo BAJA).
     await atenderRespuestaDeRuta({ repos, gsg: deps.gsg ?? crearPuertoEnEspera(), salud: deps.salud }, contacto, { baja: true }).catch(() => undefined);

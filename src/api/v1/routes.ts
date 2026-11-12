@@ -24,6 +24,7 @@ import type { Sender, SendOutcome } from '../../outbound/sender.js';
 import type { OutboundQueue } from '../../outbound/queue.js';
 import { providerOf, type SettingsService } from '../../settings/service.js';
 import type { WhatsAppClient } from '../../whatsapp/client.js';
+import { estadoConexion } from '../../whatsapp/estado-conexion.js';
 import type { Politica } from '../../salud/politica.js';
 import { politicaDesdeConfig } from '../../salud/politica.js';
 import { dailyCapFor } from '../../outbound/throttle.js';
@@ -42,10 +43,18 @@ import { ErrorApi, registrarCatalogoErrores } from '../errores.js';
 import type { ServicioPlan } from '../../plan/servicio.js';
 import type { ServicioVoz } from '../../voz/servicio.js';
 import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/media.js';
-import { MAX_BYTES_ADJUNTO, tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
+import { payloadExterno } from '../../util/payload-externo.js';
+import { tipoDeAdjuntoSaliente } from '../../admin/chat-routes.js';
+import { obtenerMedia } from './media-saliente.js';
+import { archivoDeMensaje } from './archivos-gsg.js';
 import { crearIdempotencia } from './idempotencia.js';
+import { entregaDelMensaje, type EntregaDelMensaje } from '../../whatsapp/estado-entrega.js';
+import { camposDeEntrega, entregasDelHilo } from './entrega-mensajes.js';
 
 export interface ApiV1Deps {
+  /** Las lineas de WhatsApp: `/estado` dice cada una y «conectado» = queda alguna viva. */
+  lineas?: import('../../whatsapp/lineas.js').ServicioLineas;
+  registroClientes?: import('../../whatsapp/registro.js').RegistroClientes;
   /**
    * La clave de `number_state` del numero vigente (src/salud/numero.ts). Tiene
    * que ser la misma que usa el monitor de salud: si no, la pantalla ensena las
@@ -69,6 +78,8 @@ export interface ApiV1Deps {
   plan?: ServicioPlan;
   /** La voz del asistente (ver src/voz): `voz: true` en POST /mensajes manda el texto como nota de voz. Sin ella, sale por escrito y se dice. */
   voz?: ServicioVoz;
+  /** Para el `archivo.url` de cada mensaje con foto, video o audio en el hilo (ver archivos-gsg.ts). Sin esto, el hilo sale sin enlaces. */
+  archivos?: { publicBase: string; secreto: string };
   /** Donde se guardan los ficheros que llegan por URL (`media`), para que el chat los pinte. */
   mediaDir?: string;
   /** Con que se bajan los ficheros de `media.url`. Para pruebas. */
@@ -77,7 +88,7 @@ export interface ApiV1Deps {
 }
 
 /** Los tipos de fichero con nombres en espanol (y en ingles, por si acaso). */
-const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
+export const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
   imagen: 'image',
   foto: 'image',
   image: 'image',
@@ -89,9 +100,18 @@ const TIPOS_MEDIA: Record<string, 'image' | 'video' | 'audio' | 'document'> = {
   file: 'document',
 };
 
-const mediaSchema = z.object({
-  /** De donde se baja el fichero (http o https). */
-  url: z.string().trim().url().max(2000),
+/** Un archivo de 16 MB en base64 pesa ~21,4 MB: el limite general de 4 MB no alcanza para las rutas que lo reciben. */
+export const LIMITE_CUERPO_CON_ARCHIVO = 24 * 1024 * 1024;
+
+export const mediaSchema = z.object({
+  /** De donde se baja el fichero (http o https). Una de dos: `url` o `base64`. */
+  url: z.string().trim().url().max(2000).optional(),
+  /**
+   * El fichero mismo, en base64, dentro del JSON (con o sin el prefijo
+   * `data:image/jpeg;base64,`). Para quien no tiene una direccion publica.
+   * Hasta 16 MB ya decodificado.
+   */
+  base64: z.string().max(23_000_000).optional(),
   /** imagen | video | audio | documento. Sin el, se deduce del tipo del fichero. */
   tipo: z.string().trim().toLowerCase().max(20).optional(),
   caption: z.string().max(1024).optional(),
@@ -99,7 +119,7 @@ const mediaSchema = z.object({
   nombre: z.string().trim().max(200).optional(),
   /** Un audio como nota de voz (con la onda y el play). */
   voz: z.boolean().optional(),
-});
+}).refine((m) => Boolean(m.url) !== Boolean(m.base64), { message: 'media lleva url o base64 (una de las dos)' });
 
 const telefonoSchema = z.string().min(6).max(30).transform((v) => normalizePhone(v));
 
@@ -142,32 +162,29 @@ const mensajeSchema = z
     message: 'hace falta texto, plantilla, ubicacion, pedirUbicacion o media',
   });
 
-/** Baja el fichero de `media.url`: como mucho 16 MB, y en 30 s. */
-async function bajarMedia(url: string, fetchImpl: typeof fetch): Promise<{ ok: true; datos: Buffer; mimeType: string } | { ok: false; error: string }> {
-  if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'media.url tiene que empezar por http:// o https://' };
-  const controlador = new AbortController();
-  const temporizador = setTimeout(() => controlador.abort(), 30_000);
-  try {
-    const r = await fetchImpl(url, { signal: controlador.signal, redirect: 'follow' });
-    if (!r.ok) return { ok: false, error: `no se pudo bajar media.url: respondio ${r.status}` };
-    const largo = Number(r.headers.get('content-length') ?? 0);
-    if (largo > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
-    const datos = Buffer.from(await r.arrayBuffer());
-    if (!datos.length) return { ok: false, error: 'media.url devolvio un fichero vacio' };
-    if (datos.length > MAX_BYTES_ADJUNTO) return { ok: false, error: 'WhatsApp no acepta ficheros de mas de 16 MB' };
-    const mimeType = (r.headers.get('content-type') ?? 'application/octet-stream').split(';')[0]!.trim().toLowerCase();
-    return { ok: true, datos, mimeType };
-  } catch (error) {
-    const abortado = error instanceof Error && error.name === 'AbortError';
-    return { ok: false, error: abortado ? 'media.url tardo mas de 30 s en responder' : `no se pudo bajar media.url: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    clearTimeout(temporizador);
-  }
-}
-
 /** Lo que devuelve un envio, con nombres que no cambian. */
 export function respuestaDeEnvio(outcome: SendOutcome) {
-  if (outcome.ok) return { codigo: 200, cuerpo: { ok: true, estado: 'enviado', mensajeId: outcome.wamid, entregaId: outcome.deliveryId } };
+  // Un comando («proceder cambio de ubicación»): no salió al cliente; se devuelve lo que hizo.
+  if (outcome.ok && outcome.comando) {
+    const { nombre, ...resultado } = outcome.comando;
+    return { codigo: 200, cuerpo: { ok: true, estado: 'comando', mensajeId: outcome.wamid, entregaId: null, comando: { nombre, ...resultado } } };
+  }
+  // `estado: 'enviado'` se queda por compatibilidad: quiere decir que el proveedor lo ACEPTO.
+  // Si llego al WhatsApp del cliente lo dicen `llegoAWhatsapp` y `entrega` (ver src/whatsapp/estado-entrega.ts):
+  // al enviar todavia no se sabe; la confirmacion llega despues por el evento `mensaje.estado` y en el historial.
+  if (outcome.ok) {
+    return {
+      codigo: 200,
+      cuerpo: {
+        ok: true,
+        estado: 'enviado',
+        mensajeId: outcome.wamid,
+        entregaId: outcome.deliveryId,
+        llegoAWhatsapp: null,
+        entrega: entregaAlEnviar(),
+      },
+    };
+  }
   if (outcome.blocked) {
     return {
       codigo: 202,
@@ -178,10 +195,37 @@ export function respuestaDeEnvio(outcome: SendOutcome) {
         motivo: outcome.reason,
         reintentarEnMs: outcome.retryAfterMs ?? null,
         entregaId: outcome.deliveryId,
+        llegoAWhatsapp: false,
+        entrega: entregaFallida(outcome.code, `${outcome.code}: ${outcome.reason}`),
       },
     };
   }
-  return { codigo: 502, cuerpo: { ok: false, estado: 'error', error: outcome.error, reintentable: outcome.retryable, entregaId: outcome.deliveryId } };
+  // Sin respuesta del proveedor no se sabe si salio: decir «no llego» seria mentir.
+  return {
+    codigo: 502,
+    cuerpo: {
+      ok: false,
+      estado: 'error',
+      error: outcome.error,
+      reintentable: outcome.retryable,
+      entregaId: outcome.deliveryId,
+      llegoAWhatsapp: outcome.incierto ? null : false,
+      entrega: outcome.incierto
+        ? { llegoAWhatsapp: null, estado: 'sin_confirmar' as const, descripcion: 'No se sabe si salió: WhatsApp no respondió. Revisa el historial antes de volver a mandarlo, para no duplicarlo.', minutosSinConfirmar: 0, error: null }
+        : entregaFallida(outcome.code ?? null, outcome.error),
+    },
+  };
+}
+
+/** Recien aceptado por el proveedor: todavia sin confirmacion de WhatsApp. */
+function entregaAlEnviar(): EntregaDelMensaje {
+  const e = entregaDelMensaje({ direction: 'out', status: null, createdAt: new Date() });
+  return { ...e!, descripcion: `${e!.descripcion} La confirmación llega con el evento mensaje.estado y en el historial.` };
+}
+
+/** No salio o WhatsApp lo rechazo: con el porque explicado. */
+function entregaFallida(codigo: string | null, titulo: string | null): EntregaDelMensaje {
+  return entregaDelMensaje({ direction: 'out', status: 'failed' }, { code: codigo, title: titulo })!;
 }
 
 const contactoHaciaFuera = (c: { id: string; phone: string; name: string | null; optInAt: Date | null; optInSource: string | null; optOutAt: Date | null; lastInboundAt: Date | null }) => ({
@@ -261,11 +305,16 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   app.get('/api/v1/estado', { config: { permiso: 'estado:leer' } }, async () => {
     const ahora = new Date();
     const estado = await repos.numberState.get(phoneNumberId());
-    const configurado = settings.isConfigured();
+    // Con la principal caida y otra linea viva SI se puede escribir: cada
+    // cliente sale por su linea (o, si la suya cayo, por otra viva). Antes
+    // `conectado` miraba solo la principal y el otro sistema dejaba de escribir.
+    const conexion = await estadoConexion({ settings, wa, registro: deps.registroClientes ?? null, preferida: deps.lineas?.preferida ? () => deps.lineas!.preferida!() : null });
     return {
       proveedor: providerOf(settings.current()),
-      configurado,
-      conectado: configurado && (wa.conectado?.() ?? true),
+      configurado: conexion.configurado,
+      conectado: conexion.conectado,
+      principalConectada: conexion.principalConectada,
+      lineas: conexion.lineas,
       numero: {
         calidad: estado.quality,
         nivel: estado.nivel ?? 'verde',
@@ -286,7 +335,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   // Un reintento del otro sistema con la misma Idempotency-Key no envia dos veces. Ver idempotencia.ts.
   const idempotencia = crearIdempotencia();
 
-  app.post('/api/v1/mensajes', { config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
+  app.post('/api/v1/mensajes', { bodyLimit: LIMITE_CUERPO_CON_ARCHIVO, config: { permiso: 'mensajes:enviar' }, preHandler: idempotencia.preHandler, onSend: idempotencia.onSend }, async (request, reply) => {
     const body = mensajeSchema.parse(request.body ?? {});
     const phone = body.telefono;
     if (fueraDeAlcance(request.usuario, phone)) return reply.code(403).send(ERROR_ALCANCE);
@@ -315,7 +364,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
     } else if (body.media) {
       const kindPedido = body.media.tipo ? TIPOS_MEDIA[body.media.tipo] : undefined;
       if (body.media.tipo && !kindPedido) return reply.code(400).send({ error: 'media.tipo tiene que ser imagen, video, audio o documento' });
-      const bajado = await bajarMedia(body.media.url, deps.fetchImpl ?? fetch);
+      const bajado = await obtenerMedia(body.media, kindPedido, deps.fetchImpl ?? fetch);
       if (!bajado.ok) return reply.code(400).send({ error: bajado.error });
       const kind = kindPedido ?? tipoDeAdjuntoSaliente(bajado.mimeType);
       // Un tipo generico (octet-stream) con nombre: la extension del nombre manda.
@@ -408,6 +457,8 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
   /** El hilo de un contacto: lo comparten la consulta por telefono y la consulta por tracking. */
   const hiloDe = async (contact: NonNullable<Awaited<ReturnType<typeof repos.contacts.getByPhone>>>, q: z.infer<typeof hiloSchema>) => {
     const messages = await repos.messages.listMessages(contact.id, q.limite, q.antesDe);
+    // Si cada saliente llego al WhatsApp del cliente: igual que el historial de GSG.
+    const entregas = await entregasDelHilo(repos, contact.phone, messages);
     const ventanaAbierta = Boolean(contact.lastInboundAt && Date.now() - contact.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
     const puedeEscribir = (ventanaAbierta || !ventanaObliga()) && !contact.optOutAt;
     return {
@@ -420,7 +471,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           ? null
           : 'la ventana de 24 h esta cerrada: solo se puede enviar una plantilla',
       mensajes: messages.map((m) => {
-        const p = (m.payload ?? {}) as { origen?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; media?: { voz?: unknown } };
+        const p = (m.payload ?? {}) as { origen?: unknown; textoFijo?: unknown; autorNombre?: unknown; transcripcion?: unknown; anuncio?: unknown; media?: { voz?: unknown } };
         return {
           id: m.id,
           mensajeId: m.wamid,
@@ -428,14 +479,16 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           tipo: m.kind,
           texto: m.body,
           // Quien lo mando (solo salientes): persona | ia | sistema. Y lo que dijo en una nota de voz (solo entrantes transcritos).
-          autor: m.direction === 'out' ? (p.origen === 'persona' || p.origen === 'ia' ? p.origen : 'sistema') : null,
+          autor: m.direction === 'out' ? (p.origen === 'persona' || (p.origen === 'ia' && !p.textoFijo) ? p.origen : 'sistema') : null,
           autorNombre: m.direction === 'out' && typeof p.autorNombre === 'string' ? p.autorNombre : null,
           transcripcion: typeof p.transcripcion === 'string' ? p.transcripcion : null,
           anuncio: p.anuncio && typeof p.anuncio === 'object' ? p.anuncio : null,
           voz: p.media?.voz === true,
-          datos: m.payload,
+          archivo: deps.archivos ? archivoDeMensaje(m, deps.archivos) : null,
+          datos: payloadExterno(m.payload),
           estado: m.status,
           fecha: m.createdAt,
+          ...camposDeEntrega(entregas, m),
         };
       }),
       hayMas: messages.length === q.limite,

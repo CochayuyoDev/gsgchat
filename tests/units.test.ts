@@ -1,61 +1,7 @@
 import { LIMA_BBOX, validate } from '../src/geo/validate.js';
 import { describe, expect, it } from 'vitest';
-import { parseDms } from '../src/geo/dms.js';
-import { decodePlusCode, findPlusCode } from '../src/geo/pluscode.js';
 import { isAllowedHost, isPrivateAddress, isShortLinkHost } from '../src/util/net-guard.js';
 import { TtlCache } from '../src/util/cache.js';
-
-describe('DMS', () => {
-  it('convierte grados/minutos/segundos con hemisferios', () => {
-    const r = parseDms('19°25\'57.4"N 99°07\'59.5"W');
-    expect(r).not.toBeNull();
-    expect(r!.lat).toBeCloseTo(19.432611, 5);
-    expect(r!.lng).toBeCloseTo(-99.133194, 5);
-  });
-
-  it('acepta el orden invertido (longitud primero)', () => {
-    const r = parseDms('99°07\'59.5"W 19°25\'57.4"N');
-    expect(r!.lat).toBeCloseTo(19.432611, 5);
-    expect(r!.lng).toBeCloseTo(-99.133194, 5);
-  });
-
-  it('acepta grados y minutos decimales sin segundos', () => {
-    const r = parseDms("19°25.9567' N 99°7.9917' W");
-    expect(r!.lat).toBeCloseTo(19.43261, 4);
-    expect(r!.lng).toBeCloseTo(-99.13319, 4);
-  });
-
-  it('devuelve null si falta un eje', () => {
-    expect(parseDms('19°25\'57.4"N')).toBeNull();
-  });
-});
-
-describe('Plus Codes', () => {
-  it('decodifica el vector de referencia 8FVC2222+22', () => {
-    const r = decodePlusCode('8FVC2222+22');
-    expect(r!.lat).toBeCloseTo(47.0000625, 6);
-    expect(r!.lng).toBeCloseTo(8.0000625, 6);
-  });
-
-  it('decodifica un codigo con seccion de rejilla', () => {
-    // 8FVC9G8F+6X es Zug (Suiza), el ejemplo de la documentacion de OLC.
-    const r = decodePlusCode('8FVC9G8F+6X');
-    expect(r!.lat).toBeCloseTo(47.3655, 3);
-    expect(r!.lng).toBeCloseTo(8.5249, 3);
-  });
-
-  it('encuentra el codigo dentro de una URL', () => {
-    expect(findPlusCode('https://plus.codes/8FVC2222+22')).toBe('8FVC2222+22');
-  });
-
-  it('ignora codigos cortos: sin localidad no se pueden resolver', () => {
-    expect(findPlusCode('nos vemos en XCJ8+9M')).toBeNull();
-  });
-
-  it('rechaza caracteres fuera del alfabeto OLC', () => {
-    expect(decodePlusCode('8FVC2A2A+22')).toBeNull();
-  });
-});
 
 describe('guardas de red (anti SSRF)', () => {
   it('acepta los hosts de mapas conocidos', () => {

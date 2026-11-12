@@ -89,6 +89,17 @@ export const MEXICO_BBOX: BoundingBox = {
  * falso rechazo se lo come el cliente que comparte su ubicacion y no entiende
  * por que no se la aceptan.
  */
+/**
+ * Peru continental con margen (como GSG, 26/10): donde tiene sentido una
+ * coordenada de un cliente. Lo que caiga fuera no es su casa.
+ */
+export const PERU_BBOX: BoundingBox = {
+  minLat: -18.5,
+  maxLat: 0,
+  minLng: -81.5,
+  maxLng: -68.5,
+};
+
 export const LIMA_BBOX: BoundingBox = {
   minLat: -12.6,
   maxLat: -11.5,

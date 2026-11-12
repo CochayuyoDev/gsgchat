@@ -27,6 +27,7 @@
  */
 
 import { z } from 'zod';
+import { ETIQUETAS as ETIQUETAS_GUARDADOS, ETIQUETAS_ANTERIORES } from '../archive/clasificar.js';
 import { acortar, def, errorDe, ok, telefono, telefonoADigitos, texto, type Accion, type ContextoAccion, type Preparado, type ResultadoAccion, type TipoAccion } from './acciones-base.js';
 import { ACCIONES_PANEL, PREPARAR_DE_SIEMPRE } from './acciones-panel.js';
 import { ACCIONES_MENSAJES } from './acciones-mensajes.js';
@@ -419,7 +420,7 @@ const ACCIONES_DE_SIEMPRE: Accion[] = [
   def({
     nombre: 'guardados.buscar',
     tipo: 'consulta',
-    descripcion: 'Busca en las conversaciones guardadas (las ya cerradas): por lo que se dijo, por etiqueta (reclamo, entrega, cancelacion, cambio, pago, motorizado, consulta, venta, sin_respuesta, otro), por pedido, por cliente o teléfono, y por fechas. Devuelve el resumen de cada una.',
+    descripcion: `Busca en las conversaciones guardadas (las ya cerradas): por lo que se dijo, por etiqueta (${ETIQUETAS_GUARDADOS.join(', ')}; las guardadas antes pueden tener ${ETIQUETAS_ANTERIORES.join(', ')}), por pedido, por cliente o teléfono, y por fechas. Devuelve el resumen de cada una.`,
     parametros: 'texto (opcional: palabras que se dijeron), etiqueta (opcional), pedido (opcional), q (opcional: nombre o teléfono), desde y hasta (opcionales, AAAA-MM-DD)',
     ejemplo: { orden: '¿quién se quejó de la demora la semana pasada?', accion: { accion: 'guardados.buscar', texto: 'demora', etiqueta: 'reclamo', desde: '2026-09-14', hasta: '2026-09-20' } },
     schema: z.object({

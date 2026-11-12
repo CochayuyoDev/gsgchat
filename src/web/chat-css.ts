@@ -32,8 +32,9 @@ export const CHAT_CSS = `
      bloque de "no se puede escribir") diciendo casi lo mismo. */
   .aviso { padding: 9px 14px; font-size: 13.5px; text-align: center; line-height: 1.35; flex: none; color: #fff; }
   .aviso a { color: inherit; text-decoration: underline; }
-  .aviso.demo { background: var(--ambar); }
-  .aviso.roto { background: var(--rojo); }
+  /* Teñidos, no rellenos (11/11): se lee el aviso sin que la pantalla grite. */
+  .aviso.demo { background: var(--ambar-suave); color: var(--ambar); border-bottom: 1px solid color-mix(in srgb, var(--ambar) 20%, transparent); }
+  .aviso.roto { background: var(--rojo-suave); color: var(--rojo); border-bottom: 1px solid color-mix(in srgb, var(--rojo) 20%, transparent); font-weight: 500; }
 
   /* -------------------------------------------------------- lista de chats */
   .side { background: var(--panel); border-right: 1px solid var(--line);
@@ -47,9 +48,7 @@ export const CHAT_CSS = `
   .search input { width: 100%; padding: 9px 12px; border: 0; border-radius: var(--radio-sm);
     background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
   .search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .filtros { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
-  .filtros .f { flex: none; min-height: 32px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-  .filtros .f.activo { background: var(--accent); border-color: var(--accent); color: var(--primario-texto); }
+
   .chats { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .chat { display: flex; gap: 13px; padding: 10px 14px; cursor: pointer;
     border-bottom: 1px solid var(--line);  position: relative; }
@@ -73,7 +72,12 @@ export const CHAT_CSS = `
   .chat .top { display: flex; align-items: baseline; gap: 8px; }
   .chat .name { font-weight: 600; font-size: 15px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat .when { font-size: 11.5px; color: var(--muted); flex: none; }
-  .chat .last { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; padding-right: 34px; }
+  /* Segunda linea: el ultimo mensaje (cede sitio), la etiqueta y los no leidos. El nombre se queda entero arriba. */
+  .chat .last { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted); margin-top: 2px; padding-right: 34px; min-width: 0; }
+  .chat .last .texto { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* La etiqueta no se encoge (se lee entera); el que cede sitio es el texto del mensaje. */
+  .chat .last .etq { flex: 0 0 auto; max-width: 58%; font-size: 11px; padding: 0 7px; }
+  .chat .last .badge { flex: none; }
   .chat .marcas { display: inline-flex; gap: 4px; align-items: center; color: var(--muted); font-size: 12px; }
   .badge { background: var(--badge); color: var(--primario-texto); border-radius: 999px; font-size: 11.5px;
     font-weight: 700; padding: 1px 7px; margin-left: 6px; }
@@ -93,16 +97,212 @@ export const CHAT_CSS = `
   .thread header .sub .t-pedido:hover { text-decoration: underline; }
   .thread header .sub .t-marca { font-size: 12px; }
 
+  /* La etiqueta que puso la IA, junto al nombre (bandeja y cabecera del hilo). */
+  .etq { flex: none; display: inline-block; max-width: 46%; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; background: var(--gris-suave); color: var(--gris); }
+  .etq.rojo { background: var(--rojo-suave); color: var(--rojo); }
+  .etq.ambar { background: var(--ambar-suave); color: var(--ambar); }
+  .etq.azul { background: var(--azul-suave); color: var(--azul); }
+  .etq.verde { background: var(--verde-suave); color: var(--verde); }
+  /* De otro dia o sin clasificar: se ve, pero no compite con la de hoy. */
+  .etq.vieja, .etq.sin { opacity: .7; font-weight: 500; }
+  .etq.sin { border: 1px dashed currentColor; background: transparent; }
+  /* Nombre y etiqueta en la misma linea; si no caben (telefono, nombre largo) la etiqueta baja, el nombre nunca desaparece. */
+  .thread header .t-nombre { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+  .thread header .t-nombre .name { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+  .thread header .t-nombre #t-etiqueta { display: flex; min-width: 0; max-width: 100%; }
+  .thread header .t-nombre #t-etiqueta:empty { display: none; }
+  .thread header .t-nombre .etq { max-width: 100%; }
+  /* La etiqueta de la cabecera se cambia a mano: es un boton. */
+  .etq-boton, .etq-poner { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+  .etq-boton .sel-flecha { font-size: 11px; color: var(--muted); }
+  .etq-boton:hover .etq, .etq-boton:focus-visible .etq { box-shadow: 0 0 0 2px var(--primario-suave); }
+  .etq-poner { padding: 1px 9px; border-radius: 999px; border: 1px dashed var(--line); color: var(--muted); font-size: 11.5px; }
+  .etq-poner:hover, .etq-poner:focus-visible { border-color: var(--accent); color: var(--accent); }
+  .etq .etq-mano { margin-right: 3px; font-size: 10px; opacity: .85; }
+
+  /* El avance del etiquetado, bajo los filtros. */
+  .etiquetado { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  /* El texto ocupa su fila entera; los botones van debajo. */
+  .etiquetado { flex-wrap: wrap; flex-shrink: 0; }
+  .etiquetado .que { flex: 1 1 100%; min-width: 0; }
+  .etiquetado.error { color: var(--rojo); }
+  .etiquetado .barra { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 4px; }
+  .etiquetado .barra i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .etiquetado button { flex: none; border: 0; background: none; color: inherit; cursor: pointer; font: inherit; padding: 2px 6px; }
+
+  /* Lo de arriba de la lista no se encoge: la que cede sitio es la lista. */
+  .side .search, .side .filtros { flex-shrink: 0; }
+  /* El boton del lote, en la cabecera de la lista. */
+  .etiquetar-boton { flex: none; min-height: 30px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--accent); background: transparent; color: var(--accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+
+  /* Los dos desplegables de filtro, uno al lado del otro. */
+  .selectores { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  .selector { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 10px 4px 12px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+  .selector:hover { border-color: var(--muted); }
+  .selector[aria-expanded="true"], .selector:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--primario-suave); }
+  .selector.activo { border-color: var(--accent); }
+  .selector .sel-que { flex: none; font-size: 11.5px; color: var(--muted); }
+  .selector .sel-valor { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .selector.activo .sel-valor { color: var(--accent); }
+  .selector .sel-flecha { flex: none; color: var(--muted); font-size: 12px; }
+
+  /* La lista que se abre: todas las opciones a la vista, con color y cuantos chats. */
+  .lista-filtro { position: fixed; z-index: 60; overflow-y: auto; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 12px 32px rgba(0, 0, 0, .35); }
+  .lista-filtro .lf-titulo { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--muted); }
+  .lista-filtro .lf-op { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+  .lista-filtro .lf-op:hover, .lista-filtro .lf-op:focus-visible { background: var(--primario-suave); outline: none; }
+  .lista-filtro .lf-op.activo { color: var(--accent); font-weight: 600; }
+  .lista-filtro .lf-marca { flex: none; width: 14px; font-size: 12px; color: var(--accent); }
+  .lista-filtro .lf-texto { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; line-height: 1.3; }
+  .lista-filtro .lf-n { flex: none; min-width: 26px; padding: 1px 8px; border-radius: 999px; background: var(--gris-suave); color: inherit; font-size: 12px; font-weight: 600; text-align: center; }
+  .lista-filtro .lf-op.vacia { color: var(--texto-suave); }
+  .lista-filtro .lf-op.vacia .lf-n { background: transparent; font-weight: 400; }
+  .punto { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--gris); }
+  .punto.rojo { background: var(--rojo); }
+  .punto.ambar { background: var(--ambar); }
+  .punto.azul { background: var(--azul); }
+  .punto.verde { background: var(--verde); }
+  .punto.sin { background: transparent; border: 1px dashed currentColor; }
+  .punto.hueco { background: transparent; border: 1px solid currentColor; }
+  .etiquetar-boton:hover:not(:disabled) { background: var(--accent); color: var(--primario-texto); }
+  .etiquetar-boton:disabled { opacity: .6; cursor: progress; }
+  #etiquetar.girando { animation: etiquetando 1.2s linear infinite; }
+  @keyframes etiquetando { 50% { opacity: .55; } }
+  @media (prefers-reduced-motion: reduce) { #etiquetar.girando { animation: none; } }
+  .etiquetado .ver-chats { border: 1px solid currentColor !important; border-radius: 999px; padding: 3px 10px !important; font-size: 12px; }
+
+  /* Los chats del lote, uno por fila, con su estado de analisis y de envio a GSG. */
+  .etiquetado-chats { flex: 0 1 auto; min-height: 0; max-height: 40vh; overflow-y: auto; border-bottom: 1px solid var(--line); background: var(--superficie, transparent); }
+  .etiquetado-chats .nada { padding: 10px 12px; font-size: 12.5px; color: var(--muted); }
+  .etiquetado-chats .nada.error { color: var(--rojo); }
+  .chat-lote { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%; text-align: left; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
+  .chat-lote:hover { background: var(--primario-suave); }
+  .chat-lote .quien { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-lote .tel { color: var(--muted); font-size: 11.5px; }
+  .chat-lote .estados { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+  .chat-lote .est { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--gris-suave); color: var(--gris); white-space: nowrap; }
+  .chat-lote .est-clasificada { background: var(--verde-suave); color: var(--verde); }
+  .chat-lote .est-error { background: var(--rojo-suave); color: var(--rojo); }
+  .chat-lote .est-reutilizada { background: var(--gris-suave); color: var(--gris); }
+  .chat-lote .est-pendiente { background: var(--ambar-suave); color: var(--ambar); }
+  .chat-lote .detalle { color: var(--rojo); font-size: 11.5px; overflow-wrap: anywhere; }
+
+  /* El editor del catalogo: una tabla de tres campos por etiqueta. */
+  .catalogo-dlg { width: min(920px, 96vw); max-height: 90vh; overflow-y: auto; }
+  .catalogo-dlg h3 { margin: 0 0 6px; }
+  .catalogo-dlg .cat-tabla { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+  .catalogo-dlg .cat-fila { display: grid; grid-template-columns: minmax(120px, 1.1fr) minmax(110px, 1fr) minmax(160px, 2.4fr) 32px; gap: 6px; align-items: center; }
+  .catalogo-dlg .cat-cab { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .catalogo-dlg .cat-fila input { width: 100%; min-width: 0; font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
+  .catalogo-dlg .cat-fila input[readonly] { opacity: .7; }
+  .catalogo-dlg .quitar { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; }
+  @media (max-width: 640px) {
+    /* En el telefono, cada etiqueta es una tarjeta: codigo, nombre y descripcion uno bajo otro, con su ✕ arriba. */
+    .catalogo-dlg .cat-fila { grid-template-columns: 1fr 32px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+    .catalogo-dlg .cat-fila input { grid-column: 1; }
+    .catalogo-dlg .cat-fila > :last-child { grid-column: 2; grid-row: 1; }
+    .catalogo-dlg .cat-cab { display: none; }
+  }
+
+  /* «Probar la IA»: el banco de conversaciones y la prueba de una a mano. */
+  .prueba-dlg { width: min(760px, 96vw); max-height: 90vh; display: flex; flex-direction: column; padding: 0 !important; overflow: hidden; }
+  .prueba-dlg .pr-cab { padding: 18px 22px 0; }
+  .prueba-dlg .pr-cab h3 { margin: 0 0 4px; }
+  .prueba-dlg .pr-cab .sub { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; }
+  .prueba-dlg .pr-pestanas { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding: 0 18px; }
+  .prueba-dlg .pr-pestanas button { border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; padding: 9px 12px !important; font-size: 13.5px !important; font-weight: 600; color: var(--muted) !important; }
+  .prueba-dlg .pr-pestanas button[aria-selected="true"] { color: var(--accent) !important; border-bottom-color: var(--accent) !important; }
+  .prueba-dlg .pr-cuerpo { padding: 16px 22px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+  .prueba-dlg .pr-pie { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 22px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .prueba-dlg .pr-intro { font-size: 13.5px; color: var(--muted); line-height: 1.5; margin: 0 0 14px; }
+  .prueba-dlg .pr-avance { display: flex; flex-direction: column; gap: 8px; padding: 18px 0; text-align: center; font-size: 14px; }
+  .prueba-dlg .pr-avance .barra { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .prueba-dlg .pr-avance .barra i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .prueba-dlg .pr-nota { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 12px; background: var(--gris-suave); margin-bottom: 14px; }
+  .prueba-dlg .pr-nota .cifra { font-size: 30px; font-weight: 700; line-height: 1; flex: none; }
+  .prueba-dlg .pr-nota .que { font-size: 13.5px; line-height: 1.45; }
+  .prueba-dlg .pr-nota .que b { display: block; font-size: 15px; margin-bottom: 2px; }
+  .prueba-dlg .pr-nota.verde { background: var(--verde-suave); } .prueba-dlg .pr-nota.verde .cifra { color: var(--verde); }
+  .prueba-dlg .pr-nota.ambar { background: var(--ambar-suave); } .prueba-dlg .pr-nota.ambar .cifra { color: var(--ambar); }
+  .prueba-dlg .pr-nota.rojo { background: var(--rojo-suave); } .prueba-dlg .pr-nota.rojo .cifra { color: var(--rojo); }
+  .prueba-dlg .pr-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .prueba-dlg .pr-kpi { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 12px; color: var(--muted); }
+  .prueba-dlg .pr-kpi b { display: block; font-size: 18px; color: var(--text); }
+  .prueba-dlg .pr-kpi.malo b { color: var(--rojo); }
+  .prueba-dlg h4 { margin: 14px 0 8px; font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--muted); }
+  .prueba-dlg .pr-etiquetas { display: flex; flex-wrap: wrap; gap: 6px; }
+  .prueba-dlg .pr-etiquetas .pe { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 3px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+  .prueba-dlg .pr-etiquetas .pe .etq { max-width: none; }
+  .prueba-dlg .pr-etiquetas .pe .n { padding-right: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .prueba-dlg .pr-etiquetas .pe.falla { border-color: var(--rojo); }
+  .prueba-dlg .pr-etiquetas .pe.falla .n { color: var(--rojo); font-weight: 600; }
+  .prueba-dlg .pr-casos { display: flex; flex-direction: column; gap: 8px; }
+  .prueba-dlg .pr-caso { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  .prueba-dlg .pr-caso.mal { border-color: color-mix(in srgb, var(--rojo) 40%, var(--line)); background: color-mix(in srgb, var(--rojo-suave) 50%, transparent); }
+  .prueba-dlg .pr-caso.bien { border-color: color-mix(in srgb, var(--verde) 40%, var(--line)); background: color-mix(in srgb, var(--verde-suave) 50%, transparent); }
+  .prueba-dlg .pr-caso .t { font-weight: 600; margin-bottom: 6px; }
+  .prueba-dlg .pr-caso .comp { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; color: var(--muted); font-size: 12px; }
+  .prueba-dlg .pr-caso .comp .etq { max-width: none; }
+  .prueba-dlg .pr-caso summary { cursor: pointer; color: var(--accent); font-size: 12px; margin-top: 8px; width: max-content; }
+  .prueba-dlg .pr-conv { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .prueba-dlg .pr-conv .m { max-width: 85%; padding: 5px 9px; border-radius: 9px; font-size: 12.5px; line-height: 1.4; background: var(--theirs); border: 1px solid var(--line); align-self: flex-start; }
+  .prueba-dlg .pr-conv .m.cli { align-self: flex-end; background: var(--mine); border-color: transparent; }
+  .prueba-dlg .pr-conv .m.adj { font-style: italic; color: var(--muted); }
+  .prueba-dlg .pr-vacio { text-align: center; padding: 22px 8px; color: var(--muted); font-size: 13.5px; }
+  .prueba-dlg .pr-vacio b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+  .prueba-dlg .pr-error { color: var(--rojo); font-size: 13.5px; padding: 10px 12px; border-radius: 10px; background: var(--rojo-suave); }
+  .prueba-dlg .pr-error a { color: inherit; font-weight: 600; }
+  .prueba-dlg textarea { width: 100%; min-height: 170px; resize: vertical; font: inherit; font-size: 13.5px; line-height: 1.5; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); box-sizing: border-box; }
+  .prueba-dlg textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  .prueba-dlg .pr-guia { font-size: 12px; color: var(--muted); margin: 6px 0 12px; line-height: 1.5; }
+  .prueba-dlg .pr-guia code { background: var(--gris-suave); padding: 0 4px; border-radius: 4px; font-size: 11.5px; }
+  .prueba-dlg .pr-ejemplos { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .prueba-dlg .pr-ejemplos button { padding: 4px 10px !important; font-size: 12px !important; border-radius: 999px !important; }
+  .prueba-dlg .pr-resultado { margin-top: 14px; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line); font-size: 13.5px; line-height: 1.5; }
+  .prueba-dlg .pr-resultado .etq { font-size: 14px; padding: 3px 12px; max-width: none; }
+  .prueba-dlg .pr-resultado .desc { color: var(--muted); margin-top: 6px; }
+  .prueba-dlg .pr-conmutador { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; }
+  .prueba-dlg .pr-conmutador h4 { margin: 0; flex: 1; }
+  .prueba-dlg .pr-conmutador button { padding: 4px 10px !important; font-size: 12px !important; }
+  @media (max-width: 640px) {
+    .prueba-dlg .pr-kpis { grid-template-columns: 1fr; }
+    .prueba-dlg .pr-nota .cifra { font-size: 24px; }
+    .prueba-dlg .pr-cab, .prueba-dlg .pr-cuerpo, .prueba-dlg .pr-pie { padding-left: 16px; padding-right: 16px; }
+  }
+
   .ficha { position: absolute; top: 58px; right: 8px; width: min(360px, calc(100% - 16px)); max-height: calc(100% - 70px); overflow: auto; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra-2); z-index: 6; }
   .ficha-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--borde); }
   .ficha-cuerpo { padding: 10px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 10px; }
-  .ficha-cuerpo h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .02em; }
+  .ficha-cuerpo h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--texto-suave); text-transform: none; letter-spacing: 0; }
   .ficha-cuerpo .fila { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
   .ficha-cuerpo .pin-coords { font-family: ui-monospace, Consolas, monospace; user-select: all; }
   .ficha-cuerpo a.sm, .ficha-cuerpo button.sm { min-height: 34px; padding: 4px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: none; color: var(--texto); display: inline-flex; align-items: center; }
   .ficha-acciones { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .ficha-acciones a { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: var(--radio-sm); text-decoration: none; font-weight: 600; border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); }
   .ficha-acciones a.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); }
+  /* «Lo pidió el cliente»: la baja o borrar sus datos, arriba del todo y en rojo suave. */
+  .ficha-privacidad { padding: 10px 12px; border-radius: var(--radio-sm); background: var(--rojo-suave); border: 1px solid color-mix(in srgb, var(--rojo) 35%, transparent); display: grid; gap: 6px; }
+  .ficha-privacidad h4 { color: var(--rojo) !important; }
+  .priv-caso { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+  .priv-caso blockquote { flex: 1 1 100%; margin: 2px 0 0; padding: 6px 10px; border-left: 3px solid var(--rojo); background: var(--superficie); border-radius: 6px; font-size: 13px; color: var(--texto); overflow-wrap: anywhere; }
+  .ficha-cuerpo button.sm.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); font-weight: 600; }
+  .ficha-cuerpo button.sm.peligro { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); font-weight: 600; }
+  .ficha-cuerpo button.sm.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
+  .ficha-datos { padding-top: 10px; border-top: 1px dashed var(--borde); }
+  .chip-privacidad { flex: none; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--rojo-suave); color: var(--rojo); white-space: nowrap; }
+  .dlg button:disabled { opacity: .55; cursor: not-allowed; }
+  /* Chats → «Piden baja o borrar datos»: una tarjeta por cliente, con sus botones. */
+  .priv-lista-cab { padding: 10px 14px; font-size: 13px; color: var(--rojo); background: var(--rojo-suave); border-bottom: 1px solid var(--borde); }
+  .priv-tarjeta { display: grid; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--borde); }
+  .priv-quien { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .priv-botones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .priv-botones button { min-height: 34px; padding: 4px 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--texto); }
+  .priv-botones button.principal { background: var(--primario); color: var(--primario-texto); border-color: var(--primario); }
+  .priv-botones button.peligro { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); }
+  .priv-botones button.peligro:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
+  .priv-botones button:disabled { opacity: .55; cursor: wait; }
+  .dlg .borrar-avisar { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 13.5px; line-height: 1.4; cursor: pointer; }
+  .dlg .borrar-avisar input { width: auto; margin-top: 2px; flex: none; }
 
   .messages {
     flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -136,6 +336,7 @@ export const CHAT_CSS = `
   .msg.primero.out::before { right: -8px; background: var(--mine); clip-path: polygon(0 0, 100% 0, 0 100%); }
   .msg.primero.in::before { left: -8px; background: var(--theirs); clip-path: polygon(0 0, 100% 0, 100% 100%); }
   .msg a { color: var(--accent); }
+  .msg .quien { margin-right: 6px; font-size: 10px; opacity: .7; letter-spacing: .01em; }
   .msg .meta { float: right; margin: 8px -2px -4px 10px; font-size: 11px; color: var(--muted);
     white-space: nowrap; position: relative; top: 3px; display: inline-flex; align-items: center; gap: 4px; }
   .msg .tick { color: var(--muted); }
@@ -244,6 +445,19 @@ export const CHAT_CSS = `
   /* ubicacion que mando el cliente */
   .pin-cliente { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px; padding: 8px 10px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
   .pin-cliente .pin-titulo { font-weight: 600; font-size: 13px; }
+  .adjunto { display: block; margin: 2px 0 6px; max-width: min(320px, 100%); }
+  .adjunto-foto img, .adjunto-video video { display: block; width: 100%; max-height: 320px; object-fit: cover; border-radius: 8px; background: var(--borde); }  .adjunto-sticker img { display: block; width: 160px; max-width: 100%; height: auto; background: transparent; }
+  /* Nota de voz como en WhatsApp: play, onda, tiempo y velocidad */
+  .msg .adjunto-audio, .adjunto-audio { display: flex; align-items: center; gap: 8px; min-width: 230px; max-width: min(300px, 100%); padding: 4px 2px; font-size: 12.5px; font-weight: 500; }
+  .wa-a-play { flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; background: #00a884; color: #fff; cursor: pointer; position: relative; padding: 0; }
+  .wa-a-play::before { content: ''; position: absolute; left: 14px; top: 10px; border-style: solid; border-width: 8px 0 8px 13px; border-color: transparent transparent transparent #fff; }
+  .wa-audio.sonando .wa-a-play::before { left: 11px; top: 11px; width: 5px; height: 14px; border: 0; background: #fff; box-shadow: 8px 0 0 #fff; }
+  .wa-a-barra { flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; gap: 2px; cursor: pointer; }
+  .wa-a-barra b { flex: 1; min-width: 2px; border-radius: 2px; background: #b5bdc2; }
+  .wa-a-barra b.on { background: #00a884; }
+  .wa-a-t { flex: none; min-width: 34px; color: var(--texto-suave, #667781); font-variant-numeric: tabular-nums; }
+  .wa-a-vel { flex: none; border: 0; border-radius: 12px; background: rgba(0,0,0,.08); color: inherit; font: inherit; font-size: 11.5px; font-weight: 700; padding: 3px 7px; cursor: pointer; }
+  .wa-a-vel[hidden] { display: none; }
   .pin-cliente .pin-coords { font-family: ui-monospace, Consolas, monospace; font-size: 13px; user-select: all; }
   .pin-cliente .pin-acciones { display: flex; gap: 10px; align-items: center; font-size: 13px; }
   .pin-cliente .pin-copiar { border: 1px solid var(--borde); background: var(--superficie); border-radius: var(--radio-sm); padding: 4px 10px; font: inherit; font-size: 12.5px; cursor: pointer; min-height: 32px; color: var(--texto); }
@@ -252,7 +466,7 @@ export const CHAT_CSS = `
   .day {
     align-self: center; background: var(--panel); color: var(--muted); font-size: 12.5px;
     padding: 5px 12px; border-radius: 8px; margin: 14px 0 8px; position: sticky; top: 4px;
-    z-index: 2; box-shadow: var(--sombra); text-transform: uppercase;
+    z-index: 2; box-shadow: var(--sombra); text-transform: none;
     letter-spacing: .3px; font-weight: 500;
   }
   /* por que respondio el bot: nota interna, discreta, que el cliente no ve */
@@ -262,7 +476,7 @@ export const CHAT_CSS = `
     color: var(--muted); font-size: 11.5px; line-height: 1.35; text-align: center;
     display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 8px; overflow-wrap: anywhere;
   }
-  .decision-bot .decision-etq { font-weight: 600; text-transform: uppercase; letter-spacing: .3px; font-size: 10.5px; }
+  .decision-bot .decision-etq { font-weight: 600; text-transform: none; letter-spacing: .3px; font-size: 10.5px; }
   .decision-bot .decision-txt { flex-basis: 100%; }
   .decision-bot .decision-extra { flex-basis: 100%; font-style: italic; }
   .decision-bot .decision-hora { font-size: 10.5px; opacity: .8; }
@@ -344,7 +558,7 @@ export const CHAT_CSS = `
   .emojis { padding: 8px 12px 12px; }
   .emojis .buscador { width: 100%; padding: 8px 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm);
     background: var(--superficie); color: var(--texto); font: inherit; font-size: 13.5px; margin-bottom: 8px; }
-  .emojis h5 { margin: 6px 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+  .emojis h5 { margin: 6px 0 4px; font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 600; }
   .emojis .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 2px; }
   .emojis .rejilla button { border: 0; background: none; font-size: 22px; cursor: pointer; border-radius: var(--radio-sm);
     min-height: 38px; line-height: 1; }
@@ -359,6 +573,10 @@ export const CHAT_CSS = `
   /* Son botones con forma de pildora, no chips de estado: sin el punto del armazon. */
   .rapidas-barra .chip::before { display: none; }
   .rapidas-barra .chip.editar { color: var(--muted); border-style: dashed; text-decoration: none; }
+  /* Atajo de comando: lo ejecuta el sistema, no sale al cliente. Se distingue de las respuestas rápidas. */
+  .rapidas-barra .chip.comando { color: var(--accent); border-color: var(--line); background: var(--panel); }
+  .rapidas-barra .chip.comando.confirmar { color: #fff; background: var(--accent); border-color: var(--accent); }
+  .tipo-comando { font-style: normal; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--accent); margin-right: 4px; }
   .rapidas-barra.ocupada .chip { opacity: .5; pointer-events: none; }
 
   /* previa del adjunto que se va a mandar */
@@ -386,6 +604,12 @@ export const CHAT_CSS = `
   }
   .locked button.primary { background: var(--accent); color: var(--primario-texto); border-color: var(--accent); }
   .empty { flex: 1; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 40px; font-size: 15px; line-height: 1.6; }
+  /* La etiqueta de la linea (wsp-ali, wsp-kevin...): dice por que WhatsApp va o vino cada chat y cada mensaje. */
+  .linea-tag { display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; padding: 0 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; line-height: 17px; color: #fff; }
+  .meta .linea-tag { max-width: 90px; margin-right: 5px; opacity: .92; }
+  #linea-sel { flex: 0 0 auto; max-width: 150px; border-radius: 999px; padding: 4px 8px; font-size: 12px; font-weight: 700; color: #fff; border: 0; cursor: pointer; }
+  #linea-sel option { color: #111; background: #fff; }
+  .linea-nota { font-size: 11px; color: var(--ambar); padding: 2px 12px; }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
   .pill.ok { background: var(--verde-suave); color: var(--verde); }
   .pill.bad { background: var(--rojo-suave); color: var(--rojo); }
@@ -467,8 +691,7 @@ export const CHAT_CSS = `
     .msg { max-width: 85%; }
     .msg .estrella { left: 2px; top: -2px; }
     .msg.out .estrella { right: 2px; left: auto; }
-    .filtros { flex-wrap: nowrap; }
-    .rapidas-barra .chip { min-height: 36px; }
+      .rapidas-barra .chip { min-height: 36px; }
     .thread header { padding: 8px 10px; }
     .thread header .sub { white-space: normal; }
     .icon, .composer button, .filtros .f, .flotante button, .flotante a { min-height: 44px; }

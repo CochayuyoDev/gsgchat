@@ -42,6 +42,7 @@ import type { Monitor } from '../salud/monitor.js';
 import { ESTADOS_SOLICITUD_ABIERTA } from '../entregas/ubicacion-unica.js';
 import { horaEnPalabras, horarioEnPalabras } from '../entregas/textos.js';
 import { esperaDeEnvio, limpiarEsperasEnvio } from '../rutas/espera-envio.js';
+import { quePasoConSolicitud } from '../rutas/que-paso.js';
 import { alCambiarHorario, despertarMotorRutas } from '../rutas/despertador.js';
 
 export interface RutasRoutesDeps {
@@ -114,6 +115,8 @@ const VISTAS: Record<string, Partial<ConsultaSolicitudes>> = {
   derivados: { estado: 'derivado' },
   supervision: { estado: 'supervision' },
   requieren_persona: { requiereHumano: true },
+  // BAJA o «borren mis datos» (src/privacidad): lo atiende una persona desde Chats.
+  privacidad: { incidencias: ['pide_baja', 'pide_borrar_datos'] },
 };
 
 export const NOMBRES_VISTA: Record<keyof typeof VISTAS | string, string> = {
@@ -128,6 +131,7 @@ export const NOMBRES_VISTA: Record<keyof typeof VISTAS | string, string> = {
   derivados: 'Para el repartidor',
   supervision: 'Necesitan revisión',
   requieren_persona: 'Esperan a una persona',
+  privacidad: 'Piden baja o borrar datos',
 };
 
 const listaSchema = z.object({
@@ -137,6 +141,8 @@ const listaSchema = z.object({
   incidencia: z.enum(CODIGOS as [CodigoIncidencia, ...CodigoIncidencia[]]).optional(),
   requiereHumano: z.coerce.boolean().optional(),
   q: z.string().max(120).optional(),
+  creadoDesde: z.coerce.date().optional(),
+  creadoHasta: z.coerce.date().optional(),
   limit: z.coerce.number().int().positive().max(500).default(100),
   offset: z.coerce.number().int().nonnegative().default(0),
 });
@@ -333,6 +339,15 @@ export async function registerRutasRoutes(
         if (falta) return reply.code(400).send({ error: `La plantilla "${falta}" no esta en el registro.` });
       }
     }
+    // Lo mismo con la plantilla de cada recordatorio: tiene que existir y estar aprobada por Meta.
+    if (body.plantillasSeguimientos?.length) {
+      const registro = new Map((await repos.templates.list()).map((t) => [t.name, t] as const));
+      for (const nombre of body.plantillasSeguimientos) {
+        const t = registro.get(nombre);
+        if (!t) return reply.code(400).send({ error: `La plantilla "${nombre}" no esta en el registro. Pulsa «Traer el estado desde Meta».` });
+        if (t.status !== 'APPROVED') return reply.code(400).send({ error: `La plantilla "${nombre}" todavia no esta aprobada por Meta (estado: ${t.status}).` });
+      }
+    }
     // El horario se guarda donde vive la franja unica (ajustes generales), no
     // en la clave del reparto: si no, convivirian dos horarios y ganaria el
     // mas estricto sin decirlo.
@@ -471,8 +486,8 @@ export async function registerRutasRoutes(
 
   /** Cuantos hay en cada vista: son las tarjetas de arriba de la pantalla. */
   app.get('/admin/rutas/vistas', async (request) => {
-    const query = z.object({ loteId: z.string().optional() }).parse(request.query ?? {});
-    const grupos = await repos.rutas.resumenSolicitudes(query.loteId);
+    const query = z.object({ loteId: z.string().optional(), creadoDesde: z.coerce.date().optional(), creadoHasta: z.coerce.date().optional() }).parse(request.query ?? {});
+    const grupos = await repos.rutas.resumenSolicitudes(query.loteId, { creadoDesde: query.creadoDesde, creadoHasta: query.creadoHasta });
     const cifras: Record<string, number> = Object.fromEntries(Object.keys(VISTAS).map((nombre) => [nombre, 0]));
     const sumar = (nombre: string, n: number) => { cifras[nombre] = (cifras[nombre] ?? 0) + n; };
     for (const grupo of grupos) {
@@ -488,6 +503,7 @@ export async function registerRutasRoutes(
       if (grupo.estado === 'derivado') sumar('derivados', n);
       if (grupo.estado === 'supervision') sumar('supervision', n);
       if (grupo.requiereHumano) sumar('requieren_persona', n);
+      if (grupo.incidencia === 'pide_baja' || grupo.incidencia === 'pide_borrar_datos') sumar('privacidad', n);
     }
     return { cifras, nombres: NOMBRES_VISTA };
   });
@@ -503,6 +519,14 @@ export async function registerRutasRoutes(
       contacto: solicitud.contactId ? await repos.contacts.getById(solicitud.contactId) : null,
       incidencia: solicitud.incidencia ? INCIDENCIAS[solicitud.incidencia] : null,
     };
+  });
+
+  /** «Ver qué pasó con este pedido»: la historia y el porqué, en palabras. Solo lee. */
+  app.get<{ Params: { id: string } }>('/admin/rutas/solicitudes/:id/que-paso', async (request, reply) => {
+    const id = Number(request.params.id);
+    const solicitud = Number.isInteger(id) ? await repos.rutas.solicitud(id) : null;
+    if (!solicitud) return reply.code(404).send({ error: 'Ese cliente ya no está en la lista.' });
+    return { solicitud: { id: solicitud.id, nombre: solicitud.nombre, referencia: solicitud.referencia, telefono: solicitud.phone ?? solicitud.telefonoCrudo, estado: solicitud.estado }, ...(await quePasoConSolicitud(repos, solicitud)) };
   });
 
   /**
@@ -649,8 +673,9 @@ export async function registerRutasRoutes(
       estado: 'derivado',
       requiereHumano: true,
       asignadoA: body.asignadoA ?? solicitud.asignadoA,
-      incidencia: solicitud.incidencia ?? (solicitud.primeraRespuestaAt ? 'respondio_sin_ubicacion' : 'sin_respuesta'),
-      incidenciaDetalle: body.motivo ?? solicitud.incidenciaDetalle ?? 'derivada a mano por el operador',
+      // Sin ningún mensaje enviado no es «no contestó»: no se le llegó a escribir.
+      incidencia: solicitud.incidencia ?? (solicitud.primeraRespuestaAt ? 'respondio_sin_ubicacion' : solicitud.intentos > 0 ? 'sin_respuesta' : 'no_se_le_escribio'),
+      incidenciaDetalle: body.motivo ?? solicitud.incidenciaDetalle ?? (!solicitud.primeraRespuestaAt && solicitud.intentos === 0 ? 'derivada a mano por el operador antes de escribirle' : 'derivada a mano por el operador'),
       proximoIntentoAt: null,
     });
     await repos.rutas.registrarEvento(

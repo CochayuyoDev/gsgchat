@@ -14,6 +14,7 @@
  */
 
 import { EventEmitter } from 'node:events';
+import type { ArchivoDeMensaje } from '../api/v1/archivos-gsg.js';
 
 /** Un contacto tal como viaja hacia fuera: lo justo para reconocerlo. */
 export interface ContactoEvento {
@@ -35,11 +36,13 @@ export interface Eventos {
       /** El anuncio (Facebook/Instagram) desde el que escribio, si vino de uno. */
       anuncio: { id: string | null; titulo: string | null; texto: string | null; url: string | null; imagen: string | null; clid: string | null; origen: string | null } | null;
       datos: Record<string, unknown> | null;
+      /** La foto, el video, el audio o el documento: un enlace firmado que abre el fichero tal cual (el mismo `archivo` del historial). null si no lleva. */
+      archivo: ArchivoDeMensaje | null;
       fecha: string;
     };
     /** Si se puede contestar con texto libre por la API de Meta. */
     ventanaAbierta: boolean;
-    /** El chat en GSG: `chatId` es el tracking (el mas reciente de ese WhatsApp) y vale para GET /api/v1/chat y POST /api/v1/chat; `trackings` son todos los del cliente. Sin pedido de GSG: null y []. */
+    /** El chat en GSG: `chatId` es el tracking (el mas reciente de ese WhatsApp) y vale para GET /api/v1/historial y POST /api/v1/chat; `trackings` son todos los del cliente. Sin pedido de GSG: null y []. */
     chatId: string | null;
     trackings: string[];
   };
@@ -47,13 +50,23 @@ export interface Eventos {
   'mensaje.enviado': {
     contacto: ContactoEvento;
     /** `autor`: quien lo mando: 'persona' (a mano), 'ia' (el asistente) o 'sistema' (reglas, reparto, campanas, la API). `voz`: salio como nota de voz. */
-    mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string; datos: Record<string, unknown> | null };
+    mensaje: { id: string | null; tipo: string; texto: string | null; autor: 'persona' | 'ia' | 'sistema'; autorNombre: string | null; voz: boolean; fecha: string; datos: Record<string, unknown> | null; archivo: ArchivoDeMensaje | null };
     /** Igual que en `mensaje.recibido`: el chat de GSG al que pertenece. */
     chatId: string | null;
     trackings: string[];
   };
   /** Meta (o el proveedor) dice como va: sent, delivered, read, failed. */
-  'mensaje.estado': { mensajeId: string; estado: string; fecha: string };
+  'mensaje.estado': {
+    mensajeId: string;
+    estado: string;
+    fecha: string;
+    /** Si llego al WhatsApp del cliente: true (entregado/leido), false (no llego), null (aun sin confirmar). Ver src/whatsapp/estado-entrega.ts. */
+    llegoAWhatsapp?: boolean | null;
+    /** El mismo estado en palabras: sin_confirmar | enviado | entregado | leido | no_entregado. */
+    entrega?: { estado: import('../whatsapp/estado-entrega.js').EstadoEntrega; descripcion: string };
+    /** Solo con estado failed: por que no salio (ver src/whatsapp/errores-envio.ts). */
+    error?: import('../whatsapp/errores-envio.js').ErrorDeEnvio;
+  };
   /** Se consiguio una ubicacion (pin nativo o link de mapa). */
   'ubicacion.recibida': {
     contacto: ContactoEvento;
@@ -130,7 +143,7 @@ export const NOMBRES_EVENTOS: NombreEvento[] = [
 export const DESCRIPCION_EVENTOS: Record<NombreEvento, string> = {
   'mensaje.recibido': 'El cliente escribio (texto, ubicacion, foto, audio...).',
   'mensaje.enviado': 'Salio un mensaje hacia el cliente, lo mandara quien lo mandara.',
-  'mensaje.estado': 'Un mensaje enviado cambio de estado: sent, delivered, read o failed.',
+  'mensaje.estado': 'Un mensaje enviado cambio de estado: sent, delivered, read o failed. llegoAWhatsapp dice si llego al WhatsApp del cliente (true, false o null = aun sin confirmar). Con failed trae error: codigo, motivo, queHacer y reintentar.',
   'ubicacion.recibida': 'Se consiguio la ubicacion de un cliente (pin o link de mapa).',
   'contacto.alta': 'Un contacto dio su consentimiento para recibir mensajes.',
   'contacto.baja': 'Un contacto pidio no recibir mas mensajes.',

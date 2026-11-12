@@ -2,6 +2,16 @@ import { calcularVencimientoClave } from './vencimiento-clave.js';
 import { appShell } from './shell.js';
 import { escapeHtml } from './login-page.js';
 import { MENSAJE_ERROR_HTTP_JS } from './bandeja-mensajes.js';
+import { NOMBRES_PERMISOS, PERMISOS, PERMISOS_GSG } from '../auth/permisos.js';
+
+/** Los permisos del paquete de GSG con la API que abre cada uno (ver las rutas de src/api/v1). */
+const PARA_QUE_API: Record<(typeof PERMISOS_GSG)[number], string> = {
+  'entregas:gestionar': 'API 1 y API 2',
+  'entregas:leer': 'Consultar pedidos',
+  'conversaciones:leer': 'API 3',
+  'mensajes:enviar': 'API 4',
+};
+const PAQUETE_GSG = PERMISOS_GSG.map((p) => ({ permiso: p, api: PARA_QUE_API[p], texto: PERMISOS[p] }));
 
 /** Los 12 campos del contrato con GSG Courier. */
 export const EJEMPLO_COURIER = { pedidos: [{
@@ -25,6 +35,7 @@ export const CAMPOS: Array<[string, string, boolean, string]> = [
   ['Teléfono 2', 'telefono2', false, ''],
   ['Producto', 'producto', false, ''],
   ['Cant Bultos', 'cantBultos', false, 'Entero no negativo.'],
+  ['Motorizado', 'motorizado', false, '{nombre, telefono}. Con su teléfono, ese motorizado puede escribir «proceder cambio de ubicación» a este WhatsApp y se registra la última ubicación que mandó el cliente. No se le escribe nada por venir aquí.'],
 ];
 
 /** Los campos de antes: se siguen aceptando para no romper envíos anteriores, pero no son parte del contrato. */
@@ -58,7 +69,7 @@ const RESPUESTAS_FLUJO: Array<[string, string, string]> = [
   ['429', 'Más de 120 llamadas por minuto con la misma clave (se cuentan junto con la API 1).', 'Con el Runner de Postman, repite la llamada 125 veces en menos de un minuto.'],
 ];
 
-/** API 3 (GET): los parametros de GET /api/v1/chat. [nombre, obligatorio, detalle] */
+/** API 3 (GET): los parametros de GET /api/v1/historial. [nombre, obligatorio, detalle] */
 export const CAMPOS_CHAT: Array<[string, string, string]> = [
   ['tracking', 'Sí', 'El tracking del pedido, el mismo que GSG mandó en la API 1. El WhatsApp del chat sale del pedido: no se manda.'],
   ['limite', 'No', 'Cuántos mensajes devolver (1 a 200; 60 por defecto).'],
@@ -66,7 +77,7 @@ export const CAMPOS_CHAT: Array<[string, string, string]> = [
 ];
 
 /** API 3 (GET): un ejemplo de la dirección. */
-export const EJEMPLO_CHAT = 'GET /api/v1/chat?tracking=GSG-E-205';
+export const EJEMPLO_CHAT = 'GET /api/v1/historial?tracking=GSG-E-205';
 
 /** API 3 (GET): un ejemplo de la respuesta. */
 export const EJEMPLO_RESPUESTA_CHAT = {
@@ -78,10 +89,10 @@ export const EJEMPLO_RESPUESTA_CHAT = {
   hayMas: false,
 };
 
-/** API 3 (GET): lo que contesta GET /api/v1/chat, y como sacar cada respuesta en Postman. */
+/** API 3 (GET): lo que contesta GET /api/v1/historial, y como sacar cada respuesta en Postman. */
 const RESPUESTAS_CHAT: Array<[string, string, string]> = [
-  ['200', 'El chat del WhatsApp de ese tracking: «tracking» (lista), «contacto», «mensajes» y «hayMas».', '`GET /api/v1/chat?tracking=GSG-E-205`, con el pedido creado antes con la API 1 y un cliente que ya tenga mensajes.'],
-  ['400', 'Falta el tracking, o «limite» no vale (fuera de 1 a 200).', '`GET /api/v1/chat` sin parámetros, o `?tracking=GSG-E-205&limite=500`.'],
+  ['200', 'El chat del WhatsApp de ese tracking: «tracking» (lista), «contacto», «mensajes» y «hayMas».', '`GET /api/v1/historial?tracking=GSG-E-205`, con el pedido creado antes con la API 1 y un cliente que ya tenga mensajes.'],
+  ['400', 'Falta el tracking, o «limite» no vale (fuera de 1 a 200).', '`GET /api/v1/historial` sin parámetros, o `?tracking=GSG-E-205&limite=500`.'],
   ['401', 'Sin clave, o la clave no existe o fue revocada.', 'Quita la cabecera `X-API-Key`, o pon una clave inventada.'],
   ['403', 'La clave no tiene el permiso de leer conversaciones (conversaciones:leer).', 'Usa una clave creada solo con `entregas:gestionar`.'],
   ['404', 'No hay ningún pedido con ese tracking, o ese pedido todavía no tiene chat.', '`?tracking=NO-EXISTE-1`.'],
@@ -91,7 +102,11 @@ const RESPUESTAS_CHAT: Array<[string, string, string]> = [
 /** API 4 (POST): los campos del cuerpo de POST /api/v1/chat. [nombre, obligatorio, detalle] */
 export const CAMPOS_MENSAJE: Array<[string, string, string]> = [
   ['tracking', 'Sí', 'El tracking del pedido, el mismo que GSG mandó en la API 1. El mensaje sale al WhatsApp de ese pedido: el teléfono no se manda.'],
-  ['texto', 'Sí', 'Lo que se le escribe al cliente (hasta 4000 caracteres).'],
+  ['texto', 'Sí, si no va «media»', 'Lo que se le escribe al cliente (hasta 4000 caracteres). Con «media» es el pie de la foto, el video o el documento; un audio no lleva texto.'],
+  ['media.url', 'Sí, si no va «texto»', 'Dirección http o https de una foto, un video o un audio. GSGchat baja el fichero (hasta 16 MB), comprueba que es lo que dice ser y lo manda por WhatsApp. Fotos: jpeg, png o webp. Videos: mp4 o 3gp. Audios: ogg, mp3, m4a, aac o amr.'],
+  ['media.base64', 'Alternativa a media.url', 'El fichero mismo en base64 dentro del JSON (con o sin el prefijo data:image/jpeg;base64,), para quien no tiene una dirección pública. Hasta 16 MB ya decodificado. Va media.url o media.base64, no los dos.'],
+  ['media.tipo', 'No', 'imagen, video, audio o documento. Sin él se deduce del fichero.'],
+  ['media.voz', 'No', 'true para que el audio salga como nota de voz.'],
   ['idExterno', 'Sí', 'El id que GSG le puso a este mensaje. Evita duplicados: si GSG reintenta el mismo mensaje, no se manda otra vez al cliente.'],
   ['usuario.id', 'Sí', 'El id del usuario de GSG que escribe (texto o número).'],
   ['usuario.nombre', 'No', 'Su nombre, que se ve en el chat (por ejemplo el del motorizado).'],
@@ -104,6 +119,7 @@ export const EJEMPLO_MENSAJE = { tracking: 'GSG-E-205', texto: 'Hola, soy tu mot
 /** API 4 (POST): lo que contesta POST /api/v1/chat. */
 const RESPUESTAS_MENSAJE: Array<[string, string, string]> = [
   ['200', 'Salió por WhatsApp («estado: enviado», con el id del mensaje). Si el mismo «idExterno» ya había salido: «duplicado: true» y no se escribe otra vez al cliente.', '`POST /api/v1/chat` con el JSON de ejemplo y una clave con `mensajes:enviar`. Repite la misma llamada: la segunda trae `"duplicado": true`.'],
+  ['200 («estado: comando»)', 'El texto era «proceder cambio de ubicación»: NO se le manda al cliente. GSGchat toma la última ubicación que el cliente mandó por WhatsApp y la registra en sus pedidos (aunque haya pasado la hora límite). «comando.resultado» dice qué pasó: «cambiada» (y «comando.mapa» con la nueva), «sin_ubicacion» (el cliente no mandó ninguna), «sin_cambio» (ya era la registrada) o «sin_pedidos». «comando.mensaje» lo explica en palabras.', '`{ "tracking": "GSG-E-205", "texto": "proceder cambio de ubicación", "idExterno": "gsg-msg-999", "usuario": { "id": 77, "nombre": "Juan", "rol": "motorizado" } }` con un cliente que mandó otro pin después de la hora límite.'],
   ['202', 'No salió porque una guarda lo frenó (por ejemplo, la ventana de 24 h de WhatsApp está cerrada o el cliente se dio de baja): «motivo» dice cuál. Ese «idExterno» no se apunta: se puede reintentar.', 'Escríbele a un cliente que no ha escrito en las últimas 24 h con el proveedor oficial de Meta.'],
   ['400', 'Falta el tracking, el texto, el «idExterno» o el «usuario.id», o el texto está vacío.', '`{ "tracking": "GSG-E-205", "texto": "Hola" }` (sin idExterno ni usuario).'],
   ['401', 'Sin clave, o la clave no existe o fue revocada.', 'Quita la cabecera `X-API-Key`.'],
@@ -137,11 +153,21 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
     nombreNegocio: opts.nombreNegocio, demo: opts.demo,
     css: `.courier-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.courier-card{padding:24px;border:1px solid var(--borde);border-radius:var(--radio);background:var(--superficie);box-shadow:var(--sombra);min-width:0}.courier-card>label{display:block;margin:14px 0 6px}.courier-card h2{margin-top:0}.courier-card input,.courier-card textarea{width:100%;box-sizing:border-box}.courier-card textarea{min-height:300px;padding:14px;font:13px/1.6 var(--mono)}.clave-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.clave-field label{display:block;margin-bottom:8px;font-weight:600}.clave-field select,.clave-field input{width:100%}.clave-permisos{margin:20px 0;padding:18px;border:1px solid var(--borde);border-radius:12px}.clave-permisos-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.clave-permiso{display:flex;align-items:flex-start;gap:10px;padding:12px;background:var(--superficie-2);border-radius:8px;font-size:13px}.courier-card .clave-permiso input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.clave-secret-panel{background:var(--superficie-2);padding:20px;border:1px solid var(--borde);border-radius:12px;margin-bottom:18px}.courier-secret{display:block;padding:12px;background:var(--superficie);border-radius:8px}.courier-wide{grid-column:1/-1}.courier-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.courier-scroll{overflow-x:auto;border:1px solid var(--borde);border-radius:var(--radio-sm);margin:10px 0}.courier-scroll:empty{display:none}.courier-scroll:has(>p:only-child){border:0}.courier-card .na-apis{border:1px solid var(--borde);border-radius:var(--radio-sm);border-collapse:separate;border-spacing:0;overflow:hidden}.courier-card pre{white-space:pre-wrap;overflow-wrap:anywhere}.courier-secret{overflow-wrap:anywhere}.courier-card small{display:block;margin-top:8px}.api-num{display:inline-block;margin-right:8px;padding:2px 9px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:.78em;font-weight:700;vertical-align:middle;white-space:nowrap}.postman{margin:12px 0;padding:14px;border:1px dashed var(--borde);border-radius:12px}.postman h3{margin-top:0}.postman ol{margin:6px 0 8px;padding-left:20px}.postman li{margin:4px 0}.postman-url{overflow-wrap:anywhere}.api-json{padding:12px;border-radius:10px;background:var(--superficie-2);font:13px/1.5 monospace}.courier-status{padding:11px 14px;border-radius:var(--radio-sm);background:var(--superficie-2);border:1px solid var(--borde);margin:14px 0;font-size:13.5px}#np-flujo-form{display:grid;gap:6px}.np-check{display:flex;gap:8px;align-items:center}.courier-card .np-check input{width:auto}#np-flujo-resultado{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}@media(max-width:800px){.courier-grid,.clave-form-grid,.clave-permisos-grid{grid-template-columns:1fr}}@media(max-width:640px){.courier-card{padding:16px}.courier-card .na-apis{display:block;overflow-x:auto}.courier-card .na-apis td:last-child{min-width:170px}.courier-card .na-apis code{white-space:nowrap}}
 .na-pestanas .api-num{margin-right:0;font-size:12px}
+.na-pestanas{flex-wrap:wrap;overflow:visible;row-gap:2px}
+.na-pestanas a{padding:9px 12px 11px}
+.meta-aviso{margin:2px 0 10px;padding:9px 12px;border-radius:var(--radio-sm);font-size:13.5px;font-weight:600;border:1px solid var(--borde);background:var(--superficie-2)}
+.meta-aviso.ok{color:var(--primario);border-color:color-mix(in srgb,var(--primario) 40%,transparent);background:var(--primario-suave)}
+.meta-aviso.mal{color:#b42318;border-color:#f3b7b0;background:#fef3f2}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .meta-aviso.mal{color:#fda29b;border-color:#7a271a;background:transparent}}
+:root[data-theme="dark"] .meta-aviso.mal{color:#fda29b;border-color:#7a271a;background:transparent}
+.meta-secret-estado{margin:6px 0 0;font-size:13.5px;color:var(--texto-suave)}
+.meta-secret-estado.guardada{color:var(--primario);font-weight:600}
 .courier-grid{grid-template-columns:minmax(0,1fr);max-width:1100px}
 .courier-grid>[data-na][hidden]{display:none}
 .na-apis{margin:14px 0}.na-apis code{overflow-wrap:anywhere}
 .na-clave{margin:6px 0 14px}
-.courier-card h2{font-size:18px;margin-bottom:10px}.courier-cab{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:14px}.courier-cab h2{margin-bottom:4px}.courier-cab p{margin:0}.courier-api{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--primario-suave);color:var(--primario);margin-right:4px}@media(max-width:640px){.courier-cab{flex-direction:column}}.courier-card>h3{margin-top:22px}.courier-card>small{color:var(--texto-suave)}`,
+.courier-card h2{font-size:18px;margin-bottom:10px}.courier-cab{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:14px}.courier-cab h2{margin-bottom:4px}.courier-cab p{margin:0}.courier-api{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--primario-suave);color:var(--primario);margin-right:4px}@media(max-width:640px){.courier-cab{flex-direction:column}}.courier-card>h3{margin-top:22px}.courier-card>small{color:var(--texto-suave)}
+.av-hook{border:1px solid var(--borde);border-radius:12px;padding:16px;margin:12px 0}.av-hook h3{margin:0 0 4px;font-size:15px;overflow-wrap:anywhere}.av-hook .av-meta{margin:0 0 10px;font-size:13px;color:var(--texto-suave);overflow-wrap:anywhere}.av-eventos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.av-ev{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--superficie-2);border-radius:8px;font-size:13px;line-height:1.4}.courier-card .av-ev input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.av-ev code{font-weight:700}.av-ev.destacado{outline:2px solid var(--primario);outline-offset:-2px}.av-todos{margin:0 0 10px}.av-falta{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11.5px;font-weight:700}.av-ok{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:11.5px;font-weight:700}@media(max-width:800px){.av-eventos{grid-template-columns:1fr}}`,
     contenido: `<nav class="na-pestanas s-pestanas" aria-label="Nuestra API">
       <a href="#t-resumen" data-na="resumen">Resumen</a>
       <a href="#t-api1" data-na="api1"><span class="api-num">API 1</span>Pedidos</a>
@@ -151,6 +177,8 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       <a href="#t-claves" data-na="claves">Claves</a>
       <a href="#t-validar" data-na="validar">Probar y validar</a>
       <a href="#t-llamadas" data-na="llamadas">Últimas llamadas</a>
+      <a href="#t-meta" data-na="meta">Webhook de Meta</a>
+      <a href="#t-avisos" data-na="avisos">Avisos a GSG</a>
     </nav>
     <div class="courier-grid">
       <section class="courier-card courier-wide" data-na="resumen"><h2>GSG llama → GSGchat recibe → el sistema procesa</h2>
@@ -159,7 +187,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <table class="na-apis"><thead><tr><th>API</th><th>Método</th><th>Dirección</th><th>Para qué</th></tr></thead><tbody>
           <tr><td><a href="#t-api1"><span class="api-num">API 1</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/entregas</code></td><td>GSG nos manda los pedidos del día</td></tr>
           <tr><td><a href="#t-api2"><span class="api-num">API 2</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/flujo</code></td><td>GSG nos pide cancelar o reintentar un pedido</td></tr>
-          <tr><td><a href="#t-api3"><span class="api-num">API 3</span></a></td><td><span class="chip tono-verde sin-punto">GET</span></td><td><code>/api/v1/chat?tracking=…</code></td><td>GSG pide el historial del chat de un tracking y GSGchat responde con sus mensajes</td></tr>
+          <tr><td><a href="#t-api3"><span class="api-num">API 3</span></a></td><td><span class="chip tono-verde sin-punto">GET</span></td><td><code>/api/v1/historial?tracking=…</code></td><td>GSG pide el historial del chat de un tracking y GSGchat responde con sus mensajes</td></tr>
           <tr><td><a href="#t-api4"><span class="api-num">API 4</span></a></td><td><span class="chip tono-azul sin-punto">POST</span></td><td><code>/api/v1/chat</code></td><td>GSG nos manda un mensaje que escribe uno de sus usuarios y GSGchat lo envía al cliente</td></tr>
         </tbody></table>
         <p class="na-clave">Las cuatro usan la misma clave en la cabecera <code>X-API-Key</code>. Se crea en <a href="#t-claves">Claves</a>. <a class="btn sm" href="/soporte#pruebas-api-gsg">Ver instrucciones de pruebas</a></p>
@@ -212,7 +240,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <p>Cuando un usuario de GSG (por ejemplo el motorizado) escribe en el chat de un tracking, GSG nos lo manda con un <b>POST</b>. GSGchat lo envía por WhatsApp al número de ese pedido, lo guarda en el chat firmado como una persona (con el usuario y el rol de GSG) y <b>el bot se calla</b> en ese chat hasta que alguien lo reactive con «Reactivar bot». Lo que escriba el equipo desde GSGchat sale por el mismo chat, así que se ve en los dos sistemas.</p>
         <label for="courier-url-4">Mandar el mensaje con POST</label><input id="courier-url-4" readonly>
         <div class="courier-actions"><button class="btn" id="courier-copiar-url-4" type="button">Copiar dirección</button></div>
-        <p>Misma clave que las otras APIs, con el permiso <code>mensajes:enviar</code> (las claves nuevas ya lo traen; las creadas antes no). Pasa por las mismas reglas de WhatsApp que el resto de GSGchat. Ejemplo de cuerpo:</p>
+        <p>Misma clave que las otras APIs, con el permiso <code>mensajes:enviar</code> (las claves nuevas ya lo traen; a una creada antes se le añade en Claves con «Poner al día», sin cambiar la clave). Pasa por las mismas reglas de WhatsApp que el resto de GSGchat. Ejemplo de cuerpo:</p>
         <pre class="api-json">${escapeHtml(JSON.stringify(EJEMPLO_MENSAJE, null, 2))}</pre>
         <p><b>Sin duplicados:</b> el <code>idExterno</code> es el id que GSG le pone al mensaje. Si GSG no recibe la respuesta y reintenta con el mismo <code>idExterno</code>, GSGchat contesta 200 con <code>duplicado: true</code> y no vuelve a escribirle al cliente.</p>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS_MENSAJE.map(([json, obligatorio, detalle]) => `<tr><td><code>${escapeHtml(json)}</code></td><td>${escapeHtml(obligatorio)}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div>
@@ -225,6 +253,11 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <form id="courier-form"><div class="clave-form-grid"><div class="clave-field"><label for="courier-nombre">¿Para quién es esta clave?</label><input id="courier-nombre" required minlength="2" maxlength="80" autocomplete="off" placeholder="Ejemplo: GSG principal"></div>
         <div class="clave-field"><label for="courier-vigencia">Vencimiento</label><select id="courier-vigencia"><option value="nunca">No se acaba nunca</option><option value="7">En 7 días</option><option value="30">En 30 días</option><option value="90">En 90 días</option><option value="365">En 1 año (365 días)</option><option value="fecha">Digitar una fecha</option></select></div>
         <div class="clave-field" id="courier-fecha-campo" hidden><label for="courier-vence">Fecha y hora de vencimiento</label><input id="courier-vence" type="text" maxlength="16" placeholder="DD/MM/AAAA HH:mm" autocomplete="off" aria-describedby="courier-fecha-ayuda"><small id="courier-fecha-ayuda">Puedes escribir solo la fecha; vencerá a las 23:59. Se usa la hora local de tu navegador.</small></div></div>
+        <fieldset class="clave-permisos" id="courier-permisos"><legend>Qué puede hacer esta clave</legend>
+          <p id="courier-permisos-total" class="muted" hidden>Esta clave tiene acceso total: ya puede todo y sus permisos no se cambian aquí.</p>
+          <div class="clave-permisos-grid">${PAQUETE_GSG.map((p) => `<label class="clave-permiso"><input type="checkbox" name="courier-permiso" value="${escapeHtml(p.permiso)}" checked><span><b>${escapeHtml(p.api)}</b><br>${escapeHtml(p.texto)}</span></label>`).join('')}</div>
+          <small>Al editar, los permisos cambian en la misma clave y valen al instante: GSG no tiene que cambiar nada.</small>
+        </fieldset>
 
         <div class="courier-actions"><button class="btn primario" id="courier-crear" type="submit" ${opts.disponible ? '' : 'disabled'}>Crear clave</button><button class="btn" id="courier-cancelar" type="button" hidden>Cancelar edición</button></div></form>
         <div id="courier-nueva" hidden class="clave-secret-panel"><h3 id="courier-secreto-titulo"></h3><p><strong>Guarda esta clave en un lugar seguro porque luego no la volverás a ver.</strong></p><p>Solo se muestra ahora. Si la pierdes, renueva la clave: la anterior dejará de funcionar.</p><code id="courier-secreto" class="courier-secret"></code><div class="courier-actions"><button class="btn" id="courier-copiar-clave">Copiar clave</button><button class="btn" id="courier-ocultar">Ocultar clave (ya la copié)</button></div></div>
@@ -242,6 +275,43 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <div class="courier-actions"><button class="btn primario" id="courier-validar-2" type="button" ${opts.disponible ? '' : 'disabled'}>Validar sin cambiar nada</button><button class="btn" id="courier-ejemplo-2" type="button">Restaurar ejemplo</button></div>
         <pre id="courier-validacion-2" role="status" aria-live="polite"></pre>
       </section>
+      <section class="courier-card courier-wide" id="webhook-meta" data-na="meta">
+        <div class="courier-cab"><div><h2>Webhook de WhatsApp Business API (Meta)</h2><p class="muted">Meta nos avisa aquí de cada mensaje que entra, de los estados de entrega, de las plantillas y de la calidad del número. Lo configura en el panel de Meta quien administra la app (GSG).</p></div><span id="meta-chip" class="chip tono-gris">Revisando…</span></div>
+        <p id="meta-https" class="courier-status" hidden></p>
+        <h3>1. Lo que se pega en Meta</h3>
+        <p class="muted">developers.facebook.com → tu app → WhatsApp → Configuración → Webhook → Editar.</p>
+        <label for="meta-url">URL de devolución de llamada</label>
+        <input id="meta-url" readonly>
+        <div class="courier-actions"><button class="btn" type="button" id="meta-copiar-url">Copiar URL</button></div>
+        <p class="meta-aviso" id="meta-aviso-url" role="status" hidden></p>
+        <label for="meta-token">Token de verificación (verify token)</label>
+        <input id="meta-token" autocomplete="off" spellcheck="false" maxlength="200" placeholder="Pulsa «Generar uno» o escribe uno de al menos 8 caracteres">
+        <div class="courier-actions"><button class="btn" type="button" id="meta-copiar-token">Copiar token</button><button class="btn" type="button" id="meta-generar">Generar uno</button><button class="btn primario" type="button" id="meta-guardar-token">Guardar token</button></div>
+        <p class="meta-aviso" id="meta-aviso-token" role="status" hidden></p>
+        <h3>2. Clave secreta de la app (App secret)</h3>
+        <p class="muted">Con ella se comprueba que cada aviso viene de Meta y no de otro. Está en Configuración de la app → Básica → Clave secreta de la app. Se guarda cifrada y no se vuelve a mostrar.</p>
+        <label for="meta-secret">App secret</label>
+        <input id="meta-secret" type="password" autocomplete="off" spellcheck="false" maxlength="300">
+        <p class="meta-secret-estado" id="meta-secret-estado"></p>
+        <div class="courier-actions"><button class="btn primario" type="button" id="meta-guardar-secret">Guardar clave secreta</button><button class="btn peligro" type="button" id="meta-quitar-secret" hidden>Quitar</button></div>
+        <p class="meta-aviso" id="meta-aviso-secret" role="status" hidden></p>
+        <h3>3. Campos que hay que suscribir</h3>
+        <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Para qué</th><th></th></tr></thead><tbody id="meta-campos"></tbody></table></div>
+        <h3>4. Comprobar</h3>
+        <p class="muted">Llama a este mismo webhook como lo haría Meta: el reto con el verify token y un aviso firmado con la clave secreta. No le escribe a nadie.</p>
+        <div class="courier-actions"><button class="btn primario" type="button" id="meta-probar">Probar el webhook</button></div>
+        <div id="meta-pasos"></div>
+        <p class="courier-status" id="meta-estado" role="status"></p>
+        <h3>Lo último que llegó</h3>
+        <div id="meta-eventos" class="courier-scroll tablewrap"></div>
+        <small>Mientras la app de Meta esté en modo desarrollo solo llegan los avisos de prueba del panel de Meta; los mensajes reales empiezan a llegar cuando la app pasa a modo Live.</small>
+      </section>
+      <section class="courier-card courier-wide" id="avisos-gsg" data-na="avisos">
+        <div class="courier-cab"><div><h2>Avisos a GSG (webhooks)</h2><p class="muted">Lo que GSGchat le avisa a GSG al momento, sin que GSG tenga que preguntar. Marca qué avisos recibe cada dirección: el cambio vale al instante y GSG no tiene que cambiar nada.</p></div><button class="btn sm" type="button" id="avisos-refrescar">Actualizar</button></div>
+        <div class="courier-status av-clave"><b>mensaje.estado</b> es el aviso del estado real de cada mensaje (le llegó, lo leyó o no le llegó, con el porqué). Sin él, GSG solo ve el estado nuevo al recargar la conversación.</div>
+        <div id="avisos-lista"></div>
+        <p id="avisos-aviso" class="courier-status" role="status" aria-live="polite" hidden></p>
+      </section>
       <section class="courier-card courier-wide" data-na="llamadas"><div class="courier-cab"><div><h2>Últimas llamadas (API 1 y API 2)</h2><p class="muted">Lo que GSG nos envió: pedidos, órdenes de cancelar o reintentar, y las pruebas hechas desde esta pantalla.</p></div><button class="btn sm" id="courier-refrescar">Actualizar estado</button></div><div id="courier-bitacora" class="courier-scroll tablewrap"></div></section>
       <section class="courier-card courier-wide" id="courier-campos" data-na="api1"><h2>Campos que envía Courier (API 1)</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
       <section class="courier-card courier-wide" id="courier-respuestas" data-na="api1"><h2>Respuestas de la recepción (API 1)</h2><p>Los errores vienen en JSON: <code>{ "ok": false, "codigo": "...", "error": "...", "detalles": [...] }</code>. Para probar respuestas concretas, sigue la guía de <a href="/soporte#pruebas-api-gsg">Soporte → Pruebas de Nuestra API</a>.</p><div class="courier-scroll"><table><thead><tr><th>HTTP</th><th>Significado</th></tr></thead><tbody>${RESPUESTAS.map(([c, t]) => `<tr><td><b>${escapeHtml(c)}</b></td><td>${escapeHtml(t)}</td></tr>`).join('')}</tbody></table></div></section>
@@ -249,15 +319,34 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
     script: String.raw`
 (function () {
   var $ = function(id) { return document.getElementById(id); };
-  var editando = null, ocupada = false;
+  var editando = null, editandoClave = null, ocupada = false;
+  var PAQUETE = ${JSON.stringify(PAQUETE_GSG)};
+  var EN_PAQUETE = PAQUETE.map(function(p) { return p.permiso; });
+  var VALIDOS = ${JSON.stringify(NOMBRES_PERMISOS)};
+  function casillas() { return Array.prototype.slice.call(document.querySelectorAll('[name="courier-permiso"]')); }
+  function marcados() { return casillas().filter(function(x) { return x.checked; }).map(function(x) { return x.value; }); }
+  function accesoTotal(c) { return (c.permisos || []).indexOf('*') >= 0; }
+  function faltan(c) { return accesoTotal(c) ? [] : PAQUETE.filter(function(p) { return (c.permisos || []).indexOf(p.permiso) < 0; }); }
+  function permisosDe(c) {
+    if (accesoTotal(c)) return 'Acceso total';
+    var lista = PAQUETE.filter(function(p) { return c.permisos.indexOf(p.permiso) >= 0; }).map(function(p) { return esc(p.api); });
+    var otros = c.permisos.filter(function(p) { return EN_PAQUETE.indexOf(p) < 0; }).map(function(p) { return '<code>' + esc(p) + '</code>'; });
+    return lista.concat(otros).join(' · ') || 'Ninguno';
+  }
+  function ponerCasillas(c) {
+    var total = Boolean(c && accesoTotal(c));
+    $('courier-permisos-total').hidden = !total;
+    casillas().forEach(function(x) { x.checked = !c || total || c.permisos.indexOf(x.value) >= 0; x.disabled = total; });
+  }
   var ejemplo = $('courier-json').value;
   var endpoint = location.origin + '/api/v1/entregas';
   $('courier-url').value = endpoint;
   var endpoint2 = location.origin + '/api/v1/flujo';
   $('courier-url-2').value = endpoint2;
-  var endpoint3 = location.origin + '/api/v1/chat';
+  var endpoint3 = location.origin + '/api/v1/historial';
   $('courier-url-3').value = endpoint3 + '?tracking=GSG-E-205';
-  $('courier-url-4').value = endpoint3;
+  var endpoint4 = location.origin + '/api/v1/chat';
+  $('courier-url-4').value = endpoint4;
   function aviso(t) { $('courier-aviso').textContent = t; }
   function esc(t) { var el = document.createElement('span'); el.textContent = String(t == null ? '' : t); return el.innerHTML; }
 ${MENSAJE_ERROR_HTTP_JS}
@@ -282,7 +371,7 @@ ${MENSAJE_ERROR_HTTP_JS}
   $('courier-copiar-url').onclick = function() { copiar(endpoint); };
   $('courier-copiar-url-2').onclick = function() { copiar(endpoint2); };
   $('courier-copiar-url-3').onclick = function() { copiar(endpoint3 + '?tracking='); };
-  $('courier-copiar-url-4').onclick = function() { copiar(endpoint3); };
+  $('courier-copiar-url-4').onclick = function() { copiar(endpoint4); };
   var ejemplo2 = $('courier-json-2').value;
   if ($('courier-descargar-2')) $('courier-descargar-2').onclick = function() {
     var url = URL.createObjectURL(new Blob([ejemplo2], {type:'application/json'}));
@@ -311,7 +400,7 @@ ${MENSAJE_ERROR_HTTP_JS}
   var calcularVencimiento = ${calcularVencimientoClave.toString()};
   function cambiarVigencia() { var manual = $('courier-vigencia').value === 'fecha'; $('courier-fecha-campo').hidden = !manual; $('courier-vence').required = manual; }
   $('courier-vigencia').onchange = cambiarVigencia;
-  function cancelar() { editando = null; $('courier-form').reset(); cambiarVigencia(); $('courier-crear').textContent = 'Crear clave'; $('courier-cancelar').hidden = true; }
+  function cancelar() { editando = null; editandoClave = null; $('courier-form').reset(); ponerCasillas(null); cambiarVigencia(); $('courier-crear').textContent = 'Crear clave'; $('courier-cancelar').hidden = true; }
   $('courier-cancelar').onclick = cancelar;
   $('courier-descargar').onclick = function() {
     var url = URL.createObjectURL(new Blob([ejemplo], {type:'application/json'}));
@@ -322,16 +411,18 @@ ${MENSAJE_ERROR_HTTP_JS}
     try {
       var claves = await api('/admin/claves-api');
       var activas = claves.filter(function(c) { return estadoClave(c) === 'Activa' && (c.permisos || []).some(function(p) { return p === '*' || p === 'entregas:gestionar'; }); });
-      $('courier-claves').innerHTML = claves.length ? '<table><thead><tr><th>Nombre / identificador</th><th>Creación / vencimiento</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' + claves.map(function(c) {
+      $('courier-claves').innerHTML = claves.length ? '<table><thead><tr><th>Nombre / identificador</th><th>Permisos</th><th>Creación / vencimiento</th><th>Último uso</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>' + claves.map(function(c) {
         var estado = estadoClave(c);
-        return '<tr><td><b>' + esc(c.nombre) + '</b><br><small>' + esc(c.id) + '</small></td><td>' + esc(fecha(c.createdAt)) + '<br>' + esc(fecha(c.venceAt)) + '</td><td>' + esc(c.ultimoUsoAt ? fecha(c.ultimoUsoAt) : 'Nunca se usó') + '</td><td>' + estado + '</td><td>' + (c.revocadaAt ? '' : '<button class="btn sm" data-accion="estado" data-id="' + esc(c.id) + '" ' + (estado === 'Vencida' ? 'disabled' : '') + '>' + (c.desactivadaAt ? 'Activar' : 'Desactivar') + '</button> <button class="btn sm" data-accion="renovar" data-id="' + esc(c.id) + '">Renovar</button> <button class="btn sm" data-accion="editar" data-id="' + esc(c.id) + '">Editar</button> ') + '<button class="btn sm peligro" data-accion="eliminar" data-id="' + esc(c.id) + '">Eliminar</button></td></tr>';
+        var falta = c.revocadaAt ? [] : faltan(c);
+        var permisos = permisosDe(c) + (falta.length ? '<br><span class="chip tono-ambar">Le falta: ' + falta.map(function(p) { return esc(p.api); }).join(', ') + '</span>' : '');
+        return '<tr><td><b>' + esc(c.nombre) + '</b><br><small>' + esc(c.id) + '</small></td><td>' + permisos + '</td><td>' + esc(fecha(c.createdAt)) + '<br>' + esc(fecha(c.venceAt)) + '</td><td>' + esc(c.ultimoUsoAt ? fecha(c.ultimoUsoAt) : 'Nunca se usó') + '</td><td>' + estado + '</td><td>' + (c.revocadaAt ? '' : (falta.length ? '<button class="btn sm primario" data-accion="al-dia" data-id="' + esc(c.id) + '">Poner al día</button> ' : '') + '<button class="btn sm" data-accion="estado" data-id="' + esc(c.id) + '" ' + (estado === 'Vencida' ? 'disabled' : '') + '>' + (c.desactivadaAt ? 'Activar' : 'Desactivar') + '</button> <button class="btn sm" data-accion="renovar" data-id="' + esc(c.id) + '">Renovar</button> <button class="btn sm" data-accion="editar" data-id="' + esc(c.id) + '">Editar</button> ') + '<button class="btn sm peligro" data-accion="eliminar" data-id="' + esc(c.id) + '">Eliminar</button></td></tr>';
       }).join('') + '</tbody></table>' : '<p>No hay claves creadas.</p>';
       $('courier-claves').querySelectorAll('[data-accion]').forEach(function(b) {
         b.onclick = async function() {
           if (ocupada) return;
           var c = claves.find(function(c) { return c.id === b.dataset.id; });
           if (b.dataset.accion === 'editar') {
-            editando = c.id; $('courier-nombre').value = c.nombre;
+            editando = c.id; editandoClave = c; $('courier-nombre').value = c.nombre; ponerCasillas(c);
             $('courier-vigencia').value = c.venceAt ? 'fecha' : 'nunca';
             var vencimiento = c.venceAt ? new Date(c.venceAt) : null;
             var dos = function(n) { return String(n).padStart(2, '0'); };
@@ -341,6 +432,16 @@ ${MENSAJE_ERROR_HTTP_JS}
             $('courier-crear').textContent = 'Guardar cambios'; $('courier-cancelar').hidden = false; $('courier-nombre').focus(); return;
           }
           var accion = b.dataset.accion;
+          if (accion === 'al-dia') {
+            var nuevos = faltan(c).map(function(p) { return p.api; }).join(', ');
+            if (!(await confirmarDialogo({titulo:'Poner al día «' + c.nombre + '»', texto:'Se le añade: ' + nuevos + '. La clave no cambia: GSG sigue usando la misma y vale al instante.', boton:'Poner al día'}))) return;
+            ocupada = true; b.disabled = true;
+            try {
+              await api('/admin/claves-api/' + encodeURIComponent(c.id) + '/poner-al-dia', 'POST', {});
+              cancelar(); aviso('Listo: «' + c.nombre + '» ya puede usar ' + nuevos + ' con la misma clave.'); await cargar();
+            } catch(e) { aviso(e.message); } finally { ocupada = false; b.disabled = false; }
+            return;
+          }
           var nombre;
           if (accion === 'eliminar') { nombre = window.prompt('Eliminar definitivamente «' + c.nombre + '». Escribe su nombre exacto para confirmar.'); if (nombre !== c.nombre) { aviso('Eliminación cancelada: el nombre no coincide.'); return; } }
           else if (!(await confirmarDialogo({titulo:accion === 'renovar' ? 'Renovar clave' : c.desactivadaAt ? 'Activar clave' : 'Desactivar clave',texto:accion === 'renovar' ? 'La clave anterior dejará de funcionar. Guarda la nueva y actualízala en el sistema externo.' : c.desactivadaAt ? 'Esta integración recuperará sus permisos.' : 'Las próximas peticiones con esta clave serán rechazadas.',boton:'Confirmar',peligro:true}))) return;
@@ -373,7 +474,13 @@ ${MENSAJE_ERROR_HTTP_JS}
     var venceAt;
     try { venceAt = calcularVencimiento($('courier-vigencia').value, $('courier-vence').value); } catch(e) { aviso(e.message); return; }
     var body = {nombre:$('courier-nombre').value.trim(), venceAt:venceAt};
-    if (!editando) body.permisos = ['entregas:gestionar', 'entregas:leer', 'conversaciones:leer', 'mensajes:enviar'];
+    // Al editar se conservan los permisos que la clave tenga fuera del paquete de GSG.
+    if (!editandoClave || !accesoTotal(editandoClave)) {
+      // Los retirados (p. ej. embed:emitir) ya no valen: reenviarlos haría rechazar el cambio entero.
+      var otros = editandoClave ? editandoClave.permisos.filter(function(p) { return EN_PAQUETE.indexOf(p) < 0 && VALIDOS.indexOf(p) >= 0; }) : [];
+      body.permisos = marcados().concat(otros);
+      if (!body.permisos.length) { aviso('Marca al menos un permiso: sin ninguno, la clave no podría usar ninguna API.'); return; }
+    }
     ocupada = true; $('courier-crear').disabled = true;
     try {
       ocultar();
@@ -407,6 +514,93 @@ ${MENSAJE_ERROR_HTTP_JS}
     finally { b.disabled = false; cargar(); }
   };
   cargar();
+
+  /* --- Webhook de WhatsApp Business API (Meta) ----------------------------- */
+  var RESULTADO_META = { verificado: ['verde', 'Meta verificó'], verificacion_fallida: ['rojo', 'Verificación rechazada'], recibido: ['verde', 'Aviso recibido'], firma_invalida: ['rojo', 'Firma inválida'], sin_secreto: ['ambar', 'Sin clave secreta'] };
+  function fechaMeta(iso) { return iso ? new Date(iso).toLocaleString('es-PE') : ''; }
+  function metaMsg(t, rojo) { var el = $('meta-estado'); el.textContent = t || ''; el.style.color = rojo ? '#b42318' : ''; }
+  /* La respuesta de cada boton sale justo debajo de el (url, token, secret). */
+  var avisoTimers = {};
+  function metaAviso(cual, t, mal) {
+    var el = $('meta-aviso-' + cual); if (!el) return;
+    t = String(t || '').replace(/^HTTP \d+ · /, '');
+    el.textContent = t; el.className = 'meta-aviso ' + (mal ? 'mal' : 'ok'); el.hidden = !t;
+    clearTimeout(avisoTimers[cual]);
+    if (t && !mal) avisoTimers[cual] = setTimeout(function () { el.hidden = true; }, 8000);
+  }
+  async function conBoton(boton, texto, fn) {
+    var antes = boton.textContent; boton.disabled = true; boton.textContent = texto;
+    try { return await fn(); } finally { boton.disabled = false; boton.textContent = antes; }
+  }
+  function pintarMeta(d) {
+    $('meta-url').value = d.url;
+    if (document.activeElement !== $('meta-token')) $('meta-token').value = d.verifyToken || '';
+    var https = $('meta-https');
+    https.hidden = d.publicoHttps;
+    if (!d.publicoHttps) https.textContent = 'Esta instalación no tiene una dirección https pública (' + d.url + '). Meta solo llama a direcciones https: en producción la URL será la del dominio.';
+    $('meta-secret-estado').textContent = d.conAppSecret ? '✓ Clave guardada (termina en …' + d.appSecretFinal + '). Escribe otra solo si cambió.' : (d.setup.conAppSecret ? 'Aquí no hay una guardada, pero se usa la de Conexión (/setup), que ya tiene la de Meta.' : 'Todavía no hay ninguna guardada: sin ella se rechazan los avisos.');
+    $('meta-secret-estado').className = 'meta-secret-estado' + (d.conAppSecret || d.setup.conAppSecret ? ' guardada' : '');
+    $('meta-quitar-secret').hidden = !d.conAppSecret;
+    $('meta-campos').innerHTML = d.campos.map(function (c) { return '<tr><td><code>' + esc(c.campo) + '</code></td><td>' + esc(c.para) + '</td><td>' + (c.obligatorio ? '<span class="chip tono-azul sin-punto">Necesario</span>' : '<span class="chip tono-gris sin-punto">Recomendado</span>') + '</td></tr>'; }).join('');
+    var chip = $('meta-chip'), e = d.estado || {};
+    if (d.listo) { chip.className = 'chip tono-verde'; chip.textContent = 'Verificado por Meta'; }
+    else if (!d.verifyToken && !d.conAppSecret) { chip.className = 'chip tono-gris'; chip.textContent = 'Sin configurar'; }
+    else { chip.className = 'chip tono-ambar'; chip.textContent = e.verificadoEn ? 'Falta la clave secreta' : 'Esperando a que Meta verifique'; }
+    var resumen = [];
+    if (e.verificadoEn) resumen.push('Meta verificó el webhook el ' + fechaMeta(e.verificadoEn) + '.');
+    if (e.ultimoAvisoEn) resumen.push('Último aviso de Meta: ' + fechaMeta(e.ultimoAvisoEn) + ' (' + (e.ultimoAvisoCampos || '') + ').');
+    if (e.ultimoRechazoEn) resumen.push('Último rechazo: ' + fechaMeta(e.ultimoRechazoEn) + ' — ' + (e.ultimoRechazo || '') + '.');
+    if (!$('meta-pasos').innerHTML) metaMsg(resumen.join(' ') || 'Meta todavía no ha llamado a este webhook.');
+    $('meta-eventos').innerHTML = d.eventos.length ? '<table><thead><tr><th>Fecha</th><th>Qué pasó</th><th>Detalle</th></tr></thead><tbody>' + d.eventos.map(function (ev) { var r = RESULTADO_META[ev.resultado] || ['gris', ev.resultado]; return '<tr><td class="nowrap suave">' + esc(fechaMeta(ev.en)) + '</td><td><span class="chip tono-' + r[0] + '">' + esc(r[1]) + '</span>' + (ev.prueba ? ' <span class="chip tono-azul sin-punto">prueba</span>' : '') + '</td><td>' + esc(ev.detalle) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="vacio compacto"><h3>Todavía no llegó nada</h3><p>Aparecerá aquí cuando Meta verifique el webhook o mande un aviso.</p></div>';
+  }
+  async function cargarMeta() { if (!$('webhook-meta')) return; try { pintarMeta(await api('/admin/webhook-meta')); } catch (e) { metaMsg(e.message, true); } }
+  if ($('webhook-meta')) {
+    $('meta-copiar-url').onclick = function () { copiar($('meta-url').value); metaAviso('url', 'URL copiada. Pégala en Meta como «URL de devolución de llamada».'); };
+    $('meta-copiar-token').onclick = function () { if (!$('meta-token').value) { metaAviso('token', 'Primero genera o escribe un token.', true); return; } copiar($('meta-token').value); metaAviso('token', 'Token copiado. Pégalo en Meta como «Token de verificación».'); };
+    $('meta-generar').onclick = async function () {
+      if ($('meta-token').value && !window.confirm('¿Cambiar el verify token? Habrá que pegar el nuevo en Meta y volver a verificar.')) return;
+      var b = this;
+      await conBoton(b, 'Generando…', async function () {
+        try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta/generar-token', 'POST', {})); metaAviso('token', 'Token nuevo generado y guardado. Cópialo y pégalo en Meta como «Token de verificación».'); } catch (e) { metaAviso('token', e.message, true); }
+      });
+    };
+    $('meta-guardar-token').onclick = async function () {
+      var b = this;
+      await conBoton(b, 'Guardando…', async function () {
+        try { $('meta-pasos').innerHTML = ''; pintarMeta(await api('/admin/webhook-meta', 'POST', { verifyToken: $('meta-token').value.trim() })); metaAviso('token', 'Token guardado.'); } catch (e) { metaAviso('token', e.message, true); }
+      });
+    };
+    $('meta-guardar-secret').onclick = async function () {
+      var v = $('meta-secret').value.trim();
+      if (!v) { metaAviso('secret', 'Pega primero la clave secreta de la app en el campo de arriba.', true); $('meta-secret').focus(); return; }
+      var b = this;
+      await conBoton(b, 'Guardando…', async function () {
+        try {
+          var d = await api('/admin/webhook-meta', 'POST', { appSecret: v });
+          $('meta-pasos').innerHTML = ''; pintarMeta(d); $('meta-secret').value = '';
+          metaAviso('secret', 'Clave secreta guardada (termina en …' + (d.appSecretFinal || '') + '). Ya se pueden comprobar los avisos de Meta.');
+        } catch (e) { metaAviso('secret', e.message, true); }
+      });
+    };
+    $('meta-quitar-secret').onclick = async function () {
+      if (!window.confirm('¿Quitar la clave secreta? Se rechazarán los avisos de Meta hasta que pongas otra (salvo que Conexión tenga una).')) return;
+      var b = this;
+      await conBoton(b, 'Quitando…', async function () {
+        try { pintarMeta(await api('/admin/webhook-meta', 'POST', { quitarAppSecret: true })); metaAviso('secret', 'Clave secreta quitada.'); } catch (e) { metaAviso('secret', e.message, true); }
+      });
+    };
+    $('meta-probar').onclick = async function () {
+      metaMsg('Probando…');
+      try {
+        var r = await api('/admin/webhook-meta/probar', 'POST', {});
+        $('meta-pasos').innerHTML = '<ul class="lista-pasos">' + r.pasos.map(function (p) { return '<li><span class="chip tono-' + (p.ok ? 'verde' : 'rojo') + '">' + (p.ok ? 'Bien' : 'Falta') + '</span> <b>' + esc(p.paso) + ':</b> ' + esc(p.detalle) + '</li>'; }).join('') + '</ul>';
+        pintarMeta(r);
+        metaMsg(r.ok ? 'Todo listo de nuestro lado. Falta que Meta verifique desde su panel (botón «Verificar y guardar»).' : 'Hay algo por completar: mira la lista de arriba.', !r.ok);
+      } catch (e) { metaMsg(e.message, true); }
+    };
+    cargarMeta();
+    setInterval(function () { if (!document.hidden && !$('webhook-meta').hidden) cargarMeta(); }, 15000);
+  }
   /* Pestañas: #t-<pestaña>, o el ancla de un bloque (#courier-campos) abre la suya. */
   function mostrarPestana() {
     var h = location.hash.slice(1), pestana = 'resumen', destino = null;
@@ -420,6 +614,62 @@ ${MENSAJE_ERROR_HTTP_JS}
       if (activa) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     if (destino && destino.scrollIntoView) destino.scrollIntoView({ block: 'start' }); else if (window.scrollTo) window.scrollTo(0, 0);
+  }
+  /* «Avisos a GSG»: cada webhook con sus eventos para marcar. */
+  function avisosMsg(t, mal) { var el = $('avisos-aviso'); el.hidden = !t; el.textContent = t || ''; el.style.color = mal ? '#b91c1c' : ''; }
+  function pintarAvisos(d) {
+    var eventos = d.eventos || [];
+    if (!d.webhooks || !d.webhooks.length) {
+      $('avisos-lista').innerHTML = '<div class="vacio compacto"><h3>GSG todavía no registró ninguna dirección</h3><p>GSG la registra con <code>POST /api/v1/webhooks</code> (con su clave). Cuando exista, aparecerá aquí para elegir sus avisos.</p></div>';
+      return;
+    }
+    $('avisos-lista').innerHTML = d.webhooks.map(function (w) {
+      var todos = (w.eventos || []).indexOf('*') >= 0;
+      var tiene = todos || (w.eventos || []).indexOf('mensaje.estado') >= 0;
+      var estado = w.activo ? 'Activo' : ('Apagado' + (w.motivoPausa ? ': ' + w.motivoPausa : ''));
+      return '<div class="av-hook" data-id="' + esc(w.id) + '">' +
+        '<h3>' + esc(w.descripcion || w.url) + (tiene ? '<span class="av-ok">recibe mensaje.estado</span>' : '<span class="av-falta">sin mensaje.estado</span>') + '</h3>' +
+        '<p class="av-meta">' + esc(w.url) + ' · ' + esc(estado) + (w.ultimoOkAt ? ' · último aviso recibido por GSG: ' + esc(new Date(w.ultimoOkAt).toLocaleString('es-PE')) : '') + '</p>' +
+        '<label class="av-ev av-todos"><input type="checkbox" data-todos' + (todos ? ' checked' : '') + '><span><b>Todos los avisos</b><br>Incluye los que se agreguen en el futuro.</span></label>' +
+        '<div class="av-eventos">' + eventos.map(function (e) {
+          var marcado = todos || (w.eventos || []).indexOf(e.nombre) >= 0;
+          return '<label class="av-ev' + (e.nombre === 'mensaje.estado' ? ' destacado' : '') + '"><input type="checkbox" data-evento="' + esc(e.nombre) + '"' + (marcado ? ' checked' : '') + (todos ? ' disabled' : '') + '><span><code>' + esc(e.nombre) + '</code><br>' + esc(e.descripcion) + '</span></label>';
+        }).join('') + '</div>' +
+        '<div class="courier-actions"><button class="btn primario" type="button" data-guardar>Guardar avisos</button>' +
+        (tiene ? '' : '<button class="btn" type="button" data-agregar-estado>Agregar solo mensaje.estado</button>') + '</div></div>';
+    }).join('');
+    document.querySelectorAll('.av-hook').forEach(function (caja) {
+      var id = caja.getAttribute('data-id');
+      var todosBox = caja.querySelector('[data-todos]');
+      var cajas = function () { return Array.prototype.slice.call(caja.querySelectorAll('[data-evento]')); };
+      todosBox.onchange = function () { cajas().forEach(function (x) { x.disabled = todosBox.checked; if (todosBox.checked) x.checked = true; }); };
+      var guardar = async function (lista, boton) {
+        boton.disabled = true;
+        try {
+          await api('/admin/webhooks-gsg/' + encodeURIComponent(id) + '/eventos', 'POST', { eventos: lista });
+          avisosMsg('Guardado: GSG ya recibe estos avisos en ' + (caja.querySelector('.av-meta').textContent.split(' · ')[0]) + '.');
+          await cargarAvisos();
+        } catch (e) { avisosMsg(e.message, true); boton.disabled = false; }
+      };
+      caja.querySelector('[data-guardar]').onclick = function () {
+        var lista = todosBox.checked ? ['*'] : cajas().filter(function (x) { return x.checked; }).map(function (x) { return x.getAttribute('data-evento'); });
+        guardar(lista, this);
+      };
+      var agregar = caja.querySelector('[data-agregar-estado]');
+      if (agregar) agregar.onclick = function () {
+        var lista = cajas().filter(function (x) { return x.checked; }).map(function (x) { return x.getAttribute('data-evento'); });
+        if (lista.indexOf('mensaje.estado') < 0) lista.push('mensaje.estado');
+        guardar(lista, this);
+      };
+    });
+  }
+  async function cargarAvisos() {
+    if (!$('avisos-gsg')) return;
+    try { pintarAvisos(await api('/admin/webhooks-gsg')); } catch (e) { avisosMsg(e.message, true); }
+  }
+  if ($('avisos-gsg')) {
+    $('avisos-refrescar').onclick = function () { avisosMsg(''); cargarAvisos(); };
+    cargarAvisos();
   }
   window.addEventListener('hashchange', mostrarPestana);
   mostrarPestana();

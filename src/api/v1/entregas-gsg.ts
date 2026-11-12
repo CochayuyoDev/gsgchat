@@ -37,7 +37,7 @@ import { z } from 'zod';
 import { responderLectura } from '../../web/cache-lectura.js';
 import type { ServicioEntregas, FilaEntrega } from '../../entregas/servicio.js';
 import { telefonoParaGsg } from '../../entregas/servicio.js';
-import type { EntregasRepo } from '../../entregas/repo.js';
+import { MAX_FIRST_MESSAGE, type EntregasRepo } from '../../entregas/repo.js';
 import type { ActividadRepo } from '../../auth/actividad.js';
 import { datosEnvioDeCrudo, empresaEnTexto, fusionarDatosEnvio } from '../../entregas/datos-envio.js';
 import { horarioGsgSchema } from '../../entregas/seguimiento-gsg.js';
@@ -88,6 +88,12 @@ function referenciasDeEntrada(body: unknown): { total: number; referencias: stri
 }
 
 const textoOpc = z.union([z.string().max(200), z.number()]).nullable().optional();
+/**
+ * El producto (y su detalle) entra con cualquier largo (pedido del dueño, 11/11):
+ * GSG manda descripciones largas y rechazarlas dejaba el pedido sin mensaje.
+ * Se guarda entero; en la plantilla de Meta va acortado (textos.ts, variableMeta).
+ */
+const textoLibreOpc = z.union([z.string(), z.number()]).nullable().optional();
 
 /**
  * Los datos del envio que salen en el primer mensaje al cliente. Todos
@@ -101,7 +107,7 @@ export const CAMPOS_DATOS_ENVIO = {
   fecRegistro: textoOpc,
   fecRuta: textoOpc,
   observacionCliente: textoOpc,
-  detalleProducto: textoOpc,
+  detalleProducto: textoLibreOpc,
   telefono2: textoOpc,
   tamano: textoOpc,
   cantBultos: z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]).nullable().optional(),
@@ -112,7 +118,7 @@ export const CAMPOS_DATOS_ENVIO = {
   agenciaNombre: textoOpc,
   agenciaDestino: textoOpc,
   pagoEnDestino: z.union([z.boolean().transform(v => v ? 'si' : 'no'), z.string().max(200)]).nullable().optional(),
-  producto: textoOpc,
+  producto: textoLibreOpc,
   empresa: z.union([z.object({ codigo: textoOpc, nombre: textoOpc }).passthrough(), z.string().max(200)]).nullable().optional(),
   empresaCodigo: textoOpc,
   empresaNombre: textoOpc,
@@ -123,6 +129,16 @@ export const CAMPOS_DATOS_ENVIO = {
   metodoPago: textoOpc,
   monto: textoOpc,
   remitente: textoOpc,
+  /**
+   * Opcional: el motorizado que GSG asignó, {nombre, telefono} o el nombre
+   * suelto (o `telefonoMotorizado`). Con su teléfono, ese motorizado puede
+   * escribir «proceder cambio de ubicación» a la línea de GSGchat sin nombrar
+   * el pedido (pedido del dueño, 11/11). No se le escribe nada por tenerlo.
+   */
+  motorizado: z.union([z.object({ nombre: textoOpc, telefono: textoOpc }).passthrough(), z.string().max(120)]).nullable().optional(),
+  telefonoMotorizado: textoOpc,
+  /** El texto del primer mensaje al cliente, ya redactado por GSG. Sin el, va el texto de GSGchat. */
+  firstMessage: z.string().max(MAX_FIRST_MESSAGE, `como mucho ${MAX_FIRST_MESSAGE} caracteres (lo que WhatsApp admite en un mensaje con botones)`).nullable().optional(),
 };
 
 /** Lo que se puede cambiar de un pedido ya mandado. El telefono no: eso es otro pedido. */
@@ -197,19 +213,46 @@ type Pedido = z.infer<typeof pedidoSchema>;
 /** El nombre del campo tal como lo manda GSG (para que el error diga lo que ellos escriben). */
 const CAMPO_GSG: Record<string, string> = { nombre: 'cliente', monto: 'montoCobrar' };
 
-/** Uno, una lista, o { pedidos: [...] }. Con todos los fallos de todos los pedidos, campo por campo. */
+/** Lo leido de un cuerpo: los pedidos validos, los fallos campo por campo y de cuales pedidos (0, 1, 2...) vienen. */
+export interface LecturaParcial { pedidos: Pedido[]; detalles: DetalleCampo[]; malos: number[]; error?: string }
+
+function resumenDe(detalles: DetalleCampo[]): string {
+  const grupos = new Map<number, DetalleCampo[]>();
+  for (const d of detalles) {
+    const numero = d.pedido ?? Number(d.campo.match(/^pedidos\[(\d+)\]/)?.[1] ?? 0) + 1;
+    grupos.set(numero, [...(grupos.get(numero) ?? []), d]);
+  }
+  const resumen = [...grupos.entries()].slice(0, 3).map(([numero, fallos]) => {
+    const primero = fallos[0]!;
+    const quien = [primero.cliente && `cliente "${primero.cliente}"`, primero.tracking && `tracking "${primero.tracking}"`].filter(Boolean).join(', ') || `pedido ${numero}`;
+    return `${quien}: ${fallos.map((d) => `${d.campo.replace(/^pedidos\[\d+\]\./, '')} ${d.mensaje}`).join('; ')}`;
+  }).join(' | ');
+  return `${resumen}${grupos.size > 3 ? ' | Consulta los demás pedidos en detalles' : ''}`;
+}
+
+/** Todo o nada: para quien necesita el cuerpo entero valido (validar, corregir un pedido). */
 export function leerCuerpo(body: unknown): Pedido[] | { error: string; detalles: DetalleCampo[] } {
+  const l = leerPedidos(body);
+  if (l.error) return { error: l.error, detalles: l.detalles };
+  if (l.detalles.length) return { error: `${resumenDe(l.detalles)}. No se guardó ninguno.`, detalles: l.detalles };
+  return l.pedidos;
+}
+
+/** Uno, una lista, o { pedidos: [...] }. Cada pedido se valida por su cuenta: los buenos pasan y los malos quedan explicados. */
+export function leerPedidos(body: unknown): LecturaParcial {
   const esObjeto = Boolean(body) && typeof body === 'object' && !Array.isArray(body);
   const envuelto = esObjeto && Array.isArray((body as { pedidos?: unknown }).pedidos);
   const lista = Array.isArray(body) ? body : envuelto ? (body as { pedidos: unknown[] }).pedidos : esObjeto ? [body] : [];
-  if (!lista.length) return { error: 'Manda un pedido ({tracking, cliente, telefono, empresa, metodoPago, montoCobrar, ...}), una lista de pedidos, o {pedidos: [...]}.', detalles: [{ campo: 'cuerpo', mensaje: 'vacío' }] };
-  if (lista.length > 600) return { error: 'Como mucho 600 pedidos por llamada.', detalles: [{ campo: 'pedidos', mensaje: `llegaron ${lista.length}` }] };
+  if (!lista.length) return { pedidos: [], malos: [], error: 'Manda un pedido ({tracking, cliente, telefono, empresa, metodoPago, montoCobrar, ...}), una lista de pedidos, o {pedidos: [...]}.', detalles: [{ campo: 'cuerpo', mensaje: 'vacío' }] };
+  if (lista.length > 600) return { pedidos: [], malos: [], error: 'Como mucho 600 pedidos por llamada.', detalles: [{ campo: 'pedidos', mensaje: `llegaron ${lista.length}` }] };
   const pedidos: Pedido[] = [];
   const detalles: DetalleCampo[] = [];
+  const malos: number[] = [];
   for (const [i, p] of lista.entries()) {
     const prefijo = lista.length > 1 || envuelto || Array.isArray(body) ? `pedidos[${i}].` : '';
     if (!p || typeof p !== 'object' || Array.isArray(p)) {
       detalles.push({ campo: prefijo.replace(/\.$/, '') || 'cuerpo', mensaje: 'tiene que ser un objeto' });
+      malos.push(i);
       continue;
     }
     const normalizado = normalizarPedidoGsg(p) as Record<string, unknown>;
@@ -225,31 +268,19 @@ export function leerCuerpo(body: unknown): Pedido[] | { error: string; detalles:
         const mensaje = falta ? 'falta (es obligatorio)' : issue.code === 'invalid_union' ? 'no tiene el formato esperado' : issue.message;
         if (!detalles.some((d) => d.campo === `${prefijo}${[campo, ...resto].join('.')}`)) detalles.push({ campo: `${prefijo}${[campo, ...resto].join('.')}`, mensaje, ...identidad });
       }
+      malos.push(i);
       continue;
     }
     pedidos.push(r.data);
   }
-  if (detalles.length) {
-    const grupos = new Map<number, DetalleCampo[]>();
-    for (const d of detalles) {
-      const numero = d.pedido ?? Number(d.campo.match(/^pedidos\[(\d+)\]/)?.[1] ?? 0) + 1;
-      grupos.set(numero, [...(grupos.get(numero) ?? []), d]);
-    }
-    const resumen = [...grupos.entries()].slice(0, 3).map(([numero, fallos]) => {
-      const primero = fallos[0]!;
-      const quien = [primero.cliente && `cliente "${primero.cliente}"`, primero.tracking && `tracking "${primero.tracking}"`].filter(Boolean).join(', ') || `pedido ${numero}`;
-      return `${quien}: ${fallos.map((d) => `${d.campo.replace(/^pedidos\[\d+\]\./, '')} ${d.mensaje}`).join('; ')}`;
-    }).join(' | ');
-    return { error: `${resumen}${grupos.size > 3 ? ' | Consulta los demás pedidos en detalles' : ''}. No se guardó ninguno.`, detalles };
-  }
-  return pedidos;
+  return { pedidos, detalles, malos };
 }
 
 /** Los pedidos tal como llegaron (uno, lista o { pedidos }), ya con los nombres de GSG normalizados. */
-function pedidosCrudos(body: unknown): Record<string, unknown>[] {
+function pedidosCrudos(body: unknown, soloIndices?: number[]): Record<string, unknown>[] {
   const esObjeto = Boolean(body) && typeof body === 'object' && !Array.isArray(body);
   const lista = Array.isArray(body) ? body : esObjeto && Array.isArray((body as { pedidos?: unknown }).pedidos) ? (body as { pedidos: unknown[] }).pedidos : esObjeto ? [body] : [];
-  return lista.slice(0, 600).filter((p) => p && typeof p === 'object' && !Array.isArray(p)).map((p) => normalizarPedidoGsg(p) as Record<string, unknown>);
+  return lista.slice(0, 600).filter((p, i) => (!soloIndices || soloIndices.includes(i)) && p && typeof p === 'object' && !Array.isArray(p)).map((p) => normalizarPedidoGsg(p) as Record<string, unknown>);
 }
 
 const textoDe = (v: unknown): string | null => (typeof v === 'string' || typeof v === 'number' ? String(v).trim().slice(0, 191) || null : null);
@@ -292,6 +323,7 @@ export function entregaParaApi(e: FilaEntrega): Record<string, unknown> {
     metodoPago: e.datosEnvio?.metodoPago ?? null,
     monto: e.datosEnvio?.monto ?? null,
     remitente: e.datosEnvio?.remitente ?? null,
+    firstMessage: e.datosEnvio?.firstMessage ?? null,
     estado: e.estado,
     situacion: e.situacion,
     prioridad: e.prioridad ?? 'normal',
@@ -592,8 +624,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   };
 
   /** La llamada no paso la validacion: los trackings y telefonos malos igual quedan reportados. */
-  const reportarDeValidacion = async (body: unknown): Promise<void> => {
-    for (const p of pedidosCrudos(body)) {
+  const reportarDeValidacion = async (body: unknown, soloIndices?: number[]): Promise<void> => {
+    for (const p of pedidosCrudos(body, soloIndices)) {
       const t = trackingNoValido(p.tracking);
       if (t) await reportar(t, p, t === 'tracking_falta' ? 'el pedido llegó sin tracking' : `tracking recibido: ${JSON.stringify(p.tracking).slice(0, 120)}`);
       const tel = p.telefono;
@@ -604,13 +636,19 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   app.post('/api/v1/entregas', { config: { permiso: 'entregas:gestionar' } }, async (request, reply) => {
     // Una orden de cancelar o reintentar tiene su propia direccion (API 2).
     if (esOrdenDeFlujo(request.body)) return enviarError(reply, 400, 'VALIDACION', 'Para cancelar o reintentar un pedido usa POST /api/v1/flujo (API 2); esta dirección es solo para recibir pedidos.', [{ campo: 'accion', mensaje: 'va en POST /api/v1/flujo' }]);
-    const lectura = leerCuerpo(request.body);
-    if ('error' in lectura) {
+    const leido = leerPedidos(request.body);
+    // Nada que guardar (cuerpo vacio, demasiados, o todos malos): 400 con lo que fallo en cada uno.
+    if (leido.error || !leido.pedidos.length) {
       await reportarDeValidacion(request.body);
-      return enviarError(reply, 400, 'VALIDACION', lectura.error, lectura.detalles);
+      return enviarError(reply, 400, 'VALIDACION', leido.error ?? `${resumenDe(leido.detalles)}. No se guardó ninguno.`, leido.detalles);
     }
     const quien = request.usuario?.nombre ? `${request.usuario.nombre} (API)` : 'GSG (API)';
-    return responder(reply, await recibirPedidos(lectura, quien, request.log));
+    // Un pedido malo no frena a los demas: los buenos se guardan y los malos vuelven explicados.
+    if (leido.malos.length) await reportarDeValidacion(request.body, leido.malos);
+    const salida = await recibirPedidos(leido.pedidos, quien, request.log);
+    if (!leido.malos.length || 'error' in salida) return responder(reply, salida);
+    const nMalos = leido.malos.length;
+    return responder(reply, { ...salida, body: { ...salida.body, rechazados: leido.detalles, detalle: `${String(salida.body.detalle)} ${nMalos} pedido${nMalos === 1 ? '' : 's'} rechazado${nMalos === 1 ? '' : 's'} por datos inválidos y sin guardar: ${resumenDe(leido.detalles)}.` } });
   });
 
   app.get<{ Params: { referencia: string } }>('/api/v1/entregas/:referencia', { config: { permiso: 'entregas:leer' } }, async (request, reply) => {
@@ -871,7 +909,8 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
   // El mapa de trackings de un dia: lo que ya se hizo por WhatsApp con cada
   // uno. GSG lo lee cuando quiere; GSGchat nunca se lo empuja.
   app.get('/api/v1/trackings', { config: { permiso: 'entregas:leer' } }, async (request, reply) => {
-    const q = z.object({ dia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).safeParse(request.query ?? {});
+    // `?dia=` vacío es lo mismo que no mandarlo: hoy (así lo dicen el Manual y la colección de Postman).
+    const q = z.object({ dia: z.preprocess((v) => (v === '' ? undefined : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()) }).safeParse(request.query ?? {});
     if (!q.success) return enviarError(reply, 400, 'VALIDACION', '`dia` va como AAAA-MM-DD (por ejemplo 2026-10-10).', [{ campo: 'dia', mensaje: 'AAAA-MM-DD' }]);
     const dia = q.data.dia ?? entregas.diaDeHoy();
     const fichas = await entregas.fichasTrackings(dia);

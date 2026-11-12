@@ -57,6 +57,8 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
       if (query.incidencia && s.incidencia !== query.incidencia) return false;
       if (query.incidencias?.length && !query.incidencias.includes(s.incidencia as never)) return false;
       if (query.requiereHumano !== undefined && s.requiereHumano !== query.requiereHumano) return false;
+      if (query.creadoDesde && s.createdAt.getTime() < query.creadoDesde.getTime()) return false;
+      if (query.creadoHasta && s.createdAt.getTime() >= query.creadoHasta.getTime()) return false;
       if (q) {
         const heno = [s.telefonoCrudo, s.phone, s.nombre, s.referencia].join(' ').toLowerCase();
         if (!heno.includes(q)) return false;
@@ -210,10 +212,9 @@ export function createFakeRutas(reloj: () => Date = () => new Date()): FakeRutas
         .map((s) => ({ ...s }));
     },
 
-    async resumenSolicitudes(loteId) {
+    async resumenSolicitudes(loteId, rango) {
       const grupos = new Map<string, { estado: EstadoSolicitud; incidencia: CodigoIncidencia | null; requiereHumano: boolean; total: number }>();
-      for (const s of solicitudes) {
-        if (loteId && s.loteId !== loteId) continue;
+      for (const s of filtrar({ loteId, ...rango })) {
         const clave = `${s.estado}\u0000${s.incidencia ?? ''}\u0000${s.requiereHumano}`;
         const grupo = grupos.get(clave) ?? { estado: s.estado, incidencia: s.incidencia, requiereHumano: s.requiereHumano, total: 0 };
         grupo.total++;

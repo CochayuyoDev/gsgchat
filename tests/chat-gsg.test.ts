@@ -1,10 +1,13 @@
+import { OGG_REAL } from './fixtures/audio-real.js';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
 import { crearBus } from '../src/eventos/bus.js';
 import { observarRepos } from '../src/eventos/observar.js';
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 
-// El chat de GSG, en /api/v1/chat:
+// El chat de GSG: GET /api/v1/historial y POST /api/v1/chat:
 //  - GET: el motorizado abre el chat de un tracking; GSG manda SOLO el tracking y GSGchat responde con el historial
 //    del WhatsApp que GSG ya dio en POST /api/v1/entregas.
 //  - POST: un usuario de GSG escribe; GSGchat lo manda por WhatsApp a ese numero, lo apunta con quien lo escribio y calla al bot.
@@ -15,7 +18,7 @@ let sinPermiso: string; // solo entregas
 
 const consultar = (params: Record<string, string | number>, key: string | null = clave) => {
   const q = new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])));
-  return e.app.inject({ method: 'GET', url: `/api/v1/chat?${q.toString()}`, headers: key ? { 'x-api-key': key } : {} });
+  return e.app.inject({ method: 'GET', url: `/api/v1/historial?${q.toString()}`, headers: key ? { 'x-api-key': key } : {} });
 };
 const escribir = (cuerpo: unknown, key: string | null = escritor) =>
   e.app.inject({ method: 'POST', url: '/api/v1/chat', headers: { ...(key ? { 'x-api-key': key } : {}), 'content-type': 'application/json' }, payload: JSON.stringify(cuerpo) });
@@ -41,7 +44,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { await e.cerrar(); });
 
-describe('GET /api/v1/chat?tracking=… (el historial)', () => {
+describe('GET /api/v1/historial?tracking=… (el historial)', () => {
   it('devuelve el chat del WhatsApp que GSG dio para ese tracking, con los mensajes', async () => {
     const r = await consultar({ tracking: 'Chat-1' });
     expect(r.statusCode).toBe(200);
@@ -49,6 +52,22 @@ describe('GET /api/v1/chat?tracking=… (el historial)', () => {
     expect(cuerpo).toMatchObject({ tracking: ['Chat-1'], contacto: { telefono: '51987654321' }, hayMas: false });
     for (const sobra of ['entrega', 'ventanaAbierta', 'puedeEscribir', 'motivo']) expect(cuerpo).not.toHaveProperty(sobra);
     expect(cuerpo.mensajes.some((m: any) => m.texto === 'Hola, ya estoy en casa' && m.direccion === 'entrante')).toBe(true);
+  });
+
+  it('trae la nota automatica del chat (la etiqueta de la IA): null sin etiqueta, y la ultima cuando la hay', async () => {
+    expect((await consultar({ tracking: 'CHAT-2' })).json().nota).toBeNull();
+    const repo = e.repos.chatEtiquetas!;
+    await repo.guardar({ phone: '51987654322', dia: '2026-10-27', etiqueta: 'consultar_entrega', origen: 'ia', huella: 'h1', mensajes: 2, motivo: null, loteId: null });
+    await repo.guardar({ phone: '51987654322', dia: '2026-10-28', etiqueta: 'reagendar_entrega', origen: 'ia', huella: 'h2', mensajes: 3, motivo: null, loteId: null });
+    const nota = (await consultar({ tracking: 'CHAT-2' })).json().nota;
+    expect(nota).toMatchObject({ codigo: 'reagendar_entrega', nombre: 'Reagendar entrega', dia: '2026-10-28', origen: 'ia', descripcion: expect.stringMatching(/otro día/) });
+    expect(typeof nota.actualizadaEn).toBe('string');
+    // Lo mismo por el alias del diagrama de integracion.
+    const alias = await e.app.inject({ method: 'GET', url: '/api/v1/messages?chat_id=CHAT-2', headers: { 'x-api-key': clave } });
+    expect(alias.json().nota).toMatchObject({ codigo: 'reagendar_entrega' });
+    // Un chat que la IA no pudo clasificar no tiene nota; y la de un cliente no sale en el de otro.
+    await repo.guardar({ phone: '51987654321', dia: '2026-10-28', etiqueta: null, origen: 'ia', huella: 'h3', mensajes: 1, motivo: 'la IA no respondió', loteId: null });
+    expect((await consultar({ tracking: 'Chat-1' })).json().nota).toBeNull();
   });
 
   it('cada tracking abre solo su chat', async () => {
@@ -159,7 +178,7 @@ describe('POST /api/v1/chat (un usuario de GSG escribe)', () => {
 });
 
 describe('el flujo del diagrama: /api/v1/messages, webhook con chatId y /api/v1/send-message', () => {
-  it('GET /api/v1/messages?chat_id= devuelve el mismo historial que /api/v1/chat?tracking=', async () => {
+  it('GET /api/v1/messages?chat_id= devuelve el mismo historial que /api/v1/historial?tracking=', async () => {
     const r = await e.app.inject({ method: 'GET', url: '/api/v1/messages?chat_id=Chat-1', headers: { 'x-api-key': clave } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual((await consultar({ tracking: 'Chat-1' })).json());
@@ -207,5 +226,95 @@ describe('el flujo del diagrama: /api/v1/messages, webhook con chatId y /api/v1/
     expect(e.textosA('51987654323').filter((t) => t === 'Ya te veo')).toHaveLength(1);
     expect((await e.app.inject({ method: 'POST', url: '/api/v1/send-message', headers: { 'x-api-key': clave, 'content-type': 'application/json' }, payload: JSON.stringify({ chat_id: 'CHAT-3A', texto: 'x', idExterno: 'diag-2', usuario: { id: 1 } }) })).statusCode).toBe(403);
     expect((await e.app.inject({ method: 'POST', url: '/api/v1/send-message', headers: { 'content-type': 'application/json' }, payload: JSON.stringify({ chat_id: 'CHAT-3A', texto: 'x', idExterno: 'diag-3', usuario: { id: 1 } }) })).statusCode).toBe(401);
+  });
+});
+
+describe('POST /api/v1/chat con foto, video o audio (media por URL)', () => {
+  const relleno = Buffer.alloc(64, 1);
+  const ficheros: Record<string, { tipo: string; datos: Buffer }> = {
+    '/foto.jpg': { tipo: 'image/jpeg', datos: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), relleno]) },
+    '/video.mp4': { tipo: 'video/mp4', datos: Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), relleno]) },
+    '/nota.ogg': { tipo: 'audio/ogg', datos: OGG_REAL },
+    '/falso.jpg': { tipo: 'image/jpeg', datos: Buffer.from('esto no es una foto, es texto plano largo') },
+  };
+  let servidor: Server;
+  let base = '';
+  beforeAll(async () => {
+    servidor = createServer((req, res) => {
+      const f = ficheros[req.url ?? ''];
+      if (!f) { res.statusCode = 404; res.end(); return; }
+      res.setHeader('content-type', f.tipo);
+      res.end(f.datos);
+    });
+    await new Promise<void>((ok) => servidor.listen(0, '127.0.0.1', ok));
+    base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => { await new Promise((ok) => servidor.close(ok)); });
+
+  const conMedia = (extra: Record<string, unknown>) => ({ tracking: 'CHAT-2', idExterno: `media-${Math.random()}`, usuario: { id: 77, nombre: 'Juan', rol: 'motorizado' }, ...extra });
+  const ultimoDe = async (tipo: string) => (await consultar({ tracking: 'CHAT-2' }, escritor)).json().mensajes.filter((m: any) => m.tipo === tipo && m.direccion === 'saliente').at(-1);
+
+  it('una foto con su pie de texto sale por WhatsApp, firmada por el usuario de GSG', async () => {
+    const r = await escribir(conMedia({ texto: 'Asi esta la puerta', media: { url: `${base}/foto.jpg` } }));
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ ok: true, estado: 'enviado', duplicado: false });
+    expect(await ultimoDe('image')).toMatchObject({ autor: 'persona', autorNombre: 'Juan', emisor: { tipo: 'gsg', usuarioId: '77' } });
+  });
+
+  it('un video y un audio se mandan solos, sin texto', async () => {
+    expect((await escribir(conMedia({ media: { url: `${base}/video.mp4`, tipo: 'video' } }))).statusCode).toBe(200);
+    expect(await ultimoDe('video')).toBeTruthy();
+    expect((await escribir(conMedia({ media: { url: `${base}/nota.ogg`, tipo: 'audio', voz: true } }))).statusCode).toBe(200);
+    expect(await ultimoDe('audio')).toBeTruthy();
+  });
+
+  it('un reintento con el mismo idExterno no vuelve a mandar el archivo', async () => {
+    const cuerpo = conMedia({ idExterno: 'media-fijo', media: { url: `${base}/foto.jpg` } });
+    expect((await escribir(cuerpo)).json()).toMatchObject({ duplicado: false });
+    expect((await escribir(cuerpo)).json()).toMatchObject({ ok: true, duplicado: true });
+  });
+
+  it('rechaza con 400: un audio con texto, un fichero que no es lo que dice, una URL que no abre, sin texto ni media', async () => {
+    expect((await escribir(conMedia({ texto: 'hola', media: { url: `${base}/nota.ogg`, tipo: 'audio' } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ media: { url: `${base}/falso.jpg`, tipo: 'imagen' } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ media: { url: `${base}/no-existe.jpg` } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ media: { url: `${base}/foto.jpg`, tipo: 'gif' } }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({}))).statusCode).toBe(400);
+  });
+});
+
+describe('POST /api/v1/chat con el archivo en base64 (sin URL publica)', () => {
+  const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 1)]);
+  const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(64, 2)]);
+  const OGG = OGG_REAL;
+  const conMedia = (media: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ tracking: 'CHAT-2', idExterno: `b64-${Math.random()}`, usuario: { id: 77, nombre: 'Juan', rol: 'motorizado' }, media, ...extra });
+  const ultimoDe = async (tipo: string) => (await consultar({ tracking: 'CHAT-2' }, escritor)).json().mensajes.filter((m: any) => m.tipo === tipo && m.direccion === 'saliente').at(-1);
+
+  it('una foto en base64 sale por WhatsApp, firmada por el usuario de GSG', async () => {
+    const r = await escribir(conMedia({ base64: JPEG.toString('base64'), tipo: 'imagen' }, { texto: 'Asi esta la puerta' }));
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ ok: true, estado: 'enviado', duplicado: false });
+    expect(await ultimoDe('image')).toMatchObject({ autor: 'persona', autorNombre: 'Juan', emisor: { tipo: 'gsg', usuarioId: '77' } });
+  });
+
+  it('acepta el prefijo data: y un audio como nota de voz', async () => {
+    expect((await escribir(conMedia({ base64: `data:video/mp4;base64,${MP4.toString('base64')}` }))).statusCode).toBe(200);
+    expect((await escribir(conMedia({ base64: OGG.toString('base64'), tipo: 'audio', voz: true }))).statusCode).toBe(200);
+    expect(await ultimoDe('video')).toBeTruthy();
+    expect(await ultimoDe('audio')).toBeTruthy();
+  });
+
+  it('un archivo de 6 MB pasa (el limite general de 4 MB no le aplica)', async () => {
+    const grande = Buffer.concat([JPEG, Buffer.alloc(6 * 1024 * 1024, 9)]);
+    expect((await escribir(conMedia({ base64: grande.toString('base64'), tipo: 'imagen' }))).statusCode).toBe(200);
+  });
+
+  it('rechaza con 400: base64 roto, algo que no es lo que dice, vacio, y url con base64 a la vez o ninguno', async () => {
+    expect((await escribir(conMedia({ base64: '@@@ esto no es base64 @@@' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: Buffer.from('esto no es una foto, es texto plano largo').toString('base64'), tipo: 'imagen' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: OGG.toString('base64'), tipo: 'imagen' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: '' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ base64: JPEG.toString('base64'), url: 'http://127.0.0.1:1/x.jpg' }))).statusCode).toBe(400);
+    expect((await escribir(conMedia({ tipo: 'imagen' }))).statusCode).toBe(400);
   });
 });

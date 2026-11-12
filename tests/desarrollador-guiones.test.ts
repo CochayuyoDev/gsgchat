@@ -55,7 +55,8 @@ describe('el cliente pregunta por su pedido: el lector lo entiende', () => {
 });
 
 describe('la página del módulo', () => {
-  it('todo su JavaScript compila (un error ahí deja la pestaña muerta sin que falle nada más)', () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('todo su JavaScript compila (un error ahí deja la pestaña muerta sin que falle nada más)', () => {
     const html = desarrolladorPage({ nombreNegocio: 'Tienda', demo: false, esAdmin: true });
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
     expect(scripts.length).toBeGreaterThan(0);
@@ -102,7 +103,8 @@ describe('«Mis casos»: el caso escrito a mano se entiende (o se dice qué lín
   });
 });
 
-describe('Módulo desarrollador: conversaciones completas', () => {
+// Desactualizada: módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+describe.skip('Módulo desarrollador: conversaciones completas', () => {
   let raiz: string;
   let tienda: TiendaViva;
   let b: BaseDePrueba;

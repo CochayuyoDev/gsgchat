@@ -27,6 +27,7 @@
  */
 
 import { appShell } from './shell.js';
+import { TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 import { REPARTO_CSS, REPARTO_JS } from './reparto-comun.js';
 import { PESTANAS_PEDIDOS_CSS, PESTANAS_PEDIDOS_JS, pestanasPedidosHtml } from './pestanas-pedidos.js';
 
@@ -37,14 +38,45 @@ const CSS = `${REPARTO_CSS}
 .d-nombre { font-size: 17px; }
 .d-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 0 0 10px; }
 .d-meta span { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--gris-suave); font-size: 13.5px; overflow-wrap: anywhere; }
-.d-meta small { font-size: 11.5px; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .04em; }
+.d-meta small { font-size: 11.5px; color: var(--texto-suave); text-transform: none; letter-spacing: 0; }
 .d-dir { margin: 0 0 10px; font-size: 13.5px; color: var(--texto-suave); }
-.d-titulo { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); margin: 16px 0 8px; }
+.d-titulo { font-size: 12.5px; text-transform: none; letter-spacing: 0; color: var(--texto-suave); margin: 16px 0 8px; }
 .d-bloque { margin-top: 6px; padding: 4px 12px 12px; border: 1px solid var(--borde); border-radius: 10px; }
 .d-bloque .d-titulo { margin-top: 10px; }
 .d-bloque .campo label { font-size: 13px; font-weight: 600; }
 .d-acciones { gap: 8px; flex-wrap: wrap; }
 .d-peligro { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--borde); }
+/* «Ver qué pasó con este pedido» */
+.qp-btn { width: 100%; margin: 10px 0 2px; font-weight: 600; }
+.qp-fondo { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 16px; background: rgba(11, 20, 26, .55); }
+.qp { font-family: var(--fuente, system-ui, sans-serif); background: var(--panel, #fff); color: var(--texto, #111b21); border-radius: 14px; width: min(640px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 20px; box-shadow: 0 18px 50px rgba(0,0,0,.28); }
+.qp h3 { margin: 0 0 4px; font-size: 17px; }
+.qp .qp-sub { margin: 0 0 14px; font-size: 13px; color: var(--texto-suave); overflow-wrap: anywhere; }
+.qp-diag { border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; border: 1px solid var(--borde); }
+.qp-diag b { display: block; font-size: 15.5px; margin-bottom: 4px; }
+.qp-diag p { margin: 0; font-size: 13.5px; line-height: 1.45; }
+.qp-diag .qp-hacer { margin-top: 8px; font-weight: 600; }
+.qp-diag.bad { background: #fef2f2; border-color: #fecaca; } .qp-diag.bad b { color: #b91c1c; }
+.qp-diag.warn { background: #fffbeb; border-color: #fde68a; } .qp-diag.warn b { color: #92400e; }
+.qp-diag.ok { background: #f0fdf4; border-color: #bbf7d0; } .qp-diag.ok b { color: #166534; }
+.qp-avisos { margin: 0 0 12px; padding: 0; list-style: none; display: grid; gap: 6px; }
+.qp-avisos li { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--gris-suave); line-height: 1.4; }
+.qp-avisos li.bad { background: #fef2f2; color: #991b1b; } .qp-avisos li.warn { background: #fffbeb; color: #92400e; }
+.qp-cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin: 0 0 14px; }
+.qp-cifras span { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: var(--gris-suave); font-size: 15px; font-weight: 600; }
+.qp-cifras small { font-size: 11.5px; font-weight: 400; color: var(--texto-suave); }
+.qp-linea { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--borde); }
+.qp-linea li { position: relative; padding: 0 0 10px 14px; font-size: 13.5px; line-height: 1.4; }
+.qp-linea li::before { content: ''; position: absolute; left: -6px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: #9ca3af; }
+.qp-linea li.ok::before { background: #16a34a; } .qp-linea li.bad::before { background: #dc2626; } .qp-linea li.warn::before { background: #d97706; }
+.qp-linea small { display: block; color: var(--texto-suave); font-size: 12px; }
+.qp-linea .qp-det { display: block; color: var(--texto-suave); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.qp-pie { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+@media (prefers-color-scheme: dark) {
+  .qp-diag.bad, .qp-avisos li.bad { background: rgba(220,38,38,.14); border-color: rgba(220,38,38,.4); color: inherit; }
+  .qp-diag.warn, .qp-avisos li.warn { background: rgba(217,119,6,.14); border-color: rgba(217,119,6,.4); color: inherit; }
+  .qp-diag.ok { background: rgba(22,163,74,.14); border-color: rgba(22,163,74,.4); }
+}
 .d-peligro .btn { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 35%, transparent); }
 .d-peligro .btn:hover { background: var(--rojo); border-color: var(--rojo); color: #fff; }
 .d-linea { list-style: none; margin: 0 0 0 6px !important; padding: 0 0 0 16px !important; border-left: 2px solid var(--borde); display: grid; gap: 10px; }
@@ -72,19 +104,26 @@ const CSS = `${REPARTO_CSS}
   .demo, .aviso { margin-bottom: var(--esp-3); flex-wrap: wrap; }
   .demo a, .aviso a { font-weight: 700; }
 
-  .barra { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; padding: var(--esp-3); margin-bottom: var(--esp-3); }
-  .barra .sep { flex: 1; }
-  .barra label { font-size: var(--fs-small); color: var(--texto-suave); }
+  /* La barra de arriba: qué se mira (día y lote) a la izquierda, qué se hace
+     (cargar, pausar, empezar) a la derecha, y debajo cuánto va. */
+  .barra { display: grid; gap: 0; padding: 0; margin-bottom: var(--esp-3); overflow: hidden; }
+  .barra-fila { display: flex; align-items: center; gap: var(--esp-3) var(--esp-4); flex-wrap: wrap; padding: 12px 16px; }
+  .barra-fila .sep { flex: 1; }
+  .barra-grupo { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; min-width: 0; }
+  .barra-etq { font-size: var(--fs-micro); font-weight: 700; text-transform: none; letter-spacing: 0; color: var(--texto-suave); }
+  .barra select { min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; max-width: 260px; }
+  .barra-acciones .btn { flex: none; }
 
   .wrap textarea { width: 100%; min-height: 150px; font-family: var(--mono); font-size: 13px; }
-  .barra select { min-height: var(--alto-control-sm); padding-top: 5px; padding-bottom: 5px; }
 
   /* Cuánto va y qué está haciendo el motor: la única cifra grande. */
-  .progreso { display: flex; align-items: center; gap: var(--esp-3); flex-wrap: wrap; margin-bottom: var(--esp-3); }
+  .progreso { display: flex; align-items: center; gap: var(--esp-2) var(--esp-4); flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--borde); background: var(--superficie-2); }
+  .progreso:empty { display: none; }
   .cifra { border: 0; background: transparent; padding: 0; color: var(--texto-suave); font-size: var(--fs-small); text-align: left; cursor: pointer; }
-  .cifra b { color: var(--texto); font-size: 21px; font-weight: 700; }
+  .cifra b { color: var(--texto); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cifra-cuando { color: var(--primario); font-weight: 600; }
   .cifra:hover b { color: var(--primario); }
-  .progreso-barra { flex: 1; min-width: 180px; height: 8px; border-radius: 999px; background: var(--superficie-2); overflow: hidden; }
+  .progreso-barra { flex: 1; min-width: 180px; height: 8px; border-radius: 999px; background: var(--borde); overflow: hidden; }
   .progreso-barra > span { display: block; height: 100%; background: var(--verde);  }
   .motor { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-small); color: var(--texto-suave); }
   .motor .punto { width: 9px; height: 9px; border-radius: 50%; background: var(--gris-claro); flex: none; }
@@ -111,7 +150,7 @@ const CSS = `${REPARTO_CSS}
   .filtro.urge[aria-pressed="true"] { background: var(--rojo-suave); border-color: var(--rojo); color: var(--rojo); }
 
   .cols { display: grid; grid-template-columns: 1fr 380px; gap: var(--esp-3); align-items: start; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 
   /* Las cajas son la .tarjeta del armazón, pero con cabecera propia: el
      relleno lo pone cada zona, no la tarjeta. */
@@ -134,15 +173,18 @@ const CSS = `${REPARTO_CSS}
   td b { font-weight: 600; }
   td .sub { color: var(--texto-suave); font-size: var(--fs-small); }
   .tabla-scroll { max-height: 62vh; overflow: auto; }
-  .filtro-dia { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--borde); }
+  .filtro-lista { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--borde); }
   .fd-fila { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .fd-fila #buscar { flex: 1 1 260px; max-width: 380px; min-height: var(--alto-control-sm); }
-  .fd-fila .s-segmento { flex: none; }
-  .fd-fila #f-estado { flex: 0 1 210px; min-height: var(--alto-control-sm); }
+  .fd-fila #buscar { flex: 1 1 260px; min-height: var(--alto-control-sm); }
+  .fd-fila #f-mas { flex: none; }
+  .fd-cuantos { color: var(--primario); font-weight: 700; }
+  .fd-cuantos:empty { display: none; }
+  .fd-limpiar { align-self: end; justify-self: start; }
   .fd-resumen button { border: 0; background: none; color: var(--primario); font: inherit; font-weight: 600; cursor: pointer; padding: 0; text-decoration: underline; }
-  .fd-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; padding: 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie-2); }
+  .fd-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; padding: 12px 16px; border-top: 1px solid var(--borde); background: var(--superficie); }
+  .barra-mas[aria-expanded="true"] { border-color: var(--primario); color: var(--primario); background: var(--primario-suave); }
   .fd-campos[hidden] { display: none; }
-  .fd-campos label { display: grid; gap: 4px; font-size: var(--fs-micro); color: var(--texto-suave); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; min-width: 0; }
+  .fd-campos label { display: grid; gap: 4px; font-size: var(--fs-micro); color: var(--texto-suave); font-weight: 700; text-transform: none; letter-spacing: 0; min-width: 0; }
   .fd-campos input, .fd-campos select { width: 100%; min-height: var(--alto-control-sm); font-weight: 400; font-size: 13.5px; color: var(--texto); text-transform: none; letter-spacing: 0; }
   .fd-resumen { margin: 0; font-size: var(--fs-small); }
   .fd-resumen:empty { display: none; }
@@ -185,7 +227,7 @@ const CSS = `${REPARTO_CSS}
   .aj .aj-guardar-barra { position: sticky; bottom: 0; margin-top: 14px; padding: 12px 0; background: var(--superficie); border-top: 1px solid var(--borde); z-index: 2; justify-content: flex-end; }
   .aj .aj-guardar-barra #aj-estado { order: -1; margin-right: auto; flex: 1 1 auto; }
   .aj .aj-guardar-barra #aj-guardar { order: 2; min-width: 120px; }
-  @media (max-width: 860px) { .aj .aj-bloques { grid-template-columns: 1fr; } .aj .aj-que { margin-left: 0; } }
+  @media (max-width: 860px) { .aj .aj-bloques { grid-template-columns: minmax(0, 1fr); } .aj .aj-que { margin-left: 0; } }
   .aj .aj-frase { margin: 0; line-height: 2.1; font-size: var(--fs-cuerpo); }
   .aj .aj-num { width: 64px; padding: 4px 8px; text-align: center; font: inherit; margin: 0 2px; }
   .aj .paso { border: 1px solid var(--borde); border-radius: var(--radio-sm); padding: 12px 14px; margin-top: var(--esp-2); background: var(--superficie-2); }
@@ -196,18 +238,35 @@ const CSS = `${REPARTO_CSS}
   #aj-pasos-adicionales .paso > h4, #aj-pasos-adicionales .paso > [data-quitar-adicional] { grid-column: 1 / -1; }
   #aj-pasos-adicionales .paso > [data-quitar-adicional] { justify-self: end; }
   #aj-pasos-adicionales .variante { display: flex; flex-direction: column; min-width: 0; padding: 10px 12px; border-radius: var(--radio-sm); background: var(--superficie); border: 1px solid var(--borde); }
-  #aj-pasos-adicionales .variante h5 { margin: 0 0 6px; font-size: var(--fs-small); text-transform: uppercase; letter-spacing: .05em; color: var(--texto-suave); }
+  #aj-pasos-adicionales .variante h5 { margin: 0 0 6px; font-size: var(--fs-small); text-transform: none; letter-spacing: 0; color: var(--texto-suave); }
   #aj-pasos-adicionales .variante .previa { flex: 1; }
+  .aj-editor-inicial { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
+  .aj-editor-inicial .aj-ei-cab { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .aj-editor-inicial .aj-ei-cab h4 { margin: 0; font-size: 15px; }
+  .aj-editor-inicial .aj-ei-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; margin: 8px 0 10px; }
+  .aj-editor-inicial textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; line-height: 1.45; }
+  .aj-editor-inicial .aj-ei-previa { white-space: pre-wrap; margin-top: 6px; }
+  .aj-editor-inicial .fila { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+  .aj-editor-inicial .fila .btn { flex: 0 0 auto; width: auto; }
+  .aj-editor-inicial .aj-ei-ayuda { font-size: 12.5px; color: var(--texto-suave); margin: 8px 0 6px; }
+  .aj-editor-inicial .aj-ei-datos { display: flex; flex-wrap: wrap; gap: 6px; }
+  .aj-editor-inicial .aj-ei-datos button { border: 1px solid var(--borde); background: var(--superficie-2); color: inherit; font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 999px; cursor: pointer; }
+  .aj-editor-inicial .aj-ei-datos button:hover, .aj-editor-inicial .aj-ei-datos button:focus-visible { border-color: var(--primario); color: var(--primario); }
+  @media (max-width: 760px) { .aj-editor-inicial .aj-ei-cols { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 900px) { #aj-pasos-adicionales .paso { grid-template-columns: minmax(0, 1fr); } }
   .aj .paso .cuando { color: var(--texto-suave); font-size: var(--fs-small); margin: 0 0 8px; }
   .aj .previa { background: var(--verde-suave); color: var(--texto); border-radius: var(--radio-sm); padding: 9px 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; max-width: 620px; }
   .aj .previa .previa-msg + .previa-msg { margin-top: 8px; padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--verde) 35%, transparent); }
-  .aj .previa .previa-n { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--texto-suave); margin-bottom: 2px; }
+  .aj .previa .previa-n { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--texto-suave); margin-bottom: 2px; }
   .aj .previa small { display: block; color: var(--texto-suave); font-size: 11px; margin-top: 4px; text-align: right; }
   .aj .paso textarea { margin-top: 8px; min-height: 64px; font-family: var(--fuente); font-size: 14px; }
   .aj .marcadores { font-size: var(--fs-small); color: var(--texto-suave); margin: 6px 0 0; }
   .aj .marcadores code { background: var(--superficie); border: 1px solid var(--borde); border-radius: 5px; padding: 1px 5px; font-size: 12px; cursor: pointer; }
   .aj-intro { margin: 0; padding: 12px 14px; border-radius: var(--radio-sm); background: var(--superficie-2); color: var(--texto-suave); }
+  .aj-tandas-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+  .aj-ayuda-tandas { margin: 8px 0 0; color: var(--texto-suave); font-size: var(--fs-small); line-height: 1.5; max-width: 75ch; }
+  .aj-ayuda-tandas:empty { display: none; }
+  #aj-tandas .aj-titulo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .aj-seccion { margin-top: 18px; padding: 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie); }
   .aj-seccion-inicial { border-color: var(--primario); background: var(--primario-suave); }
   .aj-seccion-cab { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 12px; }
@@ -223,11 +282,50 @@ const CSS = `${REPARTO_CSS}
   .aj-tiempo-control select { max-width: 120px; }
   .aj-fin { margin: 13px 0 0; padding-top: 11px; border-top: 1px solid var(--borde); }
   .aj-seccion .aj-titulo { margin-top: 0; }
-  @media (max-width: 780px) { .aj-tiempo-grid { grid-template-columns: 1fr; } }
+#aj-plantilla-meta .pm-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+#aj-plantilla-meta .pm-cab .aj-titulo { margin: 0; }
+#aj-plantilla-meta .pm-intro { margin: 6px 0 10px; max-width: 75ch; }
+#aj-plantilla-meta .pm-usar { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 0 0 10px; }
+#aj-plantilla-meta .pm-usar input { width: auto; }
+#aj-plantilla-meta .pm-fila { display: grid; gap: 4px; max-width: 420px; }
+#aj-plantilla-meta .pm-fila label { font-size: 13px; font-weight: 600; }
+#aj-plantilla-meta .pm-fila input { font-family: var(--mono, ui-monospace, monospace); }
+#aj-plantilla-meta .pm-fila + .pm-fila { margin-top: 10px; }
+#aj-plantilla-meta .pm-nota { font-size: 12.5px; }
+.aj-con-meta { margin: 0 0 10px; padding: 9px 12px; border-radius: var(--radio-sm, 8px); border: 1px solid var(--borde); background: var(--superficie-2); font-size: 13.5px; }
+#aj-plantilla-meta .pm-acciones { margin: 10px 0 0; gap: 8px; justify-content: flex-start; }
+#aj-plantilla-meta .pm-acciones .btn { flex: 0 0 auto; width: auto; }
+#aj-plantilla-meta .pm-aviso { margin: 10px 0 0; padding: 9px 12px; border-radius: var(--radio-sm, 8px); font-size: 13.5px; font-weight: 600; border: 1px solid var(--borde); }
+#aj-plantilla-meta .pm-aviso.ok { color: var(--primario); border-color: color-mix(in srgb, var(--primario) 40%, transparent); background: color-mix(in srgb, var(--primario) 10%, transparent); }
+#aj-plantilla-meta .pm-aviso.mal { color: var(--rojo); border-color: color-mix(in srgb, var(--rojo) 45%, transparent); background: var(--rojo-suave); }
+#aj-plantilla-meta .pm-orden-t { margin: 4px 0 8px; }
+#aj-plantilla-meta .pm-paso { display: grid; gap: 6px; max-width: 560px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--borde); border-radius: var(--radio-sm, 8px); }
+#aj-plantilla-meta .pm-paso-cab { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+#aj-plantilla-meta .pm-paso select { font-family: var(--mono, ui-monospace, monospace); max-width: 100%; }
+#aj-plantilla-meta .pm-previa-paso { font-size: 13px; white-space: pre-wrap; max-height: 150px; overflow: auto; }
+#aj-plantilla-meta .pm-vars { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; align-items: center; }
+#aj-plantilla-meta .pm-vars select { font-family: inherit; }
+#aj-plantilla-meta .pm-datos { margin-top: 12px; }
+#aj-plantilla-meta .pm-datos summary { cursor: pointer; font-weight: 600; color: var(--primario); }
+#aj-plantilla-meta .pm-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 8px; }
+#aj-plantilla-meta .pm-lista { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 6px; font-size: 13.5px; }
+#aj-plantilla-meta .pm-lista code { font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--superficie-2); }
+#aj-plantilla-meta .previa { white-space: pre-wrap; }
+@media (max-width: 760px) { #aj-plantilla-meta .pm-cols { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 780px) { .aj-tiempo-grid { grid-template-columns: minmax(0, 1fr); } }
 
   /* De pie y con una mano: la tabla deja de ser tabla y cada cliente es una
      ficha que se lee de arriba abajo. */
   @media (max-width: 680px) {
+    /* La barra de arriba, de pie: el día ocupa el ancho y los botones van en su fila. */
+    .barra-fila { gap: 10px; padding: 12px; }
+    .barra-fila .sep { display: none; }
+    .barra-grupo { flex: 1 1 100%; }
+    .barra-grupo select { flex: 1; max-width: none; }
+    .barra-acciones .btn { flex: 1 1 auto; }
+    .barra-mas { flex: 1 1 100%; }
+    .fd-campos { padding: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .progreso { padding: 10px 12px; }
     .panel > h2 { flex-wrap: wrap; }
     .panel > h2 input { max-width: none; flex: 1 1 100%; order: 3; }
     .panel > h2 .btn { order: 4; }
@@ -270,13 +368,42 @@ export function rutasPage(opts: RutasOpts): string {
   ${bandaDemo}
   ${aviso}
 
-  <div class="tarjeta barra">
-    <label for="lote">Lote</label>
-    <select id="lote" aria-label="Elegir el lote que se mira"></select>
-    <button type="button" class="btn primario sm" id="arrancar">Empezar a pedir</button>
-    <button type="button" class="btn sm" id="pausar">Pausar</button>
-    <span class="sep"></span>
-    <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
+  <!-- La barra de arriba manda sobre toda la pantalla: el día y el lote
+       recortan el avance, los contadores y la lista a la vez. -->
+  <div class="tarjeta barra" id="barra">
+    <div class="barra-fila">
+      <div class="barra-grupo">
+        <span class="barra-etq" id="etq-dia">Día</span>
+        <div class="s-segmento" role="group" aria-labelledby="etq-dia" id="filtro-dia">
+          <button type="button" class="seg activo" data-rango="hoy" aria-pressed="true">Hoy</button>
+          <button type="button" class="seg" data-rango="ayer" aria-pressed="false">Ayer</button>
+          <button type="button" class="seg" data-rango="semana" aria-pressed="false">7 días</button>
+          <button type="button" class="seg" data-rango="todos" aria-pressed="false">Todos</button>
+        </div>
+      </div>
+      <div class="barra-grupo">
+        <label class="barra-etq" for="lote">Lote</label>
+        <select id="lote" aria-label="Elegir el lote que se mira"></select>
+      </div>
+      <button type="button" class="btn sm barra-mas" id="f-mas" aria-expanded="false" aria-controls="f-campos">Más filtros <span class="fd-cuantos" id="f-cuantos"></span></button>
+      <span class="sep"></span>
+      <div class="barra-grupo barra-acciones">
+        <button type="button" class="btn sm" id="nuevo">Cargar lista nueva</button>
+        <button type="button" class="btn sm" id="pausar">Pausar</button>
+        <button type="button" class="btn primario sm" id="arrancar">Empezar a pedir</button>
+      </div>
+    </div>
+    <!-- Más filtros: fechas exactas (cambian todo, como el día) y hora, distrito y estado (afinan la lista). -->
+    <div class="fd-campos" id="f-campos" hidden>
+      <label>Fecha desde <input type="date" id="f-desde"></label>
+      <label>Fecha hasta <input type="date" id="f-hasta"></label>
+      <label>Hora desde <input type="time" id="f-hora-desde"></label>
+      <label>Hora hasta <input type="time" id="f-hora-hasta"></label>
+      <label>Distrito <select id="f-distrito"><option value="">Todos</option></select></label>
+      <label>Estado <select id="f-estado"><option value="">Todos los estados</option></select></label>
+      <button type="button" class="btn sm fd-limpiar" id="f-limpiar">Quitar estos filtros</button>
+    </div>
+    <div class="progreso" id="progreso" role="status"></div>
   </div>
 
   <!-- Ajustes de chat: cómo se le escribe al cliente (horario, ritmo, insistencia y textos) -->
@@ -295,11 +422,38 @@ export function rutasPage(opts: RutasOpts): string {
         <p class="aj-frase">Solo de las <input id="aj-hora-inicio" type="number" min="0" max="23" class="aj-num" aria-label="Hora de inicio">:00 a las <input id="aj-hora-fin" type="number" min="1" max="24" class="aj-num" aria-label="Hora de fin">:00. Fuera de ese horario, los mensajes esperan al día siguiente.</p>
       </section>
 
+      <section class="aj-seccion" id="aj-plantilla-meta">
+        <div class="pm-cab"><h3 class="aj-titulo">Plantillas aprobadas por Meta</h3><span id="pm-chip" class="chip" role="status">Revisando…</span></div>
+        <p class="muted pm-intro">Con WhatsApp API, Meta solo deja escribirle primero a un cliente con una plantilla aprobada. El primer mensaje de cada pedido sale con esta plantilla y sus datos; si el cliente ya escribió en las últimas 24 h, sale el texto de siempre.</p>
+        <label class="pm-usar"><input type="checkbox" id="pm-usar"> Usar la plantilla aprobada por Meta en el primer mensaje</label>
+        <p class="pm-orden-t"><b>Orden en que salen</b> <span class="muted">(cada mensaje usa la plantilla que elijas; si el cliente ya escribió en las últimas 24 h, sale el texto normal del bot)</span></p>
+        <div class="pm-paso">
+          <div class="pm-paso-cab"><span class="aj-paso-num">1</span><div><b>Primer mensaje</b><span class="muted"> · sale al llegar el pedido de GSG</span></div></div>
+          <select id="pm-nombre" aria-label="Plantilla del primer mensaje"></select>
+          <div class="previa pm-previa-paso" id="pm-previa-primero"></div>
+        </div>
+        <div id="pm-seguimientos"></div>
+        <p class="muted pm-nota" id="pm-sin-aprobadas" hidden>Todavía no hay plantillas aprobadas en la lista. Pulsa «Traer el estado desde Meta» para cargarlas.</p>
+        <p class="muted pm-nota">Los tiempos de los recordatorios se cambian más abajo, en «Recordatorios y seguimientos». Si hay más recordatorios que plantillas, se repite la última.</p>
+        <div class="fila pm-acciones">
+          <button type="button" class="btn primario sm" id="pm-guardar">Guardar</button>
+          <button type="button" class="btn sm" id="pm-traer">Traer el estado desde Meta</button>
+        </div>
+        <p class="pm-aviso" id="pm-aviso" role="status" hidden></p>
+        <details class="pm-datos" open>
+          <summary>Los 8 datos que se llenan solos</summary>
+          <div class="pm-cols">
+            <ol class="pm-lista" id="pm-lista"></ol>
+            <div><span class="muted">Así le llega (ejemplo)</span><div class="previa" id="pm-previa"></div></div>
+          </div>
+        </details>
+      </section>
+
       <section class="aj-seccion aj-seccion-inicial">
         <div class="aj-seccion-cab"><span class="aj-paso-num">1</span><div><h3>Solicitud inicial de ubicación</h3><p>Plantilla «Solicitud de ubicación» que se envía al llegar un pedido nuevo de GSG. Este tiempo no es un recordatorio.</p></div></div>
         <div id="aj-tiempo-solicitud"></div>
         <div id="aj-pasos"></div>
-        <details class="aj-editor-inicial" id="aj-editor-inicial"><summary>Editar el texto de «Solicitud de ubicación»</summary><p class="muted">Este es el primer mensaje real que GSGchat envía al recibir el pedido. Si lo dejas vacío, usa el texto predeterminado. El horario se toma de Pedidos GSG → Ajustes de entrega. Límite: 2000 caracteres.</p><label for="aj-texto-inicial">Texto que recibe el cliente</label><textarea id="aj-texto-inicial" rows="6" maxlength="2000" placeholder="Escribe la solicitud inicial de ubicación"></textarea><p class="marcadores">Puedes usar {nombreCompleto}, {producto}, {empresa}, {tracking}, {monto}, {direccionCompleta}, {horario}, {desde}, {hasta} y otros datos del pedido.</p><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar texto inicial</button><span id="aj-estado-texto-inicial" class="muted" role="status"></span></div></details>
+        <div class="aj-editor-inicial" id="aj-editor-inicial"><p class="aj-con-meta" id="aj-con-meta" hidden>Con la <b>plantilla aprobada por Meta</b> activa, por WhatsApp API el primer mensaje sale con esa plantilla. Este texto se usa solo si el cliente te escribió en las últimas 24 h o si el mensaje sale por una línea de QR.</p><div class="aj-ei-cab"><h4>Primer mensaje que recibe el cliente</h4><span id="aj-estado-texto-inicial" class="chip" role="status">Cargando…</span></div><p class="muted">Es lo que le llega al cliente cuando GSG manda su pedido. Cámbialo como quieras: a la derecha ves cómo le llega.</p><div class="aj-ei-cols"><div><label for="aj-texto-inicial">Texto</label><textarea id="aj-texto-inicial" rows="13" maxlength="2000" spellcheck="true"></textarea><p class="aj-ei-ayuda">Toca un dato para ponerlo donde está el cursor. Si a un pedido le falta un dato, esa línea no sale.</p><div class="aj-ei-datos" id="aj-datos-inicial"></div></div><div><span class="muted">Así le llega</span><div class="previa aj-ei-previa" id="aj-previa-inicial"></div></div></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-texto-inicial">Guardar el primer mensaje</button><button type="button" class="btn sm" id="aj-fabrica-texto-inicial">Volver al texto de fábrica</button></div></div><div class="aj-editor-inicial" id="aj-editor-otros"><div class="aj-ei-cab"><h4>Los demás mensajes del sistema</h4><span id="aj-estado-otros" class="chip" role="status">Cargando…</span></div><p class="muted">Los otros mensajes fijos del bot: el mensaje final («Ubicación registrada») y los del cambio de ubicación. El mensaje inicial y los recordatorios se editan arriba. No incluye al motorizado, al asistente ni a la IA. Las variables van entre llaves. Un texto igual al de fábrica no se guarda como propio; vaciarlo lo devuelve al de fábrica.</p><div id="aj-otros-lista"></div><div class="fila"><button type="button" class="btn primario sm" id="aj-guardar-otros">Guardar los mensajes</button></div></div>
       </section>
 
       <section class="aj-seccion">
@@ -313,6 +467,24 @@ export function rutasPage(opts: RutasOpts): string {
       <section class="aj-seccion">
         <h3 class="aj-titulo">Pausa entre clientes</h3>
         <p class="aj-frase">Entre un cliente y el siguiente, esperar entre <input id="aj-pausa-min" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa mínima"> <select id="aj-pausa-min-unidad" data-unidad-for="aj-pausa-min" aria-label="Unidad de pausa mínima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select> y <input id="aj-pausa-max" data-duracion type="number" min="1" max="86400" class="aj-num" aria-label="Pausa máxima"> <select id="aj-pausa-max-unidad" data-unidad-for="aj-pausa-max" aria-label="Unidad de pausa máxima"><option value="1" selected>segundos</option><option value="60">minutos</option><option value="3600">horas</option></select>. Esta pausa es independiente de los tiempos por pedido.</p>
+      </section>
+
+      <section class="aj-seccion" id="aj-tandas">
+        <h3 class="aj-titulo">Envío por tandas <span class="chip tono-azul sin-punto">Solo WhatsApp API</span></h3>
+        <p class="aj-frase"><label class="aj-tandas-check"><input type="checkbox" id="aj-tandas-activo" disabled> Enviar por tandas:</label> <input id="aj-tandas-tamano" disabled type="number" min="1" max="80" step="1" class="aj-num" aria-label="Mensajes por tanda"> mensajes cada <input id="aj-tandas-min" disabled type="number" min="2" max="60" step="1" class="aj-num" aria-label="Minutos entre tandas"> minutos.</p>
+        <p class="aj-ayuda-tandas">Solo para los números de <b>WhatsApp API</b>: en vez de esperar entre cada cliente, salen hasta ese número de mensajes seguidos y después se espera. Entre tanda y tanda el sistema revisa los rechazos de Meta y frena si algo va mal. Los <b>números normales (con QR)</b> no cambian: siguen con la pausa entre clientes de arriba. Recomendado: 50 mensajes cada 3 minutos.</p>
+        <p class="aj-ayuda-tandas" id="aj-tandas-estado" role="status"></p>
+      </section>
+
+      <section class="aj-seccion" id="aj-cambio-ubi">
+        <h3 class="aj-titulo">Cambio de ubicación</h3>
+        <p class="aj-frase">El cliente puede cambiar su ubicación diciendo «Cambio de Ubicación» hasta las <input id="aj-cu-hora" type="time" aria-label="Hora límite para cambiar la ubicación"> (por defecto 15:00, hora de Lima).</p>
+        <label style="display:block;margin-top:8px"><strong>Después de esa hora, el mensaje de cambio de ubicación pasa a:</strong> <span class="muted">Variables: {horaLimite} {soporte}</span>
+          <textarea id="aj-cu-texto" rows="4" style="width:100%"></textarea></label>
+        <label style="display:block;margin-top:12px"><strong>Números de GSG que pueden ordenar el cambio aunque haya pasado la hora:</strong>
+          <textarea id="aj-cu-autorizados" rows="2" maxlength="900" placeholder="999555111, 987654321" style="width:100%;box-sizing:border-box"></textarea></label>
+        <p class="muted">Si un motorizado o alguien de GSG escribe <b>proceder cambio de ubicación</b> (con o sin tilde) a este WhatsApp, se registra la última ubicación que mandó el cliente y al cliente le llega «ubicación registrada». Escriben el tracking detrás: <b>proceder cambio de ubicación GSG-123</b> (sin tracking vale si solo un cliente espera un cambio). Separa los números con comas. El motorizado que GSG manda con el pedido puede hacerlo sin estar aquí, y un cliente nunca puede.</p>
+        <div class="fila" style="margin-top:8px"><button type="button" class="btn primario" id="aj-cu-guardar">Guardar cambio de ubicación</button> <button type="button" class="btn" id="aj-cu-fabrica">Texto de fábrica</button> <span class="muted" id="aj-cu-estado" role="status"></span></div>
       </section>
 
       <section class="aj-seccion">
@@ -368,8 +540,7 @@ export function rutasPage(opts: RutasOpts): string {
     </div>
   </div>
 
-  <div class="progreso" id="progreso" role="status"></div>
-  <div class="filtros" id="filtros"></div>
+  <div class="filtros" id="filtros" role="group" aria-label="Qué clientes ver"></div>
 
   <div class="cols">
     <div class="tarjeta panel">
@@ -378,24 +549,9 @@ export function rutasPage(opts: RutasOpts): string {
         <span class="sep"></span>
         <button type="button" class="btn sm" id="csv">Descargar CSV</button>
       </h2>
-      <div class="filtro-dia" id="filtro-dia">
+      <div class="filtro-lista">
         <div class="fd-fila">
           <input id="buscar" type="search" placeholder="Buscar cliente, tracking o celular" aria-label="Buscar cliente, tracking o celular">
-          <div class="s-segmento" role="group" aria-label="Día">
-            <button type="button" class="seg activo" data-rango="hoy" aria-pressed="true">Hoy</button>
-            <button type="button" class="seg" data-rango="ayer" aria-pressed="false">Ayer</button>
-            <button type="button" class="seg" data-rango="semana" aria-pressed="false">7 días</button>
-            <button type="button" class="seg" data-rango="todos" aria-pressed="false">Todos</button>
-          </div>
-          <select id="f-estado" aria-label="Estado"><option value="">Todos los estados</option></select>
-          <button type="button" class="btn sm" id="f-mas" aria-expanded="false" aria-controls="f-campos">Más filtros</button>
-        </div>
-        <div class="fd-campos" id="f-campos" hidden>
-          <label>Fecha desde <input type="date" id="f-desde"></label>
-          <label>Fecha hasta <input type="date" id="f-hasta"></label>
-          <label>Hora desde <input type="time" id="f-hora-desde"></label>
-          <label>Hora hasta <input type="time" id="f-hora-hasta"></label>
-          <label>Distrito <select id="f-distrito"><option value="">Todos</option></select></label>
         </div>
         <p class="muted fd-resumen" id="f-resumen" role="status"></p>
       </div>
@@ -463,6 +619,7 @@ var listasPegadas = 0;   /* filas utiles que dijo la ultima revision de lo pegad
  */
 var FILTROS = [
   { vista: 'requieren_persona', clase: 'urge' },
+  { vista: 'privacidad', clase: 'urge', soloSiHay: true },
   { vista: 'sin_ubicacion' },
   { vista: 'pendientes' },
   { vista: 'esperando' },
@@ -537,11 +694,15 @@ function pintarProgreso(datos) {
   var cifras = lote ? lote.cifras : datos.cifras;
   var total = lote ? lote.total : Object.keys(cifras).reduce(function (suma, k) { return suma + cifras[k]; }, 0);
   var hechos = cifras.resuelto || 0;
+  /* Con los contadores ya cargados, el avance cuenta lo mismo que ellos:
+     el día y el lote de la barra. */
+  if (cifrasVista && cifrasVista.todos !== undefined) { total = cifrasVista.todos || 0; hechos = cifrasVista.resueltos || 0; }
   var porcentaje = total ? Math.round((hechos / total) * 100) : 0;
+  var cuando = textoDelRango();
 
   document.getElementById('progreso').innerHTML =
     '<button type="button" class="cifra" data-vista="resueltos" title="Ver a quiénes ya les llegó la ubicación">' +
-      '<b>' + hechos + '</b> de ' + total + ' con ubicación</button>' +
+      '<b>' + hechos + '</b> de ' + total + ' con ubicación' + (cuando ? ' <span class="cifra-cuando">' + esc(cuando) + '</span>' : '') + '</button>' +
     '<span class="progreso-barra"><span style="width:' + porcentaje + '%"></span></span>' +
     estadoDelMotor(datos.motor) +
     (datos.alertas.coordinador ? '' : '<span class="muted">Nadie recibe avisos por WhatsApp de los casos parados.</span>') +
@@ -621,7 +782,9 @@ function pintarGsg(datos) {
 /* --- filtros y lista --------------------------------------------------- */
 
 async function cargarFiltros() {
-  var data = await api('/admin/rutas/vistas' + (loteActual ? '?loteId=' + encodeURIComponent(loteActual) : ''));
+  var params = paramsDeRango();
+  if (loteActual) params.push('loteId=' + encodeURIComponent(loteActual));
+  var data = await api('/admin/rutas/vistas' + (params.length ? '?' + params.join('&') : ''));
   nombresVista = data.nombres;
   cifrasVista = data.cifras;
   var html = FILTROS.map(function (f) {
@@ -633,10 +796,12 @@ async function cargarFiltros() {
   }).join('');
   var caja = document.getElementById('filtros');
   if (caja.innerHTML !== html) caja.innerHTML = html;
+  /* El avance cuenta lo mismo que los contadores: el día y el lote elegidos. */
+  if (resumen) pintarProgreso(resumen);
 }
 
 async function cargarLista() {
-  var params = ['vista=' + encodeURIComponent(vista), 'limit=500'];
+  var params = ['vista=' + encodeURIComponent(vista), 'limit=500'].concat(paramsDeRango());
   if (loteActual) params.push('loteId=' + encodeURIComponent(loteActual));
   var q = document.getElementById('buscar').value.trim();
   /* Un celular se busca igual escrito con espacios, guiones, «+51» o sin nada. */
@@ -644,7 +809,8 @@ async function cargarLista() {
   if (qEnvio) params.push('q=' + encodeURIComponent(qEnvio));
 
   var data = await api('/admin/rutas/solicitudes?' + params.join('&'));
-  /* La lista muestra por defecto solo el día de hoy; lo anterior sigue guardado y se ve con las fechas. */
+  /* El día lo recorta el servidor (así las cifras y la lista cuentan lo mismo);
+     hora, distrito y estado se afinan aquí sobre lo que llegó. */
   var visibles = data.items.filter(pasaFiltroDia);
   llenarDistritos(data.items);
   document.getElementById('titulo-lista').textContent =
@@ -652,8 +818,8 @@ async function cargarLista() {
   var ocultos = data.items.length - visibles.length;
   var aviso = document.getElementById('f-resumen');
   if (ocultos > 0) {
-    aviso.innerHTML = esc(ocultos + (ocultos === 1 ? ' resultado queda' : ' resultados quedan')) + ' fuera de los filtros de día, hora, distrito o estado. <button type="button" id="f-ver-todos">Ver todos los días</button>';
-    document.getElementById('f-ver-todos').onclick = function () { aplicarRango('todos'); document.getElementById('f-estado').value = ''; cargarLista().catch(function () {}); };
+    aviso.innerHTML = esc(ocultos + (ocultos === 1 ? ' resultado queda' : ' resultados quedan')) + ' fuera de los filtros de hora, distrito o estado. <button type="button" id="f-ver-todos">Quitar esos filtros</button>';
+    document.getElementById('f-ver-todos').onclick = function () { limpiarFiltrosFinos(); cargarLista().catch(function () {}); };
   } else aviso.textContent = '';
   data = { items: visibles, total: data.total };
 
@@ -675,7 +841,7 @@ async function cargarLista() {
   pintarListaVacia(data.items.length, q);
 }
 
-/* --- filtro por día, hora y distrito (solo vista: los datos no se tocan) --- */
+/* --- filtros: el día lo aplica el servidor; hora, distrito y estado, la lista --- */
 function aIsoLocal(fecha) {
   var m = fecha.getMonth() + 1, d = fecha.getDate();
   return fecha.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
@@ -683,10 +849,6 @@ function aIsoLocal(fecha) {
 function pasaFiltroDia(s) {
   var f = new Date(s.createdAt || s.updatedAt || 0);
   if (isNaN(f.getTime())) return true;
-  var dia = aIsoLocal(f);
-  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value;
-  if (desde && dia < desde) return false;
-  if (hasta && dia > hasta) return false;
   var hm = (f.getHours() < 10 ? '0' : '') + f.getHours() + ':' + (f.getMinutes() < 10 ? '0' : '') + f.getMinutes();
   var h1 = document.getElementById('f-hora-desde').value, h2 = document.getElementById('f-hora-hasta').value;
   if (h1 && hm < h1) return false;
@@ -705,44 +867,97 @@ function llenarDistritos(items) {
   var html = '<option value="">Todos</option>' + vistos.map(function (v) { return '<option value="' + esc(v) + '">' + esc(v) + '</option>'; }).join('');
   if (lista.innerHTML !== html) { lista.innerHTML = html; lista.value = actual; }
 }
-var CAMPOS_DIA = ['f-desde', 'f-hasta', 'f-hora-desde', 'f-hora-hasta', 'f-distrito', 'f-estado'];
+/* Los filtros finos: no cambian las cifras de arriba, solo afinan la lista. */
+var CAMPOS_FINOS = ['f-hora-desde', 'f-hora-hasta', 'f-distrito', 'f-estado'];
 (function () {
   document.getElementById('f-estado').innerHTML = '<option value="">Todos los estados</option>' + Object.keys(ESTADOS).map(function (k) {
     return '<option value="' + k + '">' + esc(ESTADOS[k].texto) + '</option>';
   }).join('');
 })();
+
+/* El día se elige por la fecha en que entró el pedido, en la hora de este
+   equipo: «hoy» va de las 00:00 de hoy a las 00:00 de mañana. */
+function inicioDelDia(iso) {
+  var p = iso.split('-');
+  return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+}
+function paramsDeRango() {
+  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value, params = [];
+  if (desde) params.push('creadoDesde=' + encodeURIComponent(inicioDelDia(desde).toISOString()));
+  if (hasta) {
+    var fin = inicioDelDia(hasta);
+    fin.setDate(fin.getDate() + 1);
+    params.push('creadoHasta=' + encodeURIComponent(fin.toISOString()));
+  }
+  return params;
+}
+var rangoActual = 'hoy';
+function textoDelRango() {
+  if (rangoActual === 'hoy') return 'hoy';
+  if (rangoActual === 'ayer') return 'ayer';
+  if (rangoActual === 'semana') return 'en los últimos 7 días';
+  if (rangoActual === 'todos') return '';
+  var desde = document.getElementById('f-desde').value, hasta = document.getElementById('f-hasta').value;
+  var corto = function (iso) { var p = iso.split('-'); return p[2] + '/' + p[1]; };
+  if (desde && hasta) return desde === hasta ? 'el ' + corto(desde) : 'del ' + corto(desde) + ' al ' + corto(hasta);
+  if (desde) return 'desde el ' + corto(desde);
+  if (hasta) return 'hasta el ' + corto(hasta);
+  return '';
+}
 function aplicarRango(rango) {
   var hoy = new Date(), desde = '', hasta = '';
   if (rango === 'hoy') { desde = hasta = aIsoLocal(hoy); }
-  else if (rango === 'ayer') { var a = new Date(hoy.getTime() - 86400000); desde = hasta = aIsoLocal(a); }
-  else if (rango === 'semana') { desde = aIsoLocal(new Date(hoy.getTime() - 6 * 86400000)); hasta = aIsoLocal(hoy); }
+  else if (rango === 'ayer') { var a = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1); desde = hasta = aIsoLocal(a); }
+  else if (rango === 'semana') { desde = aIsoLocal(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 6)); hasta = aIsoLocal(hoy); }
   document.getElementById('f-desde').value = desde;
   document.getElementById('f-hasta').value = hasta;
-  ['f-hora-desde', 'f-hora-hasta', 'f-distrito'].forEach(function (id) { document.getElementById(id).value = ''; });
   marcarRango(rango);
 }
 function marcarRango(rango) {
+  rangoActual = rango;
   document.querySelectorAll('#filtro-dia [data-rango]').forEach(function (b) {
     var on = b.getAttribute('data-rango') === rango;
     b.classList.toggle('activo', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
 }
+function limpiarFiltrosFinos() {
+  CAMPOS_FINOS.forEach(function (id) { document.getElementById(id).value = ''; });
+  contarFiltrosFinos();
+}
+/* «Más filtros (2)»: que se vea que hay algo puesto aunque esté plegado. */
+function contarFiltrosFinos() {
+  var n = CAMPOS_FINOS.filter(function (id) { return document.getElementById(id).value; }).length;
+  document.getElementById('f-cuantos').textContent = n ? '(' + n + ')' : '';
+}
+/* Cambiar el día cambia todo: el avance, los contadores y la lista. */
+function recargarPorDia() {
+  return cargarFiltros().then(cargarLista).catch(function (e) { toast(e.message); });
+}
 aplicarRango('hoy');
 document.getElementById('f-mas').onclick = function () {
   var caja = document.getElementById('f-campos'), abrir = caja.hidden;
   caja.hidden = !abrir;
   this.setAttribute('aria-expanded', abrir ? 'true' : 'false');
-  this.textContent = abrir ? 'Menos filtros' : 'Más filtros';
+  this.firstChild.textContent = abrir ? 'Menos filtros ' : 'Más filtros ';
 };
-CAMPOS_DIA.forEach(function (id) {
-  document.getElementById(id).addEventListener('change', function () { marcarRango(''); cargarLista().catch(function () {}); });
+document.getElementById('lista-vacia').addEventListener('click', function (ev) {
+  if (!ev.target.closest('[data-ver-todos-dias]')) return;
+  aplicarRango('todos');
+  recargarPorDia();
+});
+document.getElementById('f-limpiar').onclick =function () { limpiarFiltrosFinos(); cargarLista().catch(function () {}); };
+CAMPOS_FINOS.forEach(function (id) {
+  document.getElementById(id).addEventListener('change', function () { contarFiltrosFinos(); cargarLista().catch(function () {}); });
+});
+['f-desde', 'f-hasta'].forEach(function (id) {
+  document.getElementById(id).addEventListener('change', function () { marcarRango(''); recargarPorDia(); });
 });
 document.getElementById('filtro-dia').addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-rango]');
   if (!b) return;
   aplicarRango(b.getAttribute('data-rango'));
-  cargarLista().catch(function () {});
+  recargarPorDia();
 });
 
 /* El hueco cuando no hay nada: siempre dice qué hacer a continuación. */
@@ -761,6 +976,13 @@ function pintarListaVacia(cuantos, q) {
     return;
   }
   if (vista === 'todos') {
+    var cuando = textoDelRango();
+    if (cuando && rangoActual !== 'todos') {
+      caja.innerHTML = '<div class="vacio"><h3>No entró ningún pedido ' + esc(cuando) + '</h3>' +
+        '<p>Los de otros días siguen guardados.</p>' +
+        '<div class="acciones"><button type="button" class="btn" data-ver-todos-dias="1">Ver todos los días</button></div></div>';
+      return;
+    }
     caja.innerHTML = '<div class="vacio"><h3>Esta lista está vacía</h3>' +
       '<p>El lote elegido no tiene ningún cliente. Elige otro lote arriba o carga una lista nueva.</p></div>';
     return;
@@ -896,6 +1118,8 @@ function pintarDetalle(data) {
   var puede = accionesDeEstado(s.estado);
   var enlaceChat = '<a class="btn sm fijo" href="/chat?phone=' + encodeURIComponent(s.phone || s.telefonoCrudo) + '">Abrir el chat</a>' +
     (sinTelefono ? '' : '<a href="#" class="btn sm fijo" id="d-incidencia">Enviar incidencia manual</a>');
+  // Siempre a mano, en cualquier estado: la historia del pedido y el porqué.
+  var botonQuePaso = '<button type="button" class="btn sm qp-btn" id="d-que-paso">🔎 Ver qué pasó con este pedido</button>';
   var abrirIncidencia = function (evento) {
     if (evento) evento.preventDefault();
     abrirIncidenciaManual({ phone: s.phone, tracking: s.referencia || '', alTerminar: function () { detalleId = null; refrescar(); } });
@@ -907,12 +1131,14 @@ function pintarDetalle(data) {
     document.getElementById('detalle-acciones').innerHTML =
       '<div class="aviso" style="margin:12px 0 8px"><div><b>Quitada de esta automatización</b><br>' +
         'No se le volverá a escribir por esta solicitud. El chat, el contacto y el historial se conservan.</div></div>' +
-      '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>';
+      '<div class="fila" style="margin:0 0 4px">' + enlaceChat + '</div>' + botonQuePaso;
     if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
+    document.getElementById('d-que-paso').onclick = function () { abrirQuePaso(s.id); };
     return;
   }
 
   document.getElementById('detalle-acciones').innerHTML =
+    botonQuePaso +
     '<div class="d-bloque"><h3 class="d-titulo">Corregir datos</h3>' +
     '<div class="campo"><label for="d-telefono">Teléfono</label>' +
       '<div class="fila"><input id="d-telefono" value="' + esc(s.telefonoCrudo) + '">' +
@@ -936,6 +1162,7 @@ function pintarDetalle(data) {
       : '');
 
   if (!sinTelefono) document.getElementById('d-incidencia').onclick = abrirIncidencia;
+  document.getElementById('d-que-paso').onclick = function () { abrirQuePaso(s.id); };
   document.getElementById('d-guardar-tel').onclick = function () { guardarTelefono(s.id); };
   document.getElementById('d-guardar-ubi').onclick = function () { guardarUbicacion(s.id); };
   document.getElementById('d-derivar').onclick = function () { accionSobre(s.id, '/derivar', 'Pasado al repartidor.', this); };
@@ -948,6 +1175,71 @@ function pintarDetalle(data) {
   if (puede.quitar) {
     document.getElementById('d-quitar').onclick = function () { quitarDeAutomatizacion(s, this); };
   }
+}
+
+/**
+ * «Ver qué pasó con este pedido»: el diagnóstico arriba (qué pasó y por qué),
+ * los avisos, las cifras y la línea de tiempo. Solo lee: no cambia nada.
+ */
+async function abrirQuePaso(id) {
+  var viejo = document.getElementById('qp-fondo');
+  if (viejo) viejo.remove();
+  var fondo = document.createElement('div');
+  fondo.className = 'qp-fondo';
+  fondo.id = 'qp-fondo';
+  fondo.innerHTML = '<div class="qp" role="dialog" aria-modal="true" aria-labelledby="qp-titulo"><h3 id="qp-titulo">Qué pasó con este pedido</h3><p class="qp-sub">Leyendo todo lo que quedó guardado…</p></div>';
+  var cerrar = function () { fondo.remove(); document.removeEventListener('keydown', alTeclear); };
+  var alTeclear = function (ev) { if (ev.key === 'Escape') cerrar(); };
+  fondo.onclick = function (ev) { if (ev.target === fondo) cerrar(); };
+  document.addEventListener('keydown', alTeclear);
+  document.body.appendChild(fondo);
+  var caja = fondo.querySelector('.qp');
+  try {
+    var d = await api('/admin/rutas/solicitudes/' + id + '/que-paso');
+    caja.innerHTML = pintarQuePaso(d);
+  } catch (error) {
+    caja.innerHTML = '<h3 id="qp-titulo">Qué pasó con este pedido</h3><div class="qp-diag bad"><b>No se pudo leer la historia</b><p>' + esc(error && error.message ? error.message : 'Error desconocido') + '</p></div><div class="qp-pie"><button type="button" class="btn sm" data-qp-cerrar>Cerrar</button></div>';
+  }
+  var b = caja.querySelector('[data-qp-cerrar]');
+  if (b) { b.onclick = cerrar; b.focus(); }
+}
+
+function pintarQuePaso(d) {
+  var s = d.solicitud || {};
+  var g = d.diagnostico || {};
+  var c = d.cifras || {};
+  var hora = function (iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return iso; }
+  };
+  var cifra = function (n, texto) { return '<span>' + esc(n) + '<small>' + esc(texto) + '</small></span>'; };
+  var html = '<h3 id="qp-titulo">Qué pasó con este pedido</h3>' +
+    '<p class="qp-sub">' + esc([s.nombre, s.referencia, s.telefono].filter(Boolean).join(' · ')) + '</p>' +
+    '<div class="qp-diag ' + esc(g.tono || 'muted') + '"><b>' + esc(g.titulo || '') + '</b><p>' + esc(g.porque || '') + '</p>' +
+      (g.queHacer ? '<p class="qp-hacer">Qué hacer: ' + esc(g.queHacer) + '</p>' : '') + '</div>';
+  if (d.avisos && d.avisos.length) {
+    html += '<ul class="qp-avisos">' + d.avisos.map(function (a) { return '<li class="' + esc(a.tono) + '">' + esc(a.texto) + '</li>'; }).join('') + '</ul>';
+  }
+  html += '<div class="qp-cifras">' +
+    cifra(c.intentosContados, 'intentos contados') +
+    cifra(c.mensajesEnSuChat, 'mensajes en su chat') +
+    cifra(c.leLlegaron, 'le llegaron') +
+    cifra(c.leidos, 'leídos') +
+    cifra(c.noLlegaron, 'no le llegaron') +
+    cifra(c.envioFrenado, 'no salieron') +
+    cifra(c.escribioElCliente, 'mensajes del cliente') +
+    '</div>';
+  html += '<h3 class="d-titulo" style="margin-top:0">Paso a paso</h3>';
+  html += d.linea && d.linea.length
+    ? '<ul class="qp-linea">' + d.linea.map(function (p) {
+        return '<li class="' + esc(p.tono) + '">' + esc(p.que) + (p.detalle ? '<span class="qp-det">' + esc(p.detalle) + '</span>' : '') + (p.cuando ? '<small>' + esc(hora(p.cuando)) + '</small>' : '') + '</li>';
+      }).join('') + '</ul>'
+    : '<p class="muted" style="margin:0">No quedó nada apuntado de este pedido.</p>';
+  if (d.faltan && d.faltan.length) {
+    html += '<p class="muted" style="margin:12px 0 0;font-size:12.5px">No se pudo leer: ' + esc(d.faltan.join(', ')) + '.</p>';
+  }
+  html += '<div class="qp-pie"><button type="button" class="btn sm" data-qp-cerrar>Cerrar</button></div>';
+  return html;
 }
 
 /**
@@ -1321,6 +1613,39 @@ function pintarPrevia(paso) {
   caja.innerHTML = previaHtml(lineas, d.ejemplo, d.textosDeSiempre[paso]) + '<small>' + pie + ' · para ' + esc(d.ejemplo.nombre) + ', pedido ' + esc(d.ejemplo.pedido) + '</small>';
 }
 
+/* El envio por tandas (solo lineas de la API) vive en los ajustes generales: se lee y se guarda aparte. */
+/* true cuando ya se leyo lo guardado: antes, guardar no toca las tandas (si no, una
+   carga lenta las apagaria sin querer: la casilla aun no muestra lo de verdad). */
+var tandasCargadas = false;
+function pintarTandas(t) {
+  t = t || { activo: false, tamano: 50, pausaMin: 3 };
+  document.getElementById('aj-tandas-activo').disabled = false;
+  document.getElementById('aj-tandas-activo').checked = Boolean(t.activo);
+  document.getElementById('aj-tandas-tamano').value = t.tamano || 50;
+  document.getElementById('aj-tandas-min').value = t.pausaMin || 3;
+  document.getElementById('aj-tandas-tamano').disabled = !t.activo;
+  document.getElementById('aj-tandas-min').disabled = !t.activo;
+}
+async function cargarTandas() {
+  try {
+    var r = await api('/admin/ajustes');
+    pintarTandas(r.guardado && r.guardado.tandasApi);
+    tandasCargadas = true;
+  } catch (e) {
+    document.getElementById('aj-tandas-estado').textContent = 'No se pudo leer el envío por tandas: ' + e.message + ' Recarga la página antes de cambiarlo.';
+  }
+}
+function leerTandas() {
+  var activo = document.getElementById('aj-tandas-activo').checked;
+  var tamano = Math.min(80, Math.max(1, Math.round(Number(document.getElementById('aj-tandas-tamano').value) || 50)));
+  var pausaMin = Math.min(60, Math.max(2, Math.round(Number(document.getElementById('aj-tandas-min').value) || 3)));
+  return { activo: activo, tamano: tamano, pausaMin: pausaMin };
+}
+document.getElementById('aj-tandas-activo').addEventListener('change', function () {
+  document.getElementById('aj-tandas-tamano').disabled = !this.checked;
+  document.getElementById('aj-tandas-min').disabled = !this.checked;
+});
+
 function pintarAjustes(d) {
   ajustesCache = d;
   if (ajustesSucios) return;
@@ -1329,31 +1654,21 @@ function pintarAjustes(d) {
   var esperas = a.esperasMensajesSegundos || (a.esperasMensajesMinutos || Array(Math.max(0, a.maxIntentos - 1)).fill(a.esperaRespuestaMinutos)).map(function (n) { return n * 60; });
   ponerDuracion('aj-pausa-min', a.pausaMinSegundos);
   ponerDuracion('aj-pausa-max', a.pausaMaxSegundos);
+  cargarTandas();
   document.getElementById('aj-hora-inicio').value = a.horaInicio;
   document.getElementById('aj-hora-fin').value = a.horaFin;
   ponerDuracion('aj-espera-final', a.esperaFinalSegundos != null ? a.esperaFinalSegundos : (a.esperaFinalMinutos || 0) * 60);
   document.getElementById('aj-tiempo-solicitud').innerHTML = controlTiempoInicialHtml(a.esperaPrimerMensajeSegundos != null ? a.esperaPrimerMensajeSegundos : (a.esperaPrimerMensajeMinutos || 0) * 60);
   pintarSecuencia(esperas);
 
-  document.getElementById('aj-pasos').innerHTML = PASOS_AJ.slice(0, 1).map(function (p) {
-    var paso = p[0];
-    return '<div class="paso" id="paso-' + paso + '"><h4>' + esc(p[1]) + '</h4><p class="cuando">' + esc(p[2]) + '</p>' +
-      '<div class="previa" id="aj-previa-' + paso + '"></div>' +
-      '<textarea data-textos="' + paso + '" rows="3" aria-label="Texto de ' + esc(p[1]) + '" placeholder="Escribe aquí si quieres decirlo a tu manera. Puedes dejar líneas en blanco entre párrafos.">' + esc(textoDeLineas(a.textos[paso])) + '</textarea>' +
-      '<p class="marcadores">Puedes usar: ' + marcadoresHtml() + ' — clic para insertar.</p>' +
-      '<p class="marcadores">' + AYUDA_REDACCION + '</p>' +
-      '</div>';
-  }).join('');
+  /* El «Texto inicial de respaldo» del reparto ya no se muestra (28/10): el que de verdad recibe el
+     cliente es el «Primer mensaje» de abajo. Lo guardado no se pierde: al guardar, un texto sin su caja
+     conserva lo que tenía (ver textos[paso] más abajo). */
+  document.getElementById('aj-pasos').innerHTML = '';
   pintarTextosAdicionales(esperas.length, textosSeguimientosDe(a, esperas.length));
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
   document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
 
-  PASOS_AJ.slice(0, 1).forEach(function (p) {
-    var paso = p[0];
-    pintarPrevia(paso);
-    document.querySelector('textarea[data-textos="' + paso + '"]')
-      .addEventListener('input', function () { pintarPrevia(paso); });
-  });
   document.querySelectorAll('#aj-pasos [data-marcador]').forEach(function (c) {
     c.onclick = function () {
       var ta = c.closest('.variante, .paso').querySelector('textarea');
@@ -1413,6 +1728,7 @@ function pintarSecuencia(esperas) {
   caja.innerHTML = esperas.map(function (segundos, indice) { return controlTiempoSecuenciaHtml(segundos, indice); }).join('');
   document.getElementById('aj-agregar-mensaje').disabled = esperas.length >= 99;
   document.getElementById('aj-agregar-mensaje').textContent = esperas.length >= 99 ? 'Máximo 99 recordatorios' : 'Agregar recordatorio';
+  if (typeof pintarSeguimientosMeta === 'function') pintarSeguimientosMeta(esperas);
 }
 
 function pintarTextosAdicionales(cantidad, textos) {
@@ -1513,6 +1829,7 @@ function quitarSeguimiento(indice) {
   var esperas = leerEsperasSecuencia();
   var textos = leerTextosAdicionales();
   esperas.splice(indice, 1);
+  segMeta.nombres = leerSegMeta(); segMeta.nombres.splice(indice, 1); segMeta.tocado = true; omitirLecturaSeg = true;
   if (indice >= 2) textos.splice(indice - 2, 1);
   pintarSecuencia(esperas);
   pintarTextosAdicionales(esperas.length, textos);
@@ -1570,10 +1887,10 @@ function actualizarEstadoCambios() {
 }
 function marcarAjustesSucios() { ajustesSucios = true; actualizarEstadoCambios(); }
 document.querySelector('.cuerpo.aj').addEventListener('input', function (event) {
-  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+  if (!event.target.closest('#aj-editor-inicial, #aj-plantilla-meta')) marcarAjustesSucios();
 });
 document.querySelector('.cuerpo.aj').addEventListener('change', function (event) {
-  if (!event.target.closest('#aj-editor-inicial')) marcarAjustesSucios();
+  if (!event.target.closest('#aj-editor-inicial, #aj-plantilla-meta')) marcarAjustesSucios();
 });
 document.getElementById('aj-descartar').onclick = function () {
   if (!ajustesBase) return;
@@ -1583,33 +1900,336 @@ document.getElementById('aj-descartar').onclick = function () {
   actualizarEstadoCambios();
 };
 
-var textoInicialCargado = false, textoInicialOcupado = false;
-var editorTextoInicial = document.getElementById('aj-editor-inicial');
-editorTextoInicial.addEventListener('toggle', async function () {
-  if (!editorTextoInicial.open || textoInicialCargado || textoInicialOcupado) return;
-  textoInicialOcupado = true;
+/*
+ * El primer mensaje que recibe el cliente (textos.solicitudUbicacion de
+ * Pedidos GSG): a la vista y editable aquí. Vacío en la base = el de fábrica;
+ * por eso, si se guarda igual al de fábrica, se guarda vacío (y el de fábrica
+ * sigue cambiando su última frase cuando la dirección no trae número).
+ */
+var TEXTO_INICIAL_FABRICA = ${JSON.stringify(TEXTOS_POR_DEFECTO.solicitudUbicacion)};
+var EJEMPLO_INICIAL = { nombreCompleto: 'Daniel Rufrán Méndez', nombre: 'Daniel', producto: 'PARLANTE', empresa: 'RGTECHNOLOGY', tracking: 'GSG-E-260541', nroPedido: '', metodoPago: 'YAPE', monto: '544.00', direccionCompleta: 'CARABAYLLO - Carabayllo Torreblanca', direccion: 'Carabayllo Torreblanca', distrito: 'Carabayllo', horario: 'de 2 a 8 de la noche', desde: '2:00 p. m.', hasta: '8:00 p. m.', hastaExtendido: '9:00 p. m.', negocio: 'GSG Courier', pedido: 'GSG-E-260541' };
+var DATOS_INICIAL = [
+  ['{nombreCompleto}', 'Nombre del cliente'], ['{nombre}', 'Solo el nombre'], ['{producto}', 'Producto'], ['{empresa}', 'Empresa'],
+  ['{tracking}', 'Código'], ['{nroPedido}', 'Nro. de pedido'], ['{metodoPago}', 'Método de pago'], ['{monto}', 'Monto a cobrar'],
+  ['{direccionCompleta}', 'Dirección'], ['{horario}', 'Horario de entrega']
+];
+document.getElementById('aj-datos-inicial').innerHTML = DATOS_INICIAL.map(function (d) {
+  return '<button type="button" data-dato-inicial="' + d[0] + '" title="Pone ' + d[0] + ': en el mensaje sale el dato de cada pedido">' + esc(d[1]) + '</button>';
+}).join('');
+document.getElementById('aj-datos-inicial').addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-dato-inicial]');
+  if (!b) return;
+  var ta = document.getElementById('aj-texto-inicial');
+  var ini = ta.selectionStart != null ? ta.selectionStart : ta.value.length, fin = ta.selectionEnd != null ? ta.selectionEnd : ini;
+  var dato = b.getAttribute('data-dato-inicial');
+  ta.value = ta.value.slice(0, ini) + dato + ta.value.slice(fin);
+  ta.focus();
+  ta.setSelectionRange(ini + dato.length, ini + dato.length);
+  previaInicial();
+});
+var textoInicialGuardado = null;
+function previaInicial() {
+  var texto = document.getElementById('aj-texto-inicial').value;
+  /* Como en el envío: una línea con un dato que no vino no sale. */
+  var lineas = texto.split('\n').filter(function (l) {
+    var vacia = false;
+    l.replace(/\{(\w+)\}/g, function (_, k) { if (EJEMPLO_INICIAL[k] === '') vacia = true; return ''; });
+    return !vacia;
+  }).map(function (l) { return l.replace(/\{(\w+)\}/g, function (todo, k) { return EJEMPLO_INICIAL[k] != null ? EJEMPLO_INICIAL[k] : todo; }); });
+  document.getElementById('aj-previa-inicial').innerHTML = esc(lineas.join('\n')) + '<small>para ' + esc(EJEMPLO_INICIAL.nombreCompleto) + ', pedido ' + esc(EJEMPLO_INICIAL.tracking) + '</small>';
   var estado = document.getElementById('aj-estado-texto-inicial');
-  estado.textContent = 'Cargando texto…';
+  var propio = texto.trim() !== TEXTO_INICIAL_FABRICA.trim();
+  var cambiado = textoInicialGuardado !== null && texto !== (textoInicialGuardado || TEXTO_INICIAL_FABRICA);
+  estado.textContent = cambiado ? 'Sin guardar' : propio ? 'Texto propio' : 'Texto de fábrica';
+  estado.className = 'chip ' + (cambiado ? 'tono-ambar' : propio ? 'tono-azul' : 'tono-gris');
+  document.getElementById('aj-fabrica-texto-inicial').disabled = !propio;
+}
+async function cargarTextoInicial() {
   try {
     var d = await api('/admin/entregas');
-    var guardado = (d.ajustes && d.ajustes.textos && d.ajustes.textos.solicitudUbicacion) || '';
-    document.getElementById('aj-texto-inicial').value = guardado;
-    textoInicialCargado = true;
-    estado.textContent = guardado ? 'Texto personalizado guardado.' : 'Se usa el texto predeterminado.';
-  } catch (e) { estado.textContent = e.message; }
-  finally { textoInicialOcupado = false; }
-});
-document.getElementById('aj-guardar-texto-inicial').onclick = async function () {
-  var boton = this, estado = document.getElementById('aj-estado-texto-inicial');
+    textoInicialGuardado = (d.ajustes && d.ajustes.textos && d.ajustes.textos.solicitudUbicacion) || '';
+    document.getElementById('aj-texto-inicial').value = textoInicialGuardado || TEXTO_INICIAL_FABRICA;
+    previaInicial();
+  } catch (e) { document.getElementById('aj-estado-texto-inicial').textContent = e.message; }
+}
+async function guardarTextoInicial(valor) {
+  var boton = document.getElementById('aj-guardar-texto-inicial');
+  var estado = document.getElementById('aj-estado-texto-inicial');
   boton.disabled = true;
   estado.textContent = 'Guardando…';
   try {
-    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: { solicitudUbicacion: document.getElementById('aj-texto-inicial').value } } });
-    textoInicialCargado = true;
-    estado.textContent = 'Texto inicial guardado.';
+    var guardar = valor.trim() === TEXTO_INICIAL_FABRICA.trim() ? '' : valor;
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: { solicitudUbicacion: guardar } } });
+    textoInicialGuardado = guardar;
+    document.getElementById('aj-texto-inicial').value = guardar || TEXTO_INICIAL_FABRICA;
+    previaInicial();
+    toast(guardar ? 'Primer mensaje guardado.' : 'Se usa el texto de fábrica.');
   } catch (e) { estado.textContent = e.message; }
   finally { boton.disabled = false; }
+}
+document.getElementById('aj-texto-inicial').addEventListener('input', previaInicial);
+document.getElementById('aj-guardar-texto-inicial').onclick = function () { guardarTextoInicial(document.getElementById('aj-texto-inicial').value); };
+document.getElementById('aj-fabrica-texto-inicial').onclick = function () { guardarTextoInicial(TEXTO_INICIAL_FABRICA); };
+cargarTextoInicial();
+
+var OTROS_DEL_BOT=['ubicacionRegistrada','ubicacionCambiada','invitarCambioUbicacion','invitarOtroCambioUbicacion','cambioUbicacionAntes'];
+var otrosDef = {};
+async function cargarOtrosTextos() {
+  var estado = document.getElementById('aj-estado-otros');
+  try {
+    var d = await api('/admin/entregas');
+    var t = d.textos || {}, guardados = (d.ajustes && d.ajustes.textos) || {};
+    otrosDef = t.porDefecto || {};
+    var vars = t.variables || {}, desc = t.descripcion || {}, lista = document.getElementById('aj-otros-lista');
+    lista.innerHTML = '';
+    Object.keys(otrosDef).forEach(function (k) {
+      if (OTROS_DEL_BOT.indexOf(k) < 0) return;
+      var l = document.createElement('label');
+      l.style.display = 'block';
+      l.style.marginBottom = '12px';
+      l.innerHTML = '<strong>' + esc(k) + '</strong> <span class="muted">' + esc(desc[k] || '') + '</span>' + (vars[k] && vars[k].length ? '<span class="muted"> Variables: ' + esc(vars[k].join(' ')) + '</span>' : '') + '<textarea data-otro="' + esc(k) + '" rows="4" maxlength="1500" style="width:100%"></textarea>';
+      l.querySelector('textarea').value = (guardados[k] || '').trim() ? guardados[k] : otrosDef[k];
+      lista.appendChild(l);
+    });
+    estado.textContent = 'Listo';
+    estado.className = 'chip tono-gris';
+  } catch (e) { estado.textContent = e.message; }
+}
+async function guardarOtrosTextos() {
+  var boton = document.getElementById('aj-guardar-otros');
+  var estado = document.getElementById('aj-estado-otros');
+  boton.disabled = true;
+  estado.textContent = 'Guardando…';
+  try {
+    var textos = {};
+    Array.prototype.forEach.call(document.querySelectorAll('#aj-otros-lista textarea[data-otro]'), function (ta) {
+      var k = ta.getAttribute('data-otro'), v = ta.value.trim();
+      textos[k] = (!v || v === (otrosDef[k] || '').trim()) ? '' : ta.value;
+    });
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { textos: textos } });
+    estado.textContent = 'Guardado';
+    toast('Mensajes guardados.');
+    await cargarOtrosTextos();
+  } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
+}
+document.getElementById('aj-guardar-otros').onclick = guardarOtrosTextos;
+var cuFabrica = '';
+async function cargarCambioUbicacion() {
+  var estado = document.getElementById('aj-cu-estado');
+  try {
+    var d = await api('/admin/entregas');
+    var aj = d.ajustes || {}, guardados = aj.textos || {};
+    cuFabrica = ((d.textos || {}).porDefecto || {}).cambioUbicacionTarde || '';
+    document.getElementById('aj-cu-hora').value = aj.cambioUbicacionHasta || '15:00';
+    document.getElementById('aj-cu-texto').value = (guardados.cambioUbicacionTarde || '').trim() ? guardados.cambioUbicacionTarde : cuFabrica;
+    document.getElementById('aj-cu-autorizados').value = (aj.autorizadosCambioUbicacion || []).join(', ');
+    estado.textContent = '';
+  } catch (e) { estado.textContent = e.message; }
+}
+async function guardarCambioUbicacion(fabrica) {
+  var boton = document.getElementById('aj-cu-guardar');
+  var estado = document.getElementById('aj-cu-estado');
+  var hora = document.getElementById('aj-cu-hora').value;
+  var texto = fabrica ? '' : document.getElementById('aj-cu-texto').value;
+  if (!/^\d{2}:\d{2}$/.test(hora)) { estado.textContent = 'Pon una hora válida.'; return; }
+  if (texto.trim() === cuFabrica.trim()) texto = '';
+  // Los números de GSG autorizados: solo dígitos, sin repetir; uno mal escrito no se guarda a medias.
+  // «51 999 777 888» y «999777888» son el mismo número: se comparan los últimos 9 dígitos.
+  var autorizados = [], vistos = [], malos = [];
+  document.getElementById('aj-cu-autorizados').value.split(/[,;\n]+/).forEach(function (p) {
+    var t = p.trim(); if (!t) return;
+    var d = t.replace(/\D/g, '');
+    if (d.length < 9 || d.length > 15) { malos.push(t); return; }
+    if (vistos.indexOf(d.slice(-9)) < 0) { vistos.push(d.slice(-9)); autorizados.push(d); }
+  });
+  if (malos.length) { estado.textContent = 'Estos números no se entienden (tienen que tener entre 9 y 15 dígitos): ' + malos.join(', '); return; }
+  boton.disabled = true;
+  estado.textContent = 'Guardando…';
+  try {
+    await api('/admin/entregas/ajustes', { method: 'POST', body: { cambioUbicacionHasta: hora, textos: { cambioUbicacionTarde: texto }, autorizadosCambioUbicacion: autorizados } });
+    toast('Cambio de ubicación guardado.');
+    await cargarCambioUbicacion();
+  } catch (e) { estado.textContent = e.message; }
+  finally { boton.disabled = false; }
+}
+document.getElementById('aj-cu-guardar').onclick = function () { guardarCambioUbicacion(false); };
+document.getElementById('aj-cu-fabrica').onclick = function () { guardarCambioUbicacion(true); };
+cargarCambioUbicacion();
+
+/* --- Plantillas aprobadas por Meta (el primer mensaje con WhatsApp API) --- */
+var ESTADO_PLANTILLA = { APPROVED: ['verde', 'Aprobada por Meta'], PENDING: ['ambar', 'En revisión en Meta'], REJECTED: ['rojo', 'Rechazada por Meta'], PAUSED: ['ambar', 'Pausada por Meta'], DISABLED: ['rojo', 'Deshabilitada por Meta'] };
+function avisoPlantilla(texto, mal) {
+  var el = document.getElementById('pm-aviso');
+  el.textContent = String(texto || '').replace(/^HTTP \d+ · /, '');
+  el.className = 'pm-aviso ' + (mal ? 'mal' : 'ok');
+  el.hidden = !texto;
+}
+function rellenarPlantilla(cuerpo, datos) {
+  return String(cuerpo || '').replace(/\{\{(\d+)\}\}/g, function (m, n) { var d = datos[Number(n) - 1]; return d ? d.ejemplo : m; });
+}
+function pintarPlantillaMeta(d) {
+  document.getElementById('pm-usar').checked = Boolean(d.usar);
+  segMeta.primero = d.nombre || '';
+  var selNombre = document.getElementById('pm-nombre');
+  if (document.activeElement !== selNombre) { selNombre.innerHTML = opcionesMeta(d.nombre || ''); if (d.nombre) selNombre.value = d.nombre; }
+  var chip = document.getElementById('pm-chip');
+  var t = d.plantilla;
+  var e = t ? (ESTADO_PLANTILLA[t.estado] || ['gris', t.estado]) : ['gris', 'No está en Meta todavía'];
+  chip.className = 'chip tono-' + e[0];
+  chip.textContent = !d.usar ? 'Apagada' : e[1];
+  document.getElementById('pm-lista').innerHTML = d.datos.map(function (x) {
+    return '<li><code>{{' + x.n + '}}</code> ' + esc(x.dato) + ' <span class="muted">· ej. ' + esc(x.ejemplo) + '</span></li>';
+  }).join('');
+  var previa = document.getElementById('pm-previa');
+  previa.textContent = t && t.cuerpo
+    ? rellenarPlantilla(t.cuerpo, d.datos)
+    : 'Cuando Meta apruebe la plantilla y la traigas, aquí se ve cómo le llega al cliente.';
+  var nota = document.getElementById('aj-con-meta');
+  if (nota) nota.hidden = !(d.usar && t && t.estado === 'APPROVED');
+  if (t && t.variables > d.datos.length) avisoPlantilla('La plantilla de Meta tiene ' + t.variables + ' datos y el sistema solo sabe llenar ' + d.datos.length + ' (nombre, producto, empresa, código, método de pago, monto, dirección y horario). Revísala en Meta.', true);
+  else if (t && t.variables && t.variables < d.datos.length) avisoPlantilla('Esta plantilla lleva ' + t.variables + ' datos: el sistema llena los primeros ' + t.variables + ' en este orden y deja el resto. Si algún dato no es el que esperas, cámbialo en el mensaje donde la uses.', false);
+  segMeta.ejemplos = d.datos;
+  pintarPrimeroMeta();
+}
+/* Una plantilla por mensaje, en orden: solo las aprobadas por Meta. */
+var plantillasRutas = { solicitud: [], recordatorio: [], insistencia: [] };
+var segMeta = { nombres: [], datos: {}, aprobadas: [], ejemplos: [], primero: '', tocado: false };
+var omitirLecturaSeg = false;
+function leerSegMeta() {
+  var out = [];
+  document.querySelectorAll('[data-seg-meta]').forEach(function (sel) { out[Number(sel.getAttribute('data-seg-meta'))] = sel.value; });
+  return out.filter(function (x) { return x !== undefined; });
+}
+function opcionesMeta(elegida) {
+  var hay = segMeta.aprobadas.some(function (t) { return t.name === elegida; });
+  return (elegida && !hay ? '<option value="' + esc(elegida) + '" selected>' + esc(elegida) + ' (no está aprobada en Meta)</option>' : '') +
+    segMeta.aprobadas.map(function (t) { return '<option value="' + esc(t.name) + '"' + (t.name === elegida ? ' selected' : '') + '>' + esc(t.name) + ' (' + t.variables + ' datos)</option>'; }).join('');
+}
+var ROTULOS_DATO = ['nombre del cliente', 'producto', 'empresa', 'código', 'método de pago', 'monto a cobrar', 'dirección', 'horario de entrega'];
+var SEG_DEFECTO = ['recordatorio_inicial'];
+var DATOS_DEFECTO = { seguimiento: [1, 3] };
+function mapaDe(nombre, n) { var m = segMeta.datos[nombre] || DATOS_DEFECTO[nombre] || [1, 2, 3, 4, 5, 6, 7, 8]; return m.slice(0, n); }
+function previaMeta(t, mapa) {
+  if (!t) return '';
+  var ej = segMeta.ejemplos || [];
+  return String(t.body || '').replace(/[{][{](\d+)[}][}]/g, function (m, n) { var d = ej[(mapa[Number(n) - 1] || Number(n)) - 1]; return d ? d.ejemplo : m; });
+}
+function pintarSeguimientosMeta(esperas, soltarDom) {
+  var caja = document.getElementById('pm-seguimientos');
+  if (!caja || typeof segMeta === 'undefined' || !segMeta) return;
+  if (!omitirLecturaSeg && soltarDom !== false && segMeta.tocado) { var leidos = leerSegMeta(); if (leidos.length) segMeta.nombres = leidos; }
+  omitirLecturaSeg = false;
+  if (!esperas) { try { esperas = leerEsperasSecuencia(); } catch (e) { esperas = (ajustesCache && ajustesCache.ajustes && ajustesCache.ajustes.esperasMensajesSegundos) || []; } }
+  document.getElementById('pm-sin-aprobadas').hidden = segMeta.aprobadas.length > 0;
+  caja.innerHTML = esperas.map(function (seg, i) {
+    var nombre = segMeta.nombres[i] || segMeta.nombres[segMeta.nombres.length - 1] || '';
+    return '<div class="pm-paso"><div class="pm-paso-cab"><span class="aj-paso-num">' + (i + 2) + '</span><div><b>Recordatorio ' + (i + 1) + '</b><span class="muted"> · ' + duracionHumana(seg) + ' después ' + (i === 0 ? 'del primer mensaje' : 'del recordatorio ' + i) + '</span></div></div>' +
+      '<select data-seg-meta="' + i + '" aria-label="Plantilla del recordatorio ' + (i + 1) + '">' + opcionesMeta(nombre) + '</select>' +
+      '<div class="pm-vars" data-seg-vars="' + i + '"></div><div class="previa pm-previa-paso" data-seg-previa="' + i + '"></div></div>';
+  }).join('');
+  if (segMeta.aprobadas.length) segMeta.nombres = leerSegMeta();
+  pintarDatosSegMeta();
+  pintarPrimeroMeta();
+}
+function pintarPrimeroMeta() {
+  var sel = document.getElementById('pm-nombre');
+  var t = segMeta.aprobadas.find(function (x) { return x.name === sel.value; });
+  var caja = document.getElementById('pm-previa-primero');
+  caja.textContent = t ? previaMeta(t, [1, 2, 3, 4, 5, 6, 7, 8]) : '';
+  caja.hidden = !t;
+}
+function pintarDatosSegMeta() {
+  document.querySelectorAll('[data-seg-meta]').forEach(function (sel) {
+    var i = sel.getAttribute('data-seg-meta');
+    var t = segMeta.aprobadas.find(function (x) { return x.name === sel.value; });
+    var cajaVars = document.querySelector('[data-seg-vars="' + i + '"]');
+    var cajaPrevia = document.querySelector('[data-seg-previa="' + i + '"]');
+    var n = t ? t.variables : 0, mapa = t ? mapaDe(t.name, n) : [];
+    cajaVars.innerHTML = Array.from({ length: n }, function (_, j) {
+      return '<label>{{' + (j + 1) + '}} = <select data-seg-var="' + esc(t.name) + '|' + j + '">' + ROTULOS_DATO.map(function (r, k) { return '<option value="' + (k + 1) + '"' + (mapa[j] === k + 1 ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></label>';
+    }).join('');
+    cajaPrevia.textContent = t ? previaMeta(t, mapa) : 'Elige una plantilla aprobada.';
+  });
+}
+document.getElementById('pm-seguimientos').addEventListener('change', function (event) {
+  var el = event.target;
+  if (el.hasAttribute('data-seg-var')) {
+    var partes = el.getAttribute('data-seg-var').split('|');
+    var m = (segMeta.datos[partes[0]] || DATOS_DEFECTO[partes[0]] || [1, 2, 3, 4, 5, 6, 7, 8]).slice();
+    m[Number(partes[1])] = Number(el.value);
+    segMeta.datos[partes[0]] = m;
+    pintarDatosSegMeta();
+  } else if (el.hasAttribute('data-seg-meta')) {
+    segMeta.tocado = true;
+    segMeta.nombres = leerSegMeta();
+    pintarDatosSegMeta();
+  }
+});
+document.getElementById('pm-nombre').addEventListener('change', pintarPrimeroMeta);
+async function cargarRecordatorioMeta() {
+  try {
+    var r = await Promise.all([api('/admin/templates'), api('/admin/rutas/ajustes')]);
+    segMeta.aprobadas = (r[0] || []).filter(function (t) { return t.status === 'APPROVED'; });
+    var a = (r[1] && r[1].ajustes) || {};
+    plantillasRutas = a.plantillas || plantillasRutas;
+    if (a.datosPlantillas) segMeta.datos = a.datosPlantillas;
+    if (!segMeta.tocado) {
+      segMeta.nombres = a.plantillasSeguimientos || [];
+      /* Sin nada guardado: las dos de GSG, si la cuenta las tiene aprobadas (el servidor hace lo mismo). */
+      if (!segMeta.nombres.length && SEG_DEFECTO.every(function (n) { return segMeta.aprobadas.some(function (t) { return t.name === n; }); })) segMeta.nombres = SEG_DEFECTO.slice();
+    }
+    /* El primer mensaje: la lista de aprobadas, con la guardada elegida. */
+    var sel = document.getElementById('pm-nombre');
+    var actual = sel.value || segMeta.primero || '';
+    sel.innerHTML = opcionesMeta(actual);
+    if (!actual && segMeta.aprobadas.length) sel.value = (segMeta.aprobadas.find(function (t) { return t.name === 'solicitud_inicial'; }) || segMeta.aprobadas[0]).name;
+    pintarSeguimientosMeta(a.esperasMensajesSegundos || [], false);
+  } catch (e) { /* sin plantillas no hay nada que elegir */ }
+}
+async function guardarRecordatorioMeta() {
+  var nombres = leerSegMeta().filter(Boolean);
+  var datos = {};
+  nombres.forEach(function (n) { if (segMeta.datos[n]) datos[n] = segMeta.datos[n]; });
+  var r = await api('/admin/rutas/ajustes', { method: 'POST', body: { plantillasSeguimientos: nombres, datosPlantillas: datos } });
+  segMeta.nombres = nombres;
+  return r;
+}
+async function cargarPlantillaMeta() {
+  try { pintarPlantillaMeta(await api('/admin/entregas/plantilla-meta')); await cargarRecordatorioMeta(); }
+  catch (e) { avisoPlantilla(e.message, true); }
+}
+async function conBotonPm(boton, texto, fn) {
+  var antes = boton.textContent; boton.disabled = true; boton.textContent = texto;
+  try { await fn(); } finally { boton.disabled = false; boton.textContent = antes; }
+}
+document.getElementById('pm-guardar').onclick = function () {
+  var boton = this;
+  conBotonPm(boton, 'Guardando…', async function () {
+    try {
+      var d = await api('/admin/entregas/plantilla-meta', { method: 'POST', body: { usar: document.getElementById('pm-usar').checked, nombre: document.getElementById('pm-nombre').value.trim() } });
+      await guardarRecordatorioMeta();
+      pintarPlantillaMeta(d);
+      await cargarRecordatorioMeta();
+      avisoPlantilla(!d.usar ? 'Guardado: el primer mensaje no usará la plantilla de Meta.' : d.plantilla && d.plantilla.estado === 'APPROVED' ? 'Guardado: el primer mensaje por WhatsApp API sale con esta plantilla.' : 'Guardado. Falta que Meta la apruebe: cuando esté aprobada, pulsa «Traer el estado desde Meta».');
+    } catch (e) { avisoPlantilla(e.message, true); }
+  });
 };
+document.getElementById('pm-traer').onclick = function () {
+  var boton = this;
+  conBotonPm(boton, 'Preguntando a Meta…', async function () {
+    try {
+      var d = await api('/admin/entregas/plantilla-meta/traer', { method: 'POST', body: {} });
+      pintarPlantillaMeta(d);
+      await cargarRecordatorioMeta();
+      var t = d.plantilla;
+      avisoPlantilla(t ? (t.estado === 'APPROVED' ? 'Listo: Meta la tiene aprobada. Se trajeron ' + d.traidas + ' plantillas.' : 'Meta la tiene como «' + (ESTADO_PLANTILLA[t.estado] || [0, t.estado])[1] + '». Hasta que esté aprobada, no se usa.') : 'Meta no tiene ninguna plantilla llamada «' + d.nombre + '». Revisa que el nombre sea exactamente el de Meta.', !t || t.estado !== 'APPROVED');
+    } catch (e) { avisoPlantilla(e.message, true); }
+  });
+};
+cargarPlantillaMeta();
+
+cargarOtrosTextos();
 
 /* Las plantillas de Meta solo salen si el numero las necesita (API oficial). */
 async function cargarAjustes() {
@@ -1673,6 +2293,14 @@ document.getElementById('aj-guardar').onclick = async function () {
       textosSeguimientos: leerTextosAdicionales()
     }});
     var v = r.vigente;
+    var tandas = leerTandas();
+    var avisoTandas = '';
+    if (!tandasCargadas) avisoTandas = ' El envío por tandas no se tocó: todavía no se había leído lo guardado.';
+    else try {
+      await api('/admin/ajustes', { method: 'POST', body: { tandasApi: tandas } });
+      avisoTandas = tandas.activo ? ' Envío por tandas (WhatsApp API): ' + tandas.tamano + ' mensajes cada ' + tandas.pausaMin + ' min.' : ' Envío por tandas apagado.';
+    } catch (e) { avisoTandas = ' El envío por tandas no se guardó: ' + e.message; }
+    document.getElementById('aj-tandas-estado').textContent = avisoTandas.trim();
     ajustesSucios = false;
     actualizarEstadoCambios();
     await cargarAjustes();

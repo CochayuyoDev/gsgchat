@@ -170,7 +170,8 @@ describe('/admin/grupos y atajos del chat', () => {
     await app.close();
   });
 
-  it('las opciones traen etiquetas, lotes, plantillas aprobadas y si vale el texto libre', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): grupos.
+  it.skip('las opciones traen etiquetas, lotes, plantillas aprobadas y si vale el texto libre', async () => {
     const r = (await app.inject({ method: 'GET', url: '/admin/grupos/opciones', headers: { cookie: admin } })).json();
     expect(r.reparto.sin_ubicacion).toContain('sin ubicación');
     expect(r.lotes[0]).toMatchObject({ nombre: 'Reparto viernes' });
@@ -179,14 +180,16 @@ describe('/admin/grupos y atajos del chat', () => {
     expect(r.negocio).toBe('La Tienda');
   });
 
-  it('previsualiza el grupo con cifras y muestra', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): grupos.
+  it.skip('previsualiza el grupo con cifras y muestra', async () => {
     const r = (await app.inject({ method: 'POST', url: '/admin/grupos/previsualizar', headers: { cookie: admin }, payload: { reparto: 'sin_ubicacion', consentimiento: 'todos' } })).json();
     expect(r.total).toBe(1);
     expect(r.telefonos).toEqual(['51912000001']);
     expect(r.clientes[0]).toMatchObject({ nombre: 'Ana Perez', reparto: { estado: 'enviado', pedido: 'P-1001' }, ficha: { completa: true } });
   });
 
-  it('un texto libre crea una plantilla propia y una campaña con las variables de cada cliente', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): grupos.
+  it.skip('un texto libre crea una plantilla propia y una campaña con las variables de cada cliente', async () => {
     const previa = (await app.inject({ method: 'POST', url: '/admin/grupos/enviar', headers: { cookie: admin }, payload: { criterio: { consentimiento: 'opt_in' }, texto: 'Hola {nombre}, ¿nos mandas tu ubicación para {pedido}? Gracias, {negocio}.', soloVistaPrevia: true } })).json();
     expect(previa.total).toBe(4);
     expect(previa.muestra.find((m: { phone: string }) => m.phone === '51912000001').texto).toBe('Hola Ana, ¿nos mandas tu ubicación para P-1001? Gracias, La Tienda.');
@@ -204,7 +207,8 @@ describe('/admin/grupos y atajos del chat', () => {
     expect((await repos.campaigns.get(envio.campaignId))?.name).toBe('Recordatorio');
   });
 
-  it('con una plantilla del registro rellena sus variables; sin clientes, avisa', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): grupos.
+  it.skip('con una plantilla del registro rellena sus variables; sin clientes, avisa', async () => {
     const envio = (await app.inject({ method: 'POST', url: '/admin/grupos/enviar', headers: { cookie: admin }, payload: { criterio: { consentimiento: 'todos', reparto: 'derivado' }, plantilla: { name: 'aviso_pedido', language: 'es' }, canario: 0 } })).json();
     expect(envio.enqueued).toBe(1);
     const d = repos._recipients.find((r) => r.campaignId === envio.campaignId);
@@ -214,7 +218,8 @@ describe('/admin/grupos y atajos del chat', () => {
     expect(vacio.json().error).toContain('ningún cliente');
   });
 
-  it('exporta el grupo en CSV', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): grupos.
+  it.skip('exporta el grupo en CSV', async () => {
     const res = await app.inject({ method: 'POST', url: '/admin/grupos/exportar', headers: { cookie: admin }, payload: { consentimiento: 'todos', ficha: 'incompleta' } });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-disposition']).toContain('grupo-clientes.csv');
@@ -233,7 +238,8 @@ describe('/admin/grupos y atajos del chat', () => {
     expect(vuelta.deFabrica).toBe(true);
   });
 
-  it('el chat dice en que punto del reparto va el cliente', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): grupos.
+  it.skip('el chat dice en que punto del reparto va el cliente', async () => {
     const ana = await repos.contacts.getByPhone('51912000001');
     const r = (await app.inject({ method: 'GET', url: `/admin/chat/${ana!.id}`, headers: { cookie: admin } })).json();
     expect(r.reparto).toMatchObject({ referencia: 'P-1001', estado: 'enviado', distrito: 'Miraflores' });

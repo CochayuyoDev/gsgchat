@@ -28,6 +28,7 @@ import type { Politica } from '../salud/politica.js';
 import { decidirRitmo } from '../salud/ritmo.js';
 import { esNumeroDePrueba } from '../desarrollador/numeros.js';
 import { anotarEsperaEnvio, anotarEsperaGlobal, limpiarEsperasEnvio } from './espera-envio.js';
+import { RETENCION_CHAT_MS } from '../whatsapp/retencion-chat.js';
 import { alDespertarMotorRutas } from './despertador.js';
 import { esLoteDePrueba } from './alertas.js';
 import { elegirPlantilla, elegirVariante } from '../salud/variantes.js';
@@ -45,6 +46,15 @@ import {
   type ContextoMensaje,
   type PasoUbicacion,
 } from './mensajes.js';
+
+/** Las plantillas de recordatorio de GSG, en orden: recordatorio 1 y recordatorio 2. */
+// Las dos plantillas del dueño (11/11): «solicitud_inicial» para el primer mensaje
+// (entregas/textos.ts) y «recordatorio_inicial» para el recordatorio (si hay mas, se repite). Las de
+// antes eran de categoría Marketing y Meta las frenaba (131049).
+export const SEGUIMIENTOS_POR_DEFECTO = ['recordatorio_inicial'] as const;
+/** Qué dato va en cada {{n}} (1 nombre, 2 producto, 3 empresa...): «seguimiento» lleva nombre y empresa. */
+/** Que datos del pedido van en cada variable: recordatorio_inicial = {{1}} nombre, {{2}} producto, {{3}} tienda. */
+export const DATOS_POR_DEFECTO: Record<string, number[]> = { seguimiento: [1, 3], recordatorio_inicial: [1, 2, 3] };
 
 export interface OpcionesMotor {
   /** Pausa entre envios, en segundos: se sortea entre los dos. */
@@ -77,7 +87,8 @@ export const OPCIONES_POR_DEFECTO: OpcionesMotor = {
   pausaMinSegundos: 15,
   pausaMaxSegundos: 30,
   esperaRespuestaMinutos: 30,
-  maxIntentos: 4,
+  // Solo 2 mensajes por pedido (pedido del dueño, 11/11): «solicitud_inicial» y un «recordatorio_inicial».
+  maxIntentos: 2,
   pedirUbicacionCadaMinutos: 0,
   horaInicio: 9,
   horaFin: 19,
@@ -107,6 +118,11 @@ export interface MotorDeps {
   repos: Repos;
   sender: Sender;
   wa?: WhatsAppClient;
+  /**
+   * Con varias lineas de WhatsApp: si queda alguna conectada. El motor solo se
+   * para cuando no queda ninguna; una linea caida frena a sus clientes, no al resto.
+   */
+  hayLineaConectada?: () => boolean;
   gsg: PuertoGsg;
   opciones: OpcionesMotor;
   /** Como se llama el negocio ahora (se cambia desde la pantalla). */
@@ -164,7 +180,16 @@ export interface MotorDeps {
    * Los recordatorios siguen con sus textos cortos de siempre.
    */
   textoSolicitud?: (solicitud: Solicitud) => Promise<string | null>;
-  plantillaSolicitud?: (solicitud: Solicitud) => Promise<{ name: string; variables: string[] } | null>;
+  plantillaSolicitud?: (solicitud: Solicitud) => Promise<{ name: string; language?: string; variables: string[] } | null>;
+  /** Los 8 datos del pedido de esa solicitud, en el orden de la plantilla de Pedidos GSG; null si no es de un pedido. */
+  datosPedido?: (solicitud: Solicitud) => Promise<string[] | null>;
+  /**
+   * Con la conexión principal de QR y una línea de WhatsApp API en uso: si
+   * hay plantilla aprobada por Meta en los ajustes (Pedidos GSG → Ajustes de
+   * chat). Entonces, fuera de la ventana de 24 h, se manda plantilla aunque
+   * `usarPlantilla` diga que no (si no, Meta rechazaría el texto libre).
+   */
+  plantillaMeta?: () => Promise<boolean>;
   /**
    * El seguimiento del primer mensaje de los pedidos (src/entregas/primer-mensaje.ts):
    * el reparto avisa antes y despues de mandar el primer mensaje de una
@@ -280,6 +305,21 @@ export async function anotarIncidenciaDeSolicitud(
 /** Pasa el caso a una persona: se acabaron los intentos del bot y su espera final. */
 export async function derivarSolicitud(ctx: ContextoIncidencia, solicitud: Solicitud): Promise<void> {
   const respondio = Boolean(solicitud.primeraRespuestaAt);
+  // «No contestó» solo si de verdad le llegó algo: si ninguno de los mensajes
+  // contados está en su chat (o WhatsApp los rechazó), se dice eso, con el porqué.
+  if (!respondio) {
+    const revision = await revisarEnviosContados(ctx.repos, solicitud, ctx.ahora()).catch((error: unknown) => {
+      ctx.log?.('no se pudo revisar los mensajes contados antes de «no contestó»', { solicitud: solicitud.id, detalle: String(error) });
+      return null;
+    });
+    // Solo con pruebas: si de algún mensaje ya no queda registro, no se afirma nada.
+    if (revision && revision.visibles === 0 && revision.sinComprobar === 0 && revision.problemas.length > 0) {
+      const detalle = `se contaron ${solicitud.intentos} mensaje${solicitud.intentos === 1 ? '' : 's'}, pero no le llegó ninguno: ${revision.problemas.join('; ')}`.slice(0, 500);
+      await anotarIncidenciaDeSolicitud(ctx, solicitud, 'no_se_le_escribio', detalle, 'derivado');
+      await ctx.repos.rutas.registrarEvento(solicitud.id, 'derivacion', `Pendiente de atención: no se le llegó a escribir (${revision.problemas.length} problema${revision.problemas.length === 1 ? '' : 's'})`, { problemas: revision.problemas });
+      return;
+    }
+  }
   const codigo: CodigoIncidencia = respondio ? 'respondio_sin_ubicacion' : 'sin_respuesta';
   const detalle = respondio
     ? `contestó pero no envió ubicación después de ${solicitud.intentos} mensajes`
@@ -291,6 +331,88 @@ export async function derivarSolicitud(ctx: ContextoIncidencia, solicitud: Solic
     'derivacion',
     `Pendiente de atención: ${solicitud.intentos} mensajes sin ubicación`,
   );
+}
+
+/**
+ * Lo que pasó de verdad con los mensajes que el reparto contó como intentos.
+ *
+ * Un intento se cuenta cuando el proveedor acepta el envío, pero eso no
+ * asegura que el cliente lo tenga: el mensaje puede no haberse guardado,
+ * haber quedado en el chat de otro número o haberlo rechazado WhatsApp
+ * después. `visibles` son los que le llegaron o pudieron llegarle (en su
+ * chat sin fallar, o con WhatsApp confirmando el envío); `problemas`, qué pasó
+ * con cada uno de los demás, en palabras.
+ *
+ * Pedidos viejos: el chat se borra a las 72 h (RETENCION_CHAT_MS), pero los
+ * intentos de envío (`deliveries`) se guardan siempre, y se miran primero.
+ * Si de un mensaje ya no queda nada en ninguno de los dos, es `sinComprobar`:
+ * no se afirma que no se le escribió.
+ */
+export async function revisarEnviosContados(
+  repos: Repos,
+  solicitud: Solicitud,
+  ahora: Date = new Date(),
+): Promise<{ visibles: number; problemas: string[]; sinComprobar: number }> {
+  const eventos = await repos.rutas.eventos(solicitud.id, 500);
+  const envios = eventos.filter((e) => e.tipo === 'envio');
+  const problemas: string[] = [];
+  let visibles = 0;
+  let sinComprobar = 0;
+  // Lo que dice WhatsApp de cada envío a este teléfono (no se borra con el chat).
+  const porWamid = new Map<string, { status: string; errorCode: string | null; errorTitle: string | null }>();
+  if (solicitud.phone) {
+    const lista = await repos.deliveries.listRecent({ phone: solicitud.phone, limit: 500, offset: 0 }).catch(() => []);
+    for (const d of lista) if (d.wamid) porWamid.set(d.wamid, d);
+  }
+  for (const envio of envios) {
+    const wamid = typeof envio.payload?.wamid === 'string' && envio.payload.wamid.trim() ? envio.payload.wamid.trim() : null;
+    const cuando = horaDelNegocio(envio.createdAt);
+    if (!wamid) {
+      problemas.push(`el envío de las ${cuando} no trae identificador de WhatsApp`);
+      continue;
+    }
+    const envioRegistrado = porWamid.get(wamid);
+    if (envioRegistrado?.status === 'failed' || envioRegistrado?.status === 'blocked_by_gate') {
+      const motivo = envioRegistrado.errorTitle || envioRegistrado.errorCode;
+      problemas.push(`WhatsApp no entregó el mensaje de las ${cuando}${motivo ? ` (${String(motivo).slice(0, 120)})` : ''}`);
+      continue;
+    }
+    const ref = await repos.messages.referenciaVisiblePorWamid(wamid, new Date(0));
+    if (!ref) {
+      if (envioRegistrado) {
+        // Sin la fila del chat (borrada por antigüedad), pero WhatsApp lo aceptó.
+        visibles++;
+        continue;
+      }
+      if (ahora.getTime() - envio.createdAt.getTime() > RETENCION_CHAT_MS) {
+        sinComprobar++;
+        problemas.push(`del mensaje de las ${cuando} ya no queda registro para comprobarlo (el chat se borra a las 72 h)`);
+        continue;
+      }
+      problemas.push(`el mensaje de las ${cuando} no quedó guardado en ningún chat (${wamid})`);
+      continue;
+    }
+    if (solicitud.contactId && ref.contactId !== solicitud.contactId) {
+      const otro = await repos.contacts.getById(ref.contactId).catch(() => null);
+      problemas.push(`el mensaje de las ${cuando} quedó en el chat de otro número (${otro?.phone ?? ref.contactId})`);
+      continue;
+    }
+    const mensaje = await repos.messages.porId(ref.contactId, Number(ref.id));
+    if (mensaje?.status === 'failed') {
+      problemas.push(`WhatsApp no entregó el mensaje de las ${cuando}`);
+      continue;
+    }
+    visibles++;
+  }
+  function horaDelNegocio(d: Date): string {
+    try {
+      return new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    } catch {
+      return d.toISOString().slice(11, 16) + ' UTC';
+    }
+  }
+  if (!envios.length && solicitud.intentos > 0) problemas.push(`hay ${solicitud.intentos} intento${solicitud.intentos === 1 ? '' : 's'} contado${solicitud.intentos === 1 ? '' : 's'} sin ningún envío anotado en la bitácora`);
+  return { visibles, problemas, sinComprobar };
 }
 
 /**
@@ -321,6 +443,21 @@ export interface Motor {
   proximoEnvioEn(): number;
   /** Milisegundos hasta la próxima tarea; null significa esperar una señal nueva. */
   proximoDespertarEn(): Promise<number | null>;
+}
+
+/**
+ * Sin socket de WhatsApp el motor no escribe. Excepcion: en una simulacion
+ * (NODE_ENV=test) lo siguiente es un cliente de prueba (51 000 0…), que nunca
+ * sale a WhatsApp (el sender lo guarda en el hilo): asi la demo enseña el
+ * primer mensaje aunque la tienda no tenga el numero vinculado.
+ */
+const sinSocket = (deps: Pick<MotorDeps, 'wa' | 'hayLineaConectada'>): boolean =>
+  deps.hayLineaConectada ? !deps.hayLineaConectada() : deps.wa?.conectado?.() === false;
+
+async function sigueSinSocketPorPrueba(repos: Repos, momento: Date): Promise<boolean> {
+  if (process.env.NODE_ENV !== 'test') return false;
+  const [siguiente] = await repos.rutas.tocaIntentar(momento, 1);
+  return Boolean(siguiente && esNumeroDePrueba(siguiente.phone));
 }
 
 export function crearMotor(deps: MotorDeps): Motor {
@@ -446,6 +583,18 @@ export function crearMotor(deps: MotorDeps): Motor {
     }
     const primera = candidatas[0]!;
     return { name: primera.name, language: primera.language, variables: primera.variables };
+  }
+
+  /** Una plantilla con menos datos que los 8 del pedido recibe solo los primeros (Meta rechaza parámetros de más: #132000). */
+  async function ajustarAlNumeroDeDatos(p: { name: string; language?: string; variables: string[] }): Promise<string[]> {
+    const t = await repos.templates.get(p.name, p.language ?? 'es').catch(() => null);
+    return t && t.variables > 0 && t.variables < p.variables.length ? p.variables.slice(0, t.variables) : p.variables;
+  }
+
+  /** Si el paso tiene alguna plantilla propia (elegida o del catálogo) ya aprobada por Meta. */
+  async function hayAprobadaDelPaso(paso: PasoUbicacion): Promise<boolean> {
+    const nombres = ajustes.plantillas[paso].length ? ajustes.plantillas[paso] : PLANTILLAS[paso].variantes;
+    return (await repos.templates.list().catch(() => [])).some((t) => nombres.includes(t.name) && t.status === 'APPROVED');
   }
 
   /** La tienda y el producto del pedido de GSG de esa solicitud ({tienda}, {producto}); sin pedido, null. */
@@ -580,7 +729,8 @@ export function crearMotor(deps: MotorDeps): Motor {
     // pida plantilla: es servicio (con franquicia) y no utilidad (sin ella).
     const contacto = await repos.contacts.getByPhone(phone).catch(() => null);
     const ventanaAbierta = Boolean(contacto?.lastInboundAt && ahora().getTime() - contacto.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
-    const conPlantilla = deps.usarPlantilla() && !ventanaAbierta;
+    const plantillaDeMeta = !ventanaAbierta && !deps.usarPlantilla() && deps.plantillaMeta ? await deps.plantillaMeta().catch(() => false) : false;
+    const conPlantilla = (deps.usarPlantilla() || plantillaDeMeta) && !ventanaAbierta;
     // El primer mensaje de un pedido: queda «enviando» en la base antes de
     // salir. Si otro intento ya esta en marcha (otro proceso, un reintento
     // manual) o el pedido espera a una persona, no se manda.
@@ -589,8 +739,30 @@ export function crearMotor(deps: MotorDeps): Motor {
       await repos.rutas.actualizarSolicitud(solicitud.id, { proximoIntentoAt: new Date(ahora().getTime() + 2 * 60_000) });
       return { accion: 'nada', solicitudId: solicitud.id, motivo: 'el primer mensaje de ese pedido ya está en curso o espera a una persona' };
     }
-    const agrupada = conPlantilla && paso === 'solicitud' ? await deps.plantillaSolicitud?.(solicitud) : null;
-    const elegida = conPlantilla ? (agrupada ? { name: agrupada.name, language: 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
+    // La plantilla con los datos del pedido: siempre en la solicitud; en un
+    // recordatorio, solo si ese paso no tiene una plantilla propia aprobada en
+    // Meta (si no, el recordatorio pediría una que Meta no tiene: #132001).
+    // También si en «Plantillas aprobadas por Meta» se eligió esa misma para los recordatorios.
+    const delPedido = conPlantilla ? await deps.plantillaSolicitud?.(solicitud) : null;
+    // Pantalla «Plantillas de Meta»: cada recordatorio tiene la suya, en orden
+    // (la última se repite). Manda sobre todo lo demás y nunca cae en la del
+    // primer mensaje: si falta o Meta no la tiene, el rechazo lo dice con su nombre.
+    const registroPlantillas = conPlantilla && paso !== 'solicitud' ? await repos.templates.list().catch(() => []) : [];
+    let lista = ajustes.plantillasSeguimientos ?? [];
+    // Sin nada elegido en la pantalla: las dos plantillas de GSG, si la cuenta
+    // las tiene aprobadas las dos; si no, como antes (nunca se pide una que Meta no tiene).
+    if (!lista.length && SEGUIMIENTOS_POR_DEFECTO.every((n) => registroPlantillas.some((t) => t.name === n && t.status === 'APPROVED'))) lista = [...SEGUIMIENTOS_POR_DEFECTO];
+    const nombreSeg = conPlantilla && paso !== 'solicitud' && lista.length ? lista[Math.min(Math.max(solicitud.intentos - 1, 0), lista.length - 1)] : undefined;
+    const registroSeg = nombreSeg ? registroPlantillas.find((t) => t.name === nombreSeg) : undefined;
+    const cuantasSeg = registroSeg?.variables ?? 2;
+    const datosSeg = nombreSeg ? await deps.datosPedido?.(solicitud).catch(() => null) ?? null : null;
+    const mapaSeg = (nombreSeg && (ajustes.datosPlantillas?.[nombreSeg] ?? DATOS_POR_DEFECTO[nombreSeg])) || [1, 2, 3, 4, 5, 6, 7, 8];
+    const variablesSeg = nombreSeg
+      ? datosSeg ? mapaSeg.slice(0, cuantasSeg).map((n) => datosSeg[n - 1] ?? '') : variablesPara(nombreSeg, paso, ctx, cuantasSeg)
+      : null;
+    const conDatosDelPedido = !nombreSeg && Boolean(delPedido) && (paso === 'solicitud' || ajustes.plantillas[paso].includes(delPedido!.name) || !(await hayAprobadaDelPaso(paso)));
+    const agrupada = conDatosDelPedido ? delPedido : null;
+    const elegida = conPlantilla ? (nombreSeg ? { name: nombreSeg, language: registroSeg?.language ?? 'es', variables: cuantasSeg } : agrupada ? { name: agrupada.name, language: agrupada.language ?? 'es', variables: agrupada.variables.length } : await plantillaPara(paso, ahora())) : null;
     // La primera solicitud de una entrega de GSG: la plantilla con los datos del envio.
     const deEntrega = !conPlantilla && paso === 'solicitud' && deps.textoSolicitud ? await deps.textoSolicitud(solicitud) : null;
     // La cadencia por cliente la fija el reparto (espera e intentos), no la
@@ -607,7 +779,7 @@ export function crearMotor(deps: MotorDeps): Motor {
           category: 'UTILITY',
           templateName: elegida!.name,
           templateLanguage: elegida!.language,
-          variables: agrupada?.variables ?? variablesPara(elegida!.name, paso, ctx, elegida!.variables),
+          variables: variablesSeg ?? (agrupada ? await ajustarAlNumeroDeDatos(agrupada) : variablesPara(elegida!.name, paso, ctx, elegida!.variables)),
           limitesContacto,
         })
       : await sender.send({
@@ -658,7 +830,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       // Sin socket no se toca la solicitud: no es una incidencia del cliente
       // ni del numero, es que WhatsApp esta cerrado. Se vuelve a intentar en
       // dos minutos y el motor no vuelve a mirar hasta entonces.
-      if (salida.code === 'sin_conexion') {
+      if (salida.code === 'sin_conexion' || salida.code === 'sin_lineas_disponibles' || salida.code === 'limite_diario') {
         esperar(solicitud, salida.code, salida.reason, salida.retryAfterMs ?? 2 * 60_000);
         await repos.rutas.actualizarSolicitud(solicitud.id, {
           proximoIntentoAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)),
@@ -733,6 +905,23 @@ export function crearMotor(deps: MotorDeps): Motor {
         ultimoEnvio = momento.getTime();
         pausaActual = sortearPausa();
       }
+      return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
+    }
+
+    // Un error de PLANTILLA de Meta (#132000-#132999: no existe con ese idioma,
+    // datos de más o de menos, pausada) no es del cliente: no le llegó nada.
+    // No gasta un intento (antes el pedido acababa en «no contestó a 4
+    // mensajes» habiendo recibido uno, 10/11); queda dicho qué arreglar y se
+    // vuelve a probar en 15 minutos (por si se trae o aprueba la plantilla).
+    if (/#?132\d{3}\b/.test(salida.error)) {
+      const espera = 15 * 60_000;
+      esperar(solicitud, 'plantilla_meta', salida.error, espera);
+      await repos.rutas.actualizarSolicitud(solicitud.id, {
+        proximoIntentoAt: new Date(momento.getTime() + espera),
+        incidencia: 'envio_bloqueado',
+        incidenciaDetalle: `Meta rechazó la plantilla (no le llegó al cliente): ${salida.error}`.slice(0, 300),
+      });
+      await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `Meta rechazó la plantilla; no cuenta como intento: ${salida.error}`);
       return { accion: 'incidencia', solicitudId: solicitud.id, motivo: salida.error };
     }
 
@@ -827,7 +1016,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       await refrescarAjustes();
       // No inicia intentos ni escribe incidencias mientras no hay socket.
       // Al reconectarse continúa en la siguiente pasada, sin espera de 2 min.
-      if (deps.wa?.conectado?.() === false) {
+      if (sinSocket(deps) && !(await sigueSinSocketPorPrueba(repos, momento))) {
         const motivo = 'WhatsApp está desconectado; el envío continúa al reconectarse.';
         anotarEsperaGlobal(repos.rutas, { codigo: 'sin_conexion', motivo, hasta: null });
         return { accion: 'nada', motivo };
@@ -935,16 +1124,19 @@ export function startMotorRutas(deps: MotorDeps): () => void {
   const programarDesconexion = () => {
     timer = setTimeout(() => {
       timer = null;
-      if (deps.wa?.conectado?.() === false) programarDesconexion();
-      else void despertar();
+      void (async () => {
+        if (sinSocket(deps) && !(await sigueSinSocketPorPrueba(deps.repos, new Date()).catch(() => false))) programarDesconexion();
+        else void despertar();
+      })();
     }, 30_000);
     timer.unref?.();
   };
 
   const dormirHastaProximaTarea = async () => {
     if (parado) return;
-    if (deps.wa?.conectado?.() === false) {
-      // Solo se comprueba el estado en memoria del socket: sin consultas SQL.
+    if (sinSocket(deps) && !(await sigueSinSocketPorPrueba(deps.repos, new Date()).catch(() => false))) {
+      // Solo se comprueba el estado en memoria del socket: sin consultas SQL
+      // (salvo en una simulacion, ver sigueSinSocketPorPrueba).
       programarDesconexion();
       return;
     }

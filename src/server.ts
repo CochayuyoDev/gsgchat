@@ -10,14 +10,18 @@ import websocket from '@fastify/websocket';
 import { ZodError } from 'zod';
 import { codigoPorStatus, cuerpoError, ErrorApi, esBaseNoDisponible, ESPERA_BASE_SEGUNDOS, type CodigoError } from './api/errores.js';
 import { paginaError } from './web/pagina-error.js';
+import { syncTemplates } from './templates/registry.js';
+import { clienteDeMeta } from './templates/cliente-meta.js';
 import type { Config } from './config.js';
 import { registrarLimpiezaChat } from './whatsapp/limpieza-chat.js';
 import type { Repos } from './db/repos.js';
 import { WhatsAppApiError, type WhatsAppClient } from './whatsapp/client.js';
 import { NotConfiguredError } from './whatsapp/dynamic.js';
+import { algunaLineaConectada, algunaLineaConfigurada } from './whatsapp/estado-conexion.js';
 import type { Sender } from './outbound/sender.js';
 import type { OutboundQueue } from './outbound/queue.js';
 import { registerWebhookRoutes } from './whatsapp/webhook.js';
+import { registerWebhookMetaRoutes } from './web/webhook-meta-routes.js';
 import { registerWahaWebhookRoutes } from './whatsapp/waha/webhook.js';
 
 import { registerAdminRoutes } from './admin/routes.js';
@@ -39,6 +43,7 @@ import { registerStickersRoutes } from './admin/stickers-routes.js';
 import { registerApiV1 } from './api/v1/routes.js';
 import { registerApiEntregasGsg } from './api/v1/entregas-gsg.js';
 import { registerApiConversacionesGsg } from './api/v1/conversaciones-gsg.js';
+import { registerArchivosGsg } from './api/v1/archivos-gsg.js';
 import type { Bus } from './eventos/bus.js';
 
 
@@ -143,6 +148,14 @@ export interface ServerDeps {
    * directorio de usuarios compartido. Sin esto, una instalacion suelta.
    */
   sesionLocal?: SesionLocal;
+  /** El buscador de direcciones (lee enlaces de mapa que solo traen una direccion). */
+  geocodificador?: import('./entregas/geocodificar.js').Geocodificador | null;
+  /** Las lineas de WhatsApp de la tienda (ver src/whatsapp/lineas.ts) y el cliente de cada una. */
+  lineas?: import('./whatsapp/lineas.js').ServicioLineas;
+  registroClientes?: import('./whatsapp/registro.js').RegistroClientes;
+  /** El webhook de Meta configurable desde «Nuestra API» (verify token, app secret, bitacora). */
+  webhookMeta?: import('./whatsapp/webhook-meta.js').ServicioWebhookMeta;
+  repartoLineas?: import('./whatsapp/reparto-lineas.js').RepartoDeLineas;
   /** Para apuntar el telefono vinculado: la salud guarda el riesgo por numero (src/salud/numero.ts). */
   anotarNumeroVigente?: (telefono: string | null | undefined) => void;
   /**
@@ -202,7 +215,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // (sin esto, `/%61dmin/...` se saltaba el de /admin). Ver util/ruta-normalizada.ts.
     rewriteUrl: (req) => normalizarRuta(req.url ?? '/'),
   });
-  registrarLimpiezaChat(app, repos);
+  registrarLimpiezaChat(app, repos, mediaDir);
 
   app.addHook('onRequest', async (request, reply) => {
     if (moduloRetirado(request.url)) return reply.code(404).send({ ok: false, codigo: 'RUTA_NO_EXISTE', error: 'Este módulo fue retirado. Usa API, WhatsApp o Pedidos GSG.' });
@@ -309,7 +322,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
   // `connected` distingue "tiene proveedor" de "el telefono esta vinculado":
   // con el cliente local, configurado no significa conectado hasta escanear el QR.
-  app.get('/health', async () => ({ ok: true, version: VERSION, configured: settings.isConfigured(), connected: settings.isConfigured() && (wa.conectado?.() ?? true) }));
+  // Con varias lineas, `connected` = queda alguna viva: la principal caida no es «sin WhatsApp».
+  const fuentesConexion = { settings, wa, registro: deps.registroClientes ?? null };
+  app.get('/health', async () => ({ ok: true, version: VERSION, configured: algunaLineaConfigurada(fuentesConexion), connected: algunaLineaConectada(fuentesConexion) }));
 
   // El orden importa: registerAuth instala el hook que resuelve quien pide
   // (cookie de sesion o clave de API) y exige sesion en /admin y en las
@@ -319,9 +334,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   // La bitacora anota sola cada accion que cambia algo (POST/DELETE que acaban bien).
   instalarBitacora(app, repos.actividad, (m, d) => app.log.warn(d ?? {}, m));
   if (stickers) await registerStickersRoutes(app, { stickers, ajustes, mediaDir });
-  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas });
+  await registerWebhookRoutes(app, { repos, config, sender, wa, settings, catalogo, gsg, salud, ajustes, stickers, ia, lista, voz, entregas, mediaDir, lineas: deps.lineas, registroClientes: deps.registroClientes, webhookMeta: deps.webhookMeta });
+  if (deps.webhookMeta) await registerWebhookMetaRoutes(app, { webhookMeta: deps.webhookMeta, settings, publicBase: config.PUBLIC_BASE_URL });
   // Las entregas del dia y los motorizados, y el simulador de GSG si se monto. Ver src/entregas.
-  if (entregas) await registerEntregasRoutes(app, { entregas, conexionGsg: deps.conexionGsg, simulador: deps.simuladorGsg, config });
+  if (entregas) {
+    await registerEntregasRoutes(app, {
+      entregas,
+      conexionGsg: deps.conexionGsg,
+      webhooks: repos.webhooks,
+      simulador: deps.simuladorGsg,
+      config,
+      traerPlantillas: async () => {
+        const cliente = await clienteDeMeta({ settings, wa, lineas: deps.lineas, registro: deps.registroClientes });
+        return cliente ? (await syncTemplates(cliente, repos, { marcarAusentes: true })).length : null;
+      },
+    });
+  }
   if (ia) await registerIaRoutes(app, { ia, plan: deps.plan, actividad: repos.actividad });
   // El resumen del dia por WhatsApp (Ajustes → Resumen del dia). Ver src/resumenes.
   if (deps.resumenes) await registerResumenesRoutes(app, { resumenes: deps.resumenes });
@@ -354,9 +382,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     // seguidos sin que el haya escrito nada en medio (ver rafaga.ts).
     rafagaMs: config.RAFAGA_MS,
     hmacKey: () => settings.current().verifyToken,
+    lineas: deps.lineas,
+    geocodificador: deps.geocodificador ?? undefined,
   });
 
   await registerAdminRoutes(app, {
+    lineas: deps.lineas,
+    registroClientes: deps.registroClientes,
     numeroDeSalud: deps.numeroDeSalud,
     bus: deps.bus,
     repos,
@@ -384,10 +416,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   // La API publica para otros sistemas (Stoky, GSG, scripts): pocos caminos,
   // nombres estables y un permiso por ruta. Ver src/api/v1.
-  await registerApiV1(app, { numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, fetchImpl: deps.webhooks?.fetchImpl });
+  await registerApiV1(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
-  await registerApiConversacionesGsg(app, { repos, sender });
+  await registerApiConversacionesGsg(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
+  // Los archivos de ese historial (`archivo.url`): enlace firmado, sin clave. Ver src/api/v1/archivos-gsg.ts.
+  await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa, registroClientes: deps.registroClientes });
   if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
 
@@ -413,6 +447,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     voz,
     entregas,
     autoConectarLocal: deps.autoConectarLocal,
+    lineas: deps.lineas,
+    geocodificador: deps.geocodificador,
+    registroClientes: deps.registroClientes,
+    repartoLineas: deps.repartoLineas,
     fiabilidad: Boolean(deps.fiabilidad),
     simulador: deps.simuladorGsg,
     settingsRepo: deps.settingsRepo,

@@ -320,7 +320,7 @@ describe('ajustes del reparto y plantillas propias', () => {
       textos: { solicitud: [], recordatorio: [], insistencia: [] },
       textosAdicionales: [],
     };
-    expect(await repos.rutas.ajustes.get(porDefecto)).toEqual(porDefecto);
+    expect(await repos.rutas.ajustes.get(porDefecto)).toMatchObject({ ...porDefecto, esperaFinalSegundos: 1800, esperaPrimerMensajeSegundos: 0, esperasMensajesSegundos: [1800, 1800] });
     const guardado = await repos.rutas.ajustes.set({ esperaRespuestaMinutos: 45, textos: { solicitud: ['Hola {nombre}'], recordatorio: [], insistencia: [] } }, porDefecto);
     expect(guardado.esperaRespuestaMinutos).toBe(45);
     expect(guardado.textos.solicitud).toEqual(['Hola {nombre}']);
@@ -329,7 +329,7 @@ describe('ajustes del reparto y plantillas propias', () => {
     expect(otra).toMatchObject({ esperaRespuestaMinutos: 45, maxIntentos: 2 });
     expect(otra.textos.solicitud).toEqual(['Hola {nombre}']);
     await repos.rutas.ajustes.reset();
-    expect(await repos.rutas.ajustes.get(porDefecto)).toEqual(porDefecto);
+    expect(await repos.rutas.ajustes.get(porDefecto)).toMatchObject({ ...porDefecto, esperaFinalSegundos: 1800, esperaPrimerMensajeSegundos: 0, esperasMensajesSegundos: [1800, 1800] });
   });
 
   it('una plantilla propia guarda sus variables documentadas y solo ella se puede borrar', async () => {

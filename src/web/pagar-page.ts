@@ -57,7 +57,7 @@ const CSS = `
   .numero { font-size: 24px; font-weight: 700; letter-spacing: .02em; margin: 4px 0; }
   .vista { max-width: 220px; border-radius: var(--radio-sm); border: 1px solid var(--borde); display: block; margin-top: var(--esp-2); }
   .campos { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 10px; }
-  @media (max-width: 560px) { .campos { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .campos { grid-template-columns: minmax(0, 1fr); } }
 `;
 
 export function pagarPage(opts: { demo: boolean; nombreNegocio: string }): string {

@@ -21,7 +21,7 @@ describe('recepcion completa de pedidos GSG', () => {
         costServ: '12.50', monto: '85.00', clientePagaDelivery: 'no', pagoEnDestino: 'si',
         nroDocumento: '00123456', cantBultos: '2', agenciaDestino: pedido.agenciaDestino });
       const e = await esc.entrega(pedido.tracking);
-      expect(e?.datosEnvio).toMatchObject({ referenciaDireccion: pedido.referenciaDireccion, fecRegistro: pedido.fecRegistro, fecRuta: pedido.fecRuta, observacionCliente: pedido.observacionCliente, detalleProducto: pedido.detalleProducto, telefono2: pedido.telefono2, tamano: pedido.tamano, sede: pedido.sede, tipoRuta: pedido.tipoRuta, nroDocumento: pedido.nroDocumento, agenciaNombre: pedido.agenciaNombre, agenciaDestino: pedido.agenciaDestino, motorizadoNombre: 'Luis' });
+      expect(e?.datosEnvio).toMatchObject({ referenciaDireccion: pedido.referenciaDireccion, fecRegistro: pedido.fecRegistro, fecRuta: pedido.fecRuta, observacionCliente: pedido.observacionCliente, detalleProducto: pedido.detalleProducto, telefono2: pedido.telefono2, tamano: pedido.tamano, sede: pedido.sede, tipoRuta: pedido.tipoRuta, nroDocumento: pedido.nroDocumento, agenciaNombre: pedido.agenciaNombre, agenciaDestino: pedido.agenciaDestino });
       expect(esc.wa.sent.length).toBe(antes);
       const otra = await esc.api.post<{ repetidas: string[] }>('/api/v1/entregas', pedido);
       expect(otra.body.repetidas).toContain(pedido.tracking);

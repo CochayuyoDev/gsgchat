@@ -233,7 +233,8 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(JSON.stringify(reporte)).toContain('GSG-');
   });
 
-  it('5. el cliente pega un enlace de Google Maps: se le pregunta si es ahí y, con su SÍ, sale a GSG', async () => {
+  // Desactualizada: ya no se pregunta «¿es ahí?» (ubicación sin confirmar, 20/10) ni hay SÍ/NO; el enlace se registra directo.
+  it.skip('5. el cliente pega un enlace de Google Maps: se le pregunta si es ahí y, con su SÍ, sale a GSG', async () => {
     await escribe('51987000002', { text: 'aqui esta https://www.google.com/maps?q=-12.0931,-77.0465' });
     // Un enlace no se da por bueno a ciegas: se le enseña el punto y se espera su SÍ.
     await esperar(() => /Esta es la ubicación de tu enlace/.test(textosA('51987000002')), 10_000, 'la pregunta del enlace');
@@ -265,7 +266,8 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     expect(crm.ubicaciones().filter((l) => l.cuerpo.tracking === 'P-004').length).toBe(2);
   });
 
-  it('8. un segundo pin corrige el primero: GSG recibe el nuevo marcado como corrección', async () => {
+  // Desactualizada: otro pin con la ubicación ya registrada no la cambia; GSG recibe la incidencia cambio_ubicacion (956c298).
+  it.skip('8. un segundo pin corrige el primero: GSG recibe el nuevo marcado como corrección', async () => {
     await escribe('51987000005', { location: { latitude: -12.1, longitude: -77.02 } });
     await esperar(() => crm.ubicaciones().filter((l) => l.cuerpo.tracking === 'P-005').length === 1, 10_000, 'el primer pin de P-005');
     await escribe('51987000005', { location: { latitude: -12.11, longitude: -77.021 } });
@@ -320,4 +322,26 @@ describe('pedir la ubicacion por WhatsApp y mandarla al CRM de GSG (produccion)'
     await escribe('51987000006', { location: { latitude: -12.13, longitude: -77.0 } });
     await esperar(() => crm.ubicaciones().some((l) => l.cuerpo.tracking === 'P-006'), 10_000, 'que GSG reciba P-006 tras reiniciar');
   }, 180_000);
+
+  it('12. la ruta del webhook de GSG crea el webhook y el secreto sale una sola vez', async () => {
+    const guardar = () => api('POST', '/admin/entregas/gsg', { modo: 'real', url: urlCrm, token: crm.estado.token, rutaWebhook: 'v1/gsgchat/webhook' });
+    const r = await guardar();
+    expect(r.status).toBe(200);
+    expect(r.body.gsg.destinoWebhook).toBe(`${urlCrm}/v1/gsgchat/webhook`);
+    expect(r.body.webhookGsg).toMatchObject({ creado: true, webhook: { url: `${urlCrm}/v1/gsgchat/webhook`, activo: true } });
+    expect(r.body.webhookGsg.secreto).toMatch(/^whsec_[0-9a-f]{48}$/);
+    // Guardar otra vez: ya existe, el secreto no vuelve a salir.
+    const otra = await guardar();
+    expect(otra.body.webhookGsg).toMatchObject({ creado: false, secreto: null });
+    // Uno nuevo solo por la ruta de rotar.
+    const rotado = await api('POST', '/admin/entregas/gsg/webhook/secreto', {});
+    expect(rotado.body.secreto).toMatch(/^whsec_[0-9a-f]{48}$/);
+    expect(rotado.body.secreto).not.toBe(r.body.webhookGsg.secreto);
+    // Con la ruta guardada pero sin webhook (p. ej. guardada antes de que existiera), «secreto nuevo» lo crea.
+    await api('DELETE', `/api/v1/webhooks/${r.body.webhookGsg.webhook.id}`);
+    const recreado = await api('POST', '/admin/entregas/gsg/webhook/secreto', {});
+    expect(recreado.status).toBe(200);
+    expect(recreado.body).toMatchObject({ creado: true });
+    expect(recreado.body.secreto).toMatch(/^whsec_[0-9a-f]{48}$/);
+  });
 });

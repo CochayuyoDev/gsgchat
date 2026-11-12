@@ -118,9 +118,9 @@ describe('unirUrlGsg: URL base + ruta', () => {
 });
 
 describe('migrarUbicacionAntigua: la URL completa de antes a base + ruta', () => {
-  it('sin URL antigua sale a donde salía: <dirección>/sendLocation', () => {
-    expect(migrarUbicacionAntigua('https://gsg.pe/api', '')).toMatchObject({ ok: true, base: 'https://gsg.pe/api/', ruta: 'sendLocation' });
-    expect(migrarUbicacionAntigua('https://gsg.pe/api/sendLocation', '')).toMatchObject({ ok: true, base: 'https://gsg.pe/api/', ruta: 'sendLocation' });
+  it('sin URL antigua sale a <dirección>/send-location (el viejo /sendLocation se despega)', () => {
+    expect(migrarUbicacionAntigua('https://gsg.pe/api', '')).toMatchObject({ ok: true, base: 'https://gsg.pe/api/', ruta: 'send-location' });
+    expect(migrarUbicacionAntigua('https://gsg.pe/api/sendLocation', '')).toMatchObject({ ok: true, base: 'https://gsg.pe/api/', ruta: 'send-location' });
   });
 
   it('la URL antigua que cuelga de la dirección conserva la base', () => {
@@ -314,7 +314,7 @@ describe('la conexión saliente guardada', () => {
     await settingsRepo.put('gsg.conexion', JSON.stringify({ modo: 'real', url: 'https://gsg.pe/api', conectadoEn: null }), false);
     await settingsRepo.put('gsg.token', encrypt(CLAVE, keyFromBase64(TEST_SETTINGS_KEY)), true);
     const antigua = await crearConexionGsg({ settingsRepo, settingsKeyBase64: TEST_SETTINGS_KEY, config, fetchImpl: f.impl });
-    expect(antigua.estado()).toMatchObject({ origenClave: 'pantalla_antigua', tieneToken: true, rutaUbicacion: 'sendLocation', destinoUbicacion: 'https://gsg.pe/api/sendLocation' });
+    expect(antigua.estado()).toMatchObject({ origenClave: 'pantalla_antigua', tieneToken: true, rutaUbicacion: 'send-location', destinoUbicacion: 'https://gsg.pe/api/send-location' });
     expect(JSON.stringify(antigua.estado())).not.toContain(CLAVE);
     await antigua.puerto().enviar('ubicacion', { tracking: 'T', lat: 1, lng: 2 });
     expect(f.llamadas.at(-1)!.cabeceras.get('x-api-key')).toBe(CLAVE);

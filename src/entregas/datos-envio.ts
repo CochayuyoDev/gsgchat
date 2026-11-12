@@ -92,6 +92,8 @@ export function datosEnvioDeCrudo(crudo: unknown): DatosEnvio | null {
     metodoPago: texto(c.metodoPago),
     monto: montoEnTexto(c.monto),
     remitente: texto(c.remitente),
+    // El primer mensaje que GSG ya redacto para el cliente (contrato: firstMessage).
+    firstMessage: texto(c.firstMessage),
   });
   if (Object.hasOwn(c, 'horarioEntrega') && c.horarioEntrega === null) return { ...(datos ?? {}), horarioEntregaDesde: null, horarioEntregaHasta: null, horarioEntregaFechaDesde: null, horarioEntregaFechaHasta: null, horarioEntregaZonaHoraria: null };
   if (horario.success) return { ...(datos ?? {}), horarioEntregaDesde: horario.data.desde, horarioEntregaHasta: horario.data.hasta, horarioEntregaFechaDesde: horario.data.fechaDesde ?? null, horarioEntregaFechaHasta: horario.data.fechaHasta ?? null, horarioEntregaZonaHoraria: horario.data.zonaHoraria ?? null };

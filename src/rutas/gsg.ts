@@ -180,7 +180,7 @@ const MOTIVOS_GSG: Record<string, MotivoGsg> = {
   numero_corto: 'TELEFONO_MAL', numero_largo: 'TELEFONO_MAL', numero_invalido: 'TELEFONO_MAL', numero_fijo: 'TELEFONO_MAL',
   sin_whatsapp: 'TELEFONO_MAL', telefono_invalido: 'TELEFONO_MAL', telefono_de_motorizado: 'TELEFONO_MAL',
   numero_equivocado: 'NO_RECONOCE_PEDIDO', no_soy_yo: 'NO_RECONOCE_PEDIDO',
-  rechaza_contacto: 'RECHAZA',
+  rechaza_contacto: 'RECHAZA', pide_baja: 'RECHAZA',
   ubicacion_fuera_de_zona: 'DIRECCION_MAL',
   cambio_ubicacion: 'DIRECCION_MAL',
 };
@@ -231,7 +231,7 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
   // Si el detalle ya empieza por el titulo («Al número le faltan dígitos: …»), no se repite.
   const partes = titulo && detalle?.startsWith(titulo) ? [detalle] : [titulo, detalle];
   const comentario = sinPrefijoPeru(partes.filter(Boolean).join(': ')).slice(0, 500) || null;
-  return {
+  const cuerpo: Record<string, unknown> = {
     tracking,
     tipo: 'PROBLEMA',
     motivo: texto(p.motivo) ?? motivoGsg(codigo),
@@ -246,6 +246,9 @@ export function problemaParaGsg(p: Record<string, unknown>): Record<string, unkn
     fechaMensaje: Number.isNaN(en.getTime()) ? new Date().toISOString() : en.toISOString(),
     eventoId: texto(p.eventoId) ?? (tracking ? eventoIdProblema(tracking, codigo, Number.isNaN(en.getTime()) ? new Date() : en) : null),
   };
+  // La incidencia manual la escribe una persona con su resumen: no lleva «queHacer».
+  if (p.origen === 'incidencia_manual') delete cuerpo.queHacer;
+  return cuerpo;
 }
 
 /**
@@ -910,7 +913,7 @@ async function despacharAhora(
     // Un pin tardío supera la falta de respuesta. No enviar el problema viejo
     // después de las coordenadas ni fingir que GSG recibió ese problema.
     const codigo = String(reporte.payload.codigo ?? reporte.payload.error ?? '');
-    if (reporte.tipo === 'incidencia' && reporte.solicitudId && ['sin_respuesta', 'respondio_sin_ubicacion'].includes(codigo)) {
+    if (reporte.tipo === 'incidencia' && reporte.solicitudId && ['sin_respuesta', 'respondio_sin_ubicacion', 'no_se_le_escribio'].includes(codigo)) {
       const vigente = await repos.rutas.solicitud(reporte.solicitudId);
       if (vigente?.estado === 'resuelto' && vigente.lat != null && vigente.lng != null) {
         await repos.rutas.marcarReporte(reporte.id, 'superado');

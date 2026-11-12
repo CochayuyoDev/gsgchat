@@ -151,7 +151,8 @@ describe('poner y quitar numeros', () => {
 });
 
 describe('el motor: cada pocas horas, como una persona', () => {
-  it('manda el primer mensaje con el boton de ubicacion y no vuelve a escribir hasta que pasen las horas', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): envío automático.
+  it.skip('manda el primer mensaje con el boton de ubicacion y no vuelve a escribir hasta que pasen las horas', async () => {
     await lista.agregar({ telefono: '987654321', nombre: 'Juan', origen: 'manual', referencia: 'pedido 1001' });
     const m = motor();
     const r1 = await m.tick();
@@ -288,7 +289,8 @@ describe('la lista y el reparto no se pisan', () => {
     expect((await repos.envioAutomatico.movimientos(1))[0]?.motivo).toContain('pasó al reparto');
   });
 
-  it('la pantalla ensena la lista y el reparto juntos, con cifras y ajustes', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): envío automático.
+  it.skip('la pantalla ensena la lista y el reparto juntos, con cifras y ajustes', async () => {
     await lista.agregar({ telefono: '987654321', nombre: 'Juan', origen: 'manual', origenDetalle: 'ali' });
     const lote = await repos.rutas.crearLote({ nombre: 'Reparto de hoy' });
     await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '912345678', phone: '51912345678', nombre: 'Rosa', referencia: '1002' }]);
@@ -305,7 +307,8 @@ describe('la lista y el reparto no se pisan', () => {
     expect(j.movimientos[0]).toMatchObject({ tipo: 'entro', phone: '51987654321' });
   });
 
-  it('quitar a un cliente del reparto desde la lista lo pasa a una persona', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): envío automático.
+  it.skip('quitar a un cliente del reparto desde la lista lo pasa a una persona', async () => {
     const lote = await repos.rutas.crearLote({ nombre: 'Hoy' });
     const [s] = await repos.rutas.agregarSolicitudes(lote.id, [{ telefonoCrudo: '912345678', phone: '51912345678', nombre: 'Rosa' }]);
     await repos.rutas.cambiarEstadoLote(lote.id, 'enviando');
@@ -317,7 +320,8 @@ describe('la lista y el reparto no se pisan', () => {
 });
 
 describe('las rutas de la pantalla', () => {
-  it('poner varios de una vez, con los rechazados explicados', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): envío automático.
+  it.skip('poner varios de una vez, con los rechazados explicados', async () => {
     const r = await app.inject({ method: 'POST', url: '/admin/envio-automatico', headers: con(TODO), payload: { telefonos: '987654321\n1234\n912 345 678', que: 'ubicacion' } });
     expect(r.statusCode).toBe(200);
     expect(r.json().puestos).toHaveLength(2);
@@ -325,13 +329,15 @@ describe('las rutas de la pantalla', () => {
     expect(r.json().rechazados[0].motivo).toContain('no sirve');
   });
 
-  it('un solo numero malo es un 400 con el motivo', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): envío automático.
+  it.skip('un solo numero malo es un 400 con el motivo', async () => {
     const r = await app.inject({ method: 'POST', url: '/admin/envio-automatico', headers: con(TODO), payload: { telefonos: '12' } });
     expect(r.statusCode).toBe(400);
     expect(r.json().error).toContain('no sirve');
   });
 
-  it('el ritmo se cambia desde la pantalla y vale para el reparto tambien', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): envío automático.
+  it.skip('el ritmo se cambia desde la pantalla y vale para el reparto tambien', async () => {
     const r = await app.inject({ method: 'POST', url: '/admin/envio-automatico/ajustes', headers: con(TODO), payload: { cadaHoras: 2, maxEnvios: 4, horaInicio: 8, horaFin: 20 } });
     expect(r.statusCode).toBe(200);
     expect(r.json().ajustes).toMatchObject({ cadaHoras: 2, maxEnvios: 4, horaInicio: 8, horaFin: 20 });
@@ -341,7 +347,8 @@ describe('las rutas de la pantalla', () => {
     expect(mal.statusCode).toBe(400);
   });
 
-  it('pausar, reanudar, editar y quitar', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): envío automático.
+  it.skip('pausar, reanudar, editar y quitar', async () => {
     const alta = await app.inject({ method: 'POST', url: '/admin/envio-automatico', headers: con(TODO), payload: { telefonos: '987654321', nombre: 'Juan' } });
     const clave = `e:${(await lista.porTelefono('987654321'))!.id}`;
     expect(alta.statusCode).toBe(200);

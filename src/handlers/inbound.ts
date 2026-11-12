@@ -20,7 +20,7 @@ import { enviarConfirmacionUbicacion, type ConfirmacionUbicacion } from '../entr
 
 import { esperarRafaga, marcarLlegada, olvidarLlegada } from './rafaga.js';
 import { TEXTO_VER_UNA_VEZ } from './textos.js';
-import { extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
+import { enlacesDeMapa, extractLocation, fromWhatsAppLocation } from '../geo/extract.js';
 import type { Config } from '../config.js';
 import type { Monitor } from '../salud/monitor.js';
 import type { ServicioAjustes } from '../ajustes/generales.js';
@@ -63,15 +63,26 @@ import { textoFueraDeZona, textoGracias } from '../rutas/mensajes.js';
 import { hayCatalogo } from '../stoky/conexion.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
 import { atenderComoAgente, atenderConReglaGsg, cerrarChat, clasificarPinLejos, pideAsesor, type DepsAgente } from '../ia/agente-operativo.js';
-import { entradaAdmitida } from '../whatsapp/entradas-admitidas.js';
+import { detectarPrivacidad } from '../privacidad/detectar.js';
+import { atenderPedidoDePrivacidad } from '../privacidad/servicio.js';
+import { entradaAdmitida, esMediaAdmitida } from '../whatsapp/entradas-admitidas.js';
 import { atenderEntrante as atenderEntranteDeProceso } from '../procesos/nucleo.js';
 import type { EntradaProceso } from '../procesos/validar.js';
 import { leerPreguntaPorPedido } from '../entregas/interpretar.js';
+import { soltarSolicitudes } from '../entregas/ubicacion-unica.js';
+import { clasificarConReglas } from '../archive/clasificar.js';
+
+/** Un enlace que solo trae una dirección: se busca en el mapa (solo vale con número de puerta). */
+const porDireccionDe = (deps: { entregas?: { ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null> } | null }) =>
+  deps.entregas ? (direccion: string) => deps.entregas!.ubicarDireccionDeEnlace(direccion) : undefined;
 import { horaEnPalabras, horarioEnPalabras, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 import type { Solicitud } from '../db/rutas.js';
+import { ID_LINEA_PRINCIPAL } from '../whatsapp/lineas.js';
 import { ventanaDeEntrega } from '../entregas/horario-distrito.js';
 
 export interface InboundDeps {
+  /** Para ubicar un enlace de mapa que solo trae una direccion escrita (ver extractLocation). */
+  geocodificador?: import('../entregas/geocodificar.js').Geocodificador;
   repos: Repos;
   sender: Sender;
   wa: WhatsAppClient;
@@ -693,31 +704,53 @@ export function firmaDeAccion(message: InboundMessage): string | null {
   return null;
 }
 
+/** La clave de deduplicacion de un entrante: el id, con la linea delante si no es la principal. */
+export function claveEntrada(message: InboundMessage): string {
+  const linea = message.linea;
+  return linea && linea.id !== ID_LINEA_PRINCIPAL ? `${linea.id.slice(0, 8)}:${message.id}` : message.id;
+}
+
+/**
+ * Los mismos repos, pero todo mensaje que se guarde lleva la linea por la que
+ * llego. Se hace aqui, y no en cada `messages.add` del manejador, para no
+ * olvidar ninguno de los caminos de entrada.
+ */
+function conLineaDeEntrada(deps: InboundDeps, linea: InboundMessage['linea']): InboundDeps {
+  if (!linea) return deps;
+  const messages = Object.create(deps.repos.messages) as typeof deps.repos.messages;
+  messages.add = (m) => deps.repos.messages.add({ lineaId: linea.id, lineaEtiqueta: linea.etiqueta, lineaNumero: linea.numero, ...m });
+  return { ...deps, repos: { ...deps.repos, messages } };
+}
+
 export async function handleInboundMessage(
   message: InboundMessage,
   profileName: string | undefined,
-  deps: InboundDeps,
+  rawDeps: InboundDeps,
 ): Promise<void> {
   if (!entradaAdmitida(message)) return;
+  const deps = conLineaDeEntrada(rawDeps, message.linea);
   // Reenvíos de un mismo wamid no pueden ejecutar dos veces una regla,
   // aunque la fila del chat haya vencido y se haya borrado físicamente.
   // El recibo conserva solo metadatos durante siete días; nunca el cuerpo.
   // Los reenvíos multimedia son filtrados antes de llegar aquí.
   const provider = message.provider ?? 'whatsapp';
+  // Con varias lineas, el mismo id de mensaje de dos cuentas distintas no es
+  // el mismo mensaje: la clave lleva la linea (la principal conserva la de siempre).
+  const claveId = claveEntrada(message);
   const reservado = await deps.repos.messages.reservarEntrada(
     provider,
-    message.id,
+    claveId,
     new Date(),
     new Date(Date.now() + 7 * 24 * 60 * 60_000),
   );
   if (!reservado) return;
   try {
     await handleInboundMessageReservado(message, profileName, deps);
-    await deps.repos.messages.finalizarEntrada(provider, message.id, 'aceptado');
+    await deps.repos.messages.finalizarEntrada(provider, claveId, 'aceptado');
   } catch (error) {
     // Un fallo durante el turno puede ocurrir después de que un proveedor
     // aceptara un envío. Se marca incierto y no se reproduce a ciegas.
-    await deps.repos.messages.finalizarEntrada(provider, message.id, 'incierto').catch(() => undefined);
+    await deps.repos.messages.finalizarEntrada(provider, claveId, 'incierto').catch(() => undefined);
     throw error;
   }
 }
@@ -806,16 +839,6 @@ function rafagaDe(deps: Pick<InboundDeps, 'rafagaMs' | 'config'>): number {
   return deps.rafagaMs ?? deps.config.RAFAGA_MS ?? 0;
 }
 
-/** Ultimo aviso de «esa es tu ubicacion en tiempo real» por telefono: las actualizaciones en vivo no lo repiten. */
-const avisosEnVivo = new Map<string, number>();
-function avisarUbicacionEnVivo(phone: string, ahora: number): boolean {
-  const antes = avisosEnVivo.get(phone);
-  if (antes !== undefined && ahora - antes < 10 * 60_000) return false;
-  avisosEnVivo.set(phone, ahora);
-  if (avisosEnVivo.size > 5_000) avisosEnVivo.clear();
-  return true;
-}
-
 /** Un pin o un boton pulsado se atienden ya: no esperan a la rafaga. */
 function atiendeYa(message: InboundMessage): boolean {
   return message.type === 'location' || message.type === 'livelocation' || message.type === 'interactive' || message.type === 'button';
@@ -827,6 +850,11 @@ async function handleInboundMessageEnFila(
   deps: InboundDeps,
 ): Promise<void> {
   const { repos, wa, config } = deps;
+  // Un enlace de mapa de otra ciudad no se reconoce: ni coordenadas ni respuesta.
+  const leerEnlace = async (t: string) => {
+    const r = await extractLocation(t, { bbox: config.bbox, pais: config.pais, porDireccion: porDireccionDe(deps) });
+    return !r.ok && r.reason === 'outside_bbox' ? ({ ok: false, reason: 'no_coordinates_found', warnings: [] } as const) : r;
+  };
   const phone = message.from;
   const receivedAt = new Date(Number(message.timestamp) * 1000 || Date.now());
 
@@ -852,7 +880,8 @@ async function handleInboundMessageEnFila(
     ...senderBase,
     async send(job) {
       if (pausaTraspasada && !job.traspasaPausa) job = { ...job, traspasaPausa: true };
-      if (job.manual || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
+      // La respuesta del bot a «cambiar ubicación» sale también con el bot callado (28/10).
+      if (job.manual || job.cambioUbicacion || job.respuestaUbicacion || soloDigitos(job.phone) !== soloDigitos(phone) || !botCallado() || (await esMotorizadoQueEscribe())) return senderBase.send(job);
       console.warn('[inbound] bot callado: no se le contesta al cliente', { phone, que: (job.text ?? job.interactive?.body ?? job.kind).slice(0, 60) });
       return { ok: true, wamid: `silencio:${randomUUID()}`, deliveryId: -1 };
     },
@@ -946,6 +975,60 @@ async function handleInboundMessageEnFila(
     createdAt: receivedAt,
   });
 
+  // «proceder cambio de ubicación» escrito por el MOTORIZADO de GSG (pedido del
+  // dueño, 11/11): se registra la última ubicación que mandó su cliente y se le
+  // contesta a él. Va antes que todo lo del cliente (privacidad, plazo, IA,
+  // bot callado): no es un cliente. Si quien escribe no es motorizado de
+  // ningún pedido de hoy, devuelve null y el mensaje sigue como siempre (un
+  // cliente que escribe el comando no cambia nada).
+  if (message.type === 'text' && deps.entregas?.comandoDeMotorizado) {
+    const comando = await deps.entregas.comandoDeMotorizado(phone, String(message.text?.body ?? '')).catch((error) => {
+      request_log(deps, 'no se pudo atender el cambio de ubicación del motorizado', error);
+      return null;
+    });
+    if (comando) {
+      console.log(`[comando] «proceder cambio de ubicación» del motorizado ${phone}: ${comando.resultado}`, comando.referencias);
+      if (comando.responder) {
+        await senderBase
+          .send({ phone, kind: 'freeform', category: 'UTILITY', manual: false, origen: 'sistema', text: comando.responder })
+          .catch((error) => request_log(deps, 'no se pudo contestar al motorizado', error));
+      }
+      return;
+    }
+  }
+
+  // Una foto, un audio o un video (regla del dueño, 28/10): queda en el chat para
+  // que lo vean aquí y GSG desde el historial, y nada más. No se transcribe, no
+  // se contesta, no cuenta como respuesta ni mueve el pedido ni el recordatorio.
+  if (esMediaAdmitida(message)) return;
+
+  // «BAJA», «no me escriban más», «borren mis datos» (regla del dueño, 09/11):
+  // no se ejecuta solo. Se apunta, se para el bot, su pedido pasa a una
+  // persona y sale el aviso; la baja o el borrado los hace el equipo desde
+  // Chats. Va antes de todo lo demás (también con el bot en pausa o el plazo
+  // vencido): quien lo pide tiene que quedar anotado siempre.
+  if (message.type === 'text' && repos.privacidad && !(await esMotorizadoQueEscribe())) {
+    const escrito = String(message.text?.body ?? '').trim();
+    const deteccion = escrito
+      ? await detectarPrivacidad(escrito, deps.ia?.activa() ? (m) => deps.ia!.clasificarOperativo(m) : undefined).catch(() => null)
+      : null;
+    if (deteccion) {
+      await atenderPedidoDePrivacidad(
+        {
+          repos,
+          sender,
+          entregas: deps.entregas,
+          ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}),
+          log: (m, d) => console.warn(`[privacidad] ${m}`, d ?? ''),
+        },
+        contact,
+        escrito,
+        deteccion,
+      ).catch((error) => request_log(deps, 'no se pudo apuntar el pedido de privacidad', error));
+      return;
+    }
+  }
+
   // Regla del dueño (20/10): pasado el plazo para marcar la incidencia, el
   // sistema ya no hace nada con ese cliente: se marca la incidencia, se le
   // reporta a GSG y aqui se acaba. Ni respuesta, ni pin registrado, ni IA,
@@ -1006,7 +1089,7 @@ async function handleInboundMessageEnFila(
   // el pin se perdio). Todo lo demas sigue callado mientras dure la pausa.
   if (contact.botPausadoAt) {
     const texto = message.type === 'text' ? String(message.text?.body ?? '') : '';
-    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || message.type === 'livelocation' || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|waze\.com)/i.test(texto);
+    const esUbicacion = (message.type === 'location' && Boolean(message.location)) || /(maps\.google\.|google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl|maps\.apple\.|waze\.com)/i.test(texto);
     // Los botones «Sí, recibo hoy» / «No» que mandó el sistema tambien: son la respuesta a lo que él preguntó.
     const esBotonDeEntrega = message.type === 'interactive' && String(message.interactive?.button_reply?.id ?? '').startsWith('entrega:');
     if (esBotonDeEntrega) request_log(deps, 'bot en pausa, pero el cliente pulsó el botón que mandó el sistema: se atiende', null);
@@ -1063,10 +1146,18 @@ async function handleInboundMessageEnFila(
       await cerrarTrasUbicacion();
       return true;
     }
-    // Otra ubicación con la suya ya registrada: el reparto lo reportó; las
-    // entregas quitan la ubicación y marcan el error. Al cliente, nada.
+    // Otra ubicación con la suya ya registrada: la atienden las entregas (28/10).
+    // Antes de la hora límite y con cambios que le queden, se registra como su
+    // cambio y se le confirma; sin cambios, se le dice; después de la hora, como
+    // siempre (se reporta a GSG y al cliente no se le contesta).
     if (respuesta.resultado === 'cambio_reportado') {
-      if (deps.entregas && respuesta.ubicacionNueva) await deps.entregas.alUbicacion(contact, respuesta.ubicacionNueva).catch((error) => request_log(deps, 'no se pudo marcar el cambio de ubicación en las entregas', error));
+      if (deps.entregas && respuesta.ubicacionNueva) {
+        const r = await deps.entregas.alUbicacion(contact, respuesta.ubicacionNueva).catch((error) => {
+          request_log(deps, 'no se pudo atender el cambio de ubicación en las entregas', error);
+          return { atendida: false as const };
+        });
+        if (r.atendida && r.responder && r.resultado !== 'cambio_reportado' && r.resultado !== 'propuesta_obsoleta') await responderEntrega(r);
+      }
       return true;
     }
     if (respuesta.resultado === 'fuera_de_zona') {
@@ -1139,13 +1230,18 @@ async function handleInboundMessageEnFila(
         ? { phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } }
         : { phone, kind: 'freeform', category: 'UTILITY', text: r.responder ?? '' }, scope);
     }
+    // «cambiar ubicación» lo atiende el bot (regla del dueño, 28/10): su respuesta
+    // sale también con el bot callado, como «Ubicación registrada».
+    const delCambio = r.resultado === 'pide_cambio_ubicacion' || r.resultado === 'pide_cambio_ubicacion_tarde' || r.resultado === 'cambio_ubicacion_agotado';
     const enviado = await (r.botones?.length
       ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', interactive: { body: r.responder ?? '', buttons: r.botones } })
       : r.pedirUbicacion
-        // «Claro, {nombre}, por favor mándeme su nueva ubicación»: con el botón
-        // de ubicación, como el primer mensaje; sale aunque el chat esté en silencio.
-        ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', cierreTrasGracias: true, interactive: { body: r.responder ?? '', locationRequest: true } })
-        : reply(r.responder ?? '', {
+        // «Por favor, comparta su nueva ubicación»: con el botón de ubicación,
+        // como el primer mensaje; sale aunque el chat esté en silencio.
+        ? sender.send({ phone, kind: 'interactive', category: 'UTILITY', cierreTrasGracias: true, ...(delCambio ? { cambioUbicacion: true } : {}), interactive: { body: r.responder ?? '', locationRequest: true } })
+        : delCambio
+          ? sender.send({ phone, kind: 'freeform', category: 'UTILITY', text: r.responder ?? '', cierreTrasGracias: true, cambioUbicacion: true })
+          : reply(r.responder ?? '', {
           // La ubicación nueva (el cliente la cambió antes de la hora límite) se
           // le confirma aunque el chat esté en silencio tras UBI REGISTRADA,
           // igual que el «después de la 1:00 PM»: es la respuesta a su cambio.
@@ -1240,22 +1336,32 @@ async function handleInboundMessageEnFila(
       interactive: { body, locationRequest: true },
     });
 
-  // --- ubicacion en tiempo real: no se registra -------------------------
-  // Se mueve con el cliente y no dice donde recibe: se le pide la actual.
-  // Vale tanto para las entregas del dia como para cualquier solicitud del
-  // reparto. Las actualizaciones de la misma ubicacion en vivo no repiten el aviso.
-  if (message.type === 'livelocation') {
-    let texto = deps.entregas ? await deps.entregas.alUbicacionEnVivo(phone).catch(() => null) : null;
-    if (!texto) {
-      const abierta = (await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ?? (await repos.rutas.abiertaPorTelefono(phone).catch(() => null));
-      if (abierta && (abierta.estado === 'pendiente' || abierta.estado === 'enviado' || abierta.estado === 'respondio')) {
-        texto = TEXTOS_POR_DEFECTO.ubicacionEnVivo;
-        await repos.rutas.registrarEvento(abierta.id, 'respuesta', 'mandó su ubicación en tiempo real: no se registra, se le pide la ubicación actual').catch(() => undefined);
+  // --- ubicacion en tiempo real: no es una ubicacion valida -------------
+  // Solo valen el pin de ubicacion actual y los enlaces de Google Maps, Apple
+  // Maps y Waze. La ubicacion en vivo no se lee, no se contesta y se sigue
+  // esperando una ubicacion valida.
+  if (message.type === 'livelocation') return;
+
+  // --- un enlace de mapa sin ubicación segura -----------------------------
+  // El cliente con una entrega en curso manda un enlace de mapa en vez del pin.
+  // Si de ese enlace sale su ubicación (sus coordenadas, o la dirección que
+  // trae encontrada en el mapa con su número de puerta), la registra el camino
+  // de siempre (abajo). Si no sale o manda dos enlaces distintos, no se adivina
+  // y el bot NO contesta: solo salen los mensajes del bot (regla del dueño,
+  // 29/10). Se apunta en el pedido y siguen los recordatorios de siempre.
+  if (message.type === 'text' && deps.entregas && !(await deps.entregas.esMotorizado(phone).catch(() => false))) {
+    const enlaces = enlacesDeMapa(message.text?.body ?? '');
+    if (enlaces.length && (await deps.entregas.tieneEntregaEnCurso(phone).catch(() => false))) {
+      const leida = enlaces.length === 1 ? await leerEnlace(enlaces[0]!).catch(() => null) : null;
+      // Fuera del país (o de la zona) lo atiende el camino de fuera de zona, más abajo.
+      const sinUbicacion = enlaces.length > 1 || !leida || (!leida.ok && leida.reason !== 'outside_bbox');
+      if (sinUbicacion) {
+        const motivo = enlaces.length > 1 ? `mandó ${enlaces.length} enlaces de mapa distintos` : `mandó un enlace de mapa sin la ubicación exacta (${leida && !leida.ok ? leida.reason : 'no se pudo leer'})`;
+        await deps.entregas.anotarAgente(phone, `${motivo}: no se le contesta (${enlaces[0]!.slice(0, 120)})`).catch(() => undefined);
+        const abierta = (await repos.rutas.abiertaPorContacto(contact.id).catch(() => null)) ?? (await repos.rutas.abiertaPorTelefono(phone).catch(() => null));
+        if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `${motivo}: no se le contesta, siguen los recordatorios`).catch(() => undefined);
+        return;
       }
-    }
-    if (texto) {
-      if (avisarUbicacionEnVivo(phone, Date.now())) await reply(texto);
-      return;
     }
   }
 
@@ -1270,12 +1376,21 @@ async function handleInboundMessageEnFila(
     if (esperando) {
       const escrito = message.text?.body ?? message.media?.transcripcion ?? message.button?.text ?? message.interactive?.button_reply?.title ?? '';
       const boton = message.interactive?.button_reply?.id ?? message.button?.payload ?? null;
-      const ubicacion = escrito && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(escrito)
-        ? await extractLocation(escrito, {}).catch(() => null) : null;
+      const ubicacion = escrito && /https?:\/\/|\bgoogle\.|goo\.gl|maps\.apple\.|waze\.com/i.test(escrito)
+        ? await leerEnlace(escrito).catch(() => null) : null;
       const confirmaPin = Boolean(deps.entregas && clasificarPinLejos(escrito, boton) !== 'otra' && await deps.entregas.pinLejosPendiente(phone).catch(() => false));
       if (!ubicacion?.ok && !confirmaPin) {
         // Un número equivocado se reporta por dentro, sin contestarle al cliente.
         if (escrito && pareceNumeroEquivocado(escrito)) await deps.entregas?.alNoSoyYo(contact, escrito, 'reglas; sin respuesta al cliente').catch((error) => request_log(deps, 'no se pudo reportar el número equivocado', error));
+        // Pide cancelar o la entrega otro día: tampoco se le contesta (la nota la
+        // pone la IA para GSG), pero ya no se le manda «aún esperamos tu
+        // ubicación»: lo ve una persona (regla del dueño, 29/10).
+        const pide = escrito && !pareceNumeroEquivocado(escrito) ? clasificarConReglas([{ direction: 'in', kind: 'text', body: escrito }]) : null;
+        if (pide === 'cancelar_entrega' || pide === 'reagendar_entrega') {
+          const que = pide === 'cancelar_entrega' ? 'pidió cancelar el pedido' : 'pidió la entrega otro día';
+          await soltarSolicitudes(repos, phone, { ahora: new Date(), motivo: `${que} («${escrito.slice(0, 160)}»)`, estado: 'supervision', incidencia: 'respondio_sin_ubicacion' }).catch((error) => request_log(deps, 'no se pudieron parar los recordatorios', error));
+          return;
+        }
         if (abierta) await repos.rutas.registrarEvento(abierta.id, 'respuesta', `mensaje sin ubicación: no se contesta ni se adelanta el recordatorio (${escrito.slice(0, 160) || message.type})`).catch(() => undefined);
         return;
       }
@@ -1294,7 +1409,7 @@ async function handleInboundMessageEnFila(
     const cuerpo = message.text?.body ?? '';
     const escrito = cuerpo || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || message.media?.transcripcion || '';
     // Un enlace de mapa (o coordenadas) es su ubicación: la registra el camino de siempre.
-    const enlace = !esPin && cuerpo && /https?:\/\/|-?\d{1,2}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/.test(cuerpo) ? await extractLocation(cuerpo, {}).catch(() => null) : null;
+    const enlace = !esPin && cuerpo && /https?:\/\/|\bgoogle\.|goo\.gl|maps\.apple\.|waze\.com/i.test(cuerpo) ? await leerEnlace(cuerpo).catch(() => null) : null;
     if (!esPin && !enlace?.ok) {
       await atenderConReglaGsg(depsAgente(), contact, { texto: escrito, tipo: message.type, boton: message.interactive?.button_reply?.id ?? message.button?.payload ?? null, mensajes: message.rafaga ?? 1, citaId: message.context?.id ?? null }).catch((error) => request_log(deps, 'fallo la regla del dueño al atender un mensaje', error));
       return;
@@ -1494,7 +1609,7 @@ async function handleInboundMessageEnFila(
   const [rules, prefs, result] = await Promise.all([
     repos.automation.listRules(),
     repos.automation.getPrefs(),
-    extractLocation(text, {}),
+    leerEnlace(text),
   ]);
 
   // Las entregas del dia: la respuesta a "¿confirmas tu pedido?" y lo que

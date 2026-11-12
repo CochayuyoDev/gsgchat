@@ -21,6 +21,8 @@ const MANZANA = /\b(mz|mza|manzana)\b/;
 const LOTE = /\b(lt|lte|lote)\b/;
 /** «altura del mercado», «frente al parque», «cuadra 5», «esquina con». */
 const REFERENCIA = /\b(altura|frente|cuadra|esquina|espalda|costado|cerca|al lado|referencia|ref)\b/;
+/** Verbos con los que alguien cuenta de sí mismo en vez de dar una dirección. */
+const FRASE_PERSONAL = /\b(vivo|vivimos|estoy|estamos|soy|ando|resido|trabajo|voy|vengo|queda)\b/;
 const NUMERO = /\b\d{1,5}\b|\bn[°ºo]\s*\d/;
 
 /**
@@ -31,7 +33,9 @@ const NUMERO = /\b\d{1,5}\b|\bn[°ºo]\s*\d/;
 export function pareceDireccion(texto: string): boolean {
   const crudo = (texto ?? '').trim();
   if (crudo.length > 300) return false;
-  if (distritoConocido(crudo)) return true;
+  // Solo el distrito («Surco», «San Juan de Lurigancho») es una respuesta; una frase
+  // con verbo («vivo en Surco», «estoy en Lince») cuenta lo que haga el cliente, no dónde queda.
+  if (distritoConocido(crudo) && crudo.split(/\s+/).length <= 4 && !FRASE_PERSONAL.test(sinTildes(crudo))) return true;
   if (crudo.length < 6) return false;
   // Una pregunta no es una dirección («¿dónde queda la av. larco?»).
   if (/^[¿?]/.test(crudo) || /\?\s*$/.test(crudo)) return false;

@@ -114,6 +114,8 @@ export const CAMPOS_PEDIDO = new Set([
   'horarioEntrega',
   // Los datos del envio del primer mensaje al cliente (todos opcionales). Ver src/entregas/datos-envio.ts.
   'producto', 'empresa', 'empresaCodigo', 'empresaNombre', 'tiendaCodigo', 'tiendaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente',
+  // El primer mensaje ya redactado por GSG (sale tal cual en vez del texto de GSGchat).
+  'firstMessage',
 ]);
 
 // ------------------------------------------------------------ tokens del simulador

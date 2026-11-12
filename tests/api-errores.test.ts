@@ -106,6 +106,38 @@ describe('códigos HTTP de POST /api/v1/entregas', () => {
     expect(await a.entrega('ERR-400B')).toBeFalsy();
   });
 
+  it('el producto entra con cualquier largo y se guarda entero (sin el tope de 200 caracteres)', async () => {
+    const producto = 'Kit de llantas Pirelli P Zero 245/40 R18 con aros, pernos y valvulas; '.repeat(70).trim();
+    expect(producto.length).toBeGreaterThan(4000);
+    const detalleProducto = 'Detalle muy largo del envío. '.repeat(100).trim();
+    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { pedidos: [pedido('PROD-LARGO', '987700051', { producto, detalleProducto })] } });
+    expect(r.status).toBe(201);
+    expect(r.json.rechazados ?? []).toEqual([]);
+    const e = await a.entrega('PROD-LARGO');
+    const guardado = String(e?.datosEnvio?.producto ?? '');
+    expect(guardado.length).toBe(producto.length);
+    expect(guardado).toBe(producto);
+    expect(e?.datosEnvio?.detalleProducto).toBe(detalleProducto);
+  });
+
+  it('un pedido con datos inválidos no frena a los buenos del mismo lote: se guardan y el malo vuelve explicado', async () => {
+    const largo = 'x'.repeat(201);
+    const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { pedidos: [pedido('LOTE-OK1', '987700041'), pedido('LOTE-MALO', '987700042', { metodoPago: largo }), pedido('LOTE-OK2', '987700043')] } });
+    expect(r.status).toBe(201);
+    expect(r.json.ok).toBe(true);
+    expect(r.json.creadas.map((c: { referencia: string }) => c.referencia).sort()).toEqual(['LOTE-OK1', 'LOTE-OK2']);
+    expect(r.json.rechazados).toEqual([expect.objectContaining({ campo: 'pedidos[1].metodoPago', pedido: 2, tracking: 'LOTE-MALO', mensaje: expect.stringMatching(/200 caracteres/) })]);
+    expect(r.json.detalle).toContain('1 pedido rechazado');
+    expect(await a.entrega('LOTE-OK1')).toBeTruthy();
+    expect(await a.entrega('LOTE-OK2')).toBeTruthy();
+    expect(await a.entrega('LOTE-MALO')).toBeFalsy();
+    // Repetir la misma llamada no duplica los buenos y sigue rechazando el malo.
+    const otra = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { pedidos: [pedido('LOTE-OK1', '987700041'), pedido('LOTE-MALO', '987700042', { metodoPago: largo }), pedido('LOTE-OK2', '987700043')] } });
+    expect(otra.status).toBe(200);
+    expect(otra.json.creadas).toEqual([]);
+    expect(otra.json.rechazados).toHaveLength(1);
+  });
+
   it('400: sin tracking lo dice con el nombre que usa GSG', async () => {
     const r = await pedir('/api/v1/entregas', { clave: claveA, cuerpo: { ...GSG, cliente: 'Sin tracking', telefono: '987700004' } });
     expect(r.status).toBe(400);

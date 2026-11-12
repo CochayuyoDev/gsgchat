@@ -43,6 +43,7 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/claves-api$/, 'clave.crear'],
   ['PATCH', /^\/admin\/claves-api\/:id$/, 'clave.editar'],
   ['POST', /^\/admin\/claves-api\/:id\/renovar$/, 'clave.renovar'],
+  ['POST', /^\/admin\/claves-api\/:id\/poner-al-dia$/, 'clave.poner_al_dia'],
   ['POST', /^\/admin\/claves-api\/:id\/eliminar$/, 'clave.eliminar'],
   ['DELETE', /^\/admin\/claves-api\/:id$/, 'clave.revocar'],
   ['POST', /^\/admin\/ajustes$/, 'ajustes.guardar'],
@@ -87,6 +88,8 @@ const ACCIONES: Array<[method: string, ruta: RegExp, accion: string]> = [
   ['POST', /^\/admin\/contacts\/opt-in$/, 'contacto.optin'],
   ['POST', /^\/admin\/contacts\/opt-out$/, 'contacto.baja'],
   ['POST', /^\/admin\/contacts\/eliminar$/, 'contactos.eliminar'],
+  ['POST', /^\/admin\/privacidad\/borrar$/, 'cliente.eliminar_datos'],
+  ['POST', /^\/admin\/privacidad\/descartar$/, 'cliente.privacidad_descartada'],
   ['POST', /^\/admin\/automation\/rules/, 'automatizacion.regla'],
   ['PUT', /^\/admin\/automation\/rules/, 'automatizacion.regla'],
   ['DELETE', /^\/admin\/automation\/rules/, 'automatizacion.regla.borrar'],
@@ -191,6 +194,7 @@ export const ETIQUETAS: Record<string, string> = {
   'clave.activar': 'Activó una clave de API',
   'clave.desactivar': 'Desactivó una clave de API',
   'clave.renovar': 'Renovó una clave de API',
+  'clave.poner_al_dia': 'Puso al día los permisos de una clave de API',
   'clave.eliminar': 'Eliminó una clave de API',
   'ajustes.guardar': 'Guardo la configuracion',
   'ajustes.restablecer': 'Restablecio la configuracion',
@@ -331,6 +335,13 @@ export function detalleSeguro(body: unknown, params?: Record<string, string>): R
   return Object.keys(out).length ? out : null;
 }
 
+/** Tras eliminar los datos de un cliente, la bitacora no puede guardar su numero: solo los ultimos 4 digitos. */
+function detalleSinNumero(body: unknown): Record<string, unknown> | null {
+  const phone = body && typeof body === 'object' ? String((body as Record<string, unknown>).phone ?? '') : '';
+  const d = phone.replace(/\D+/g, '');
+  return d ? { cliente: `••••${d.slice(-4)}` } : null;
+}
+
 export function accionDe(method: string, ruta: string): string | null {
   if (IGNORAR.some((r) => r.test(ruta))) return null;
   for (const [m, r, accion] of ACCIONES) if (m === method && r.test(ruta)) return accion;
@@ -360,7 +371,7 @@ export function instalarBitacora(app: FastifyInstance, repo: ActividadRepo, log?
         usuarioId: u?.id ?? null,
         usuario,
         accion,
-        detalle: detalleSeguro(body, request.params as Record<string, string>),
+        detalle: accion === 'cliente.eliminar_datos' ? detalleSinNumero(body) : detalleSeguro(body, request.params as Record<string, string>),
         ip: request.ip || null,
       });
     } catch (error) {

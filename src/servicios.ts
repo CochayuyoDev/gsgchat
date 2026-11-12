@@ -37,12 +37,15 @@ import { startScheduler } from './automation/engine.js';
 import { ventanaDeEntrega } from './entregas/horario-distrito.js';
 
 import { startArchiveSweeper } from './archive/service.js';
+import { catalogoVigente } from './chat/etiquetar.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
+import { vigilarMensajesNoEntregados } from './rutas/no-llego.js';
 import { crearPuertoGsg, despacharReportes, paradaPorClave } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
 
 import type { ServicioEnvioAutomatico } from './envio-automatico/servicio.js';
 import { syncTemplates } from './templates/registry.js';
+import { clienteDeMeta, hayApiEnUso } from './templates/cliente-meta.js';
 import type { Bus } from './eventos/bus.js';
 import { encolarEventos, startDespachadorWebhooks } from './webhooks/despachador.js';
 import type { PuertoGsg } from './rutas/gsg.js';
@@ -56,6 +59,11 @@ export interface ServiciosDeps {
   repos: Repos;
   settings: SettingsService;
   wa: WhatsAppClient;
+  /** Con varias lineas de WhatsApp: si queda alguna conectada (ver `MotorDeps.hayLineaConectada`). */
+  hayLineaConectada?: () => boolean;
+  /** Las lineas y sus clientes: con una linea de WhatsApp API, las plantillas se traen por ella. */
+  lineas?: import('./whatsapp/lineas.js').ServicioLineas;
+  registro?: import('./whatsapp/registro.js').RegistroClientes;
   sender: Sender;
   salud: Monitor;
   politica: () => Politica;
@@ -99,13 +107,21 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   // Con la API oficial, el estado de las plantillas se refresca cada media
   // hora: del final de una pausa Meta no avisa por webhook, y una plantilla
   // que sigue marcada como pausada cuando ya no lo esta es trabajo parado.
-  const sincronizadorPlantillas = setInterval(() => {
-    if (providerOf(settings.current()) !== 'cloud' || !settings.isConfigured()) return;
-    void syncTemplates(wa, repos).catch((error) =>
+  // Con la principal por QR y una linea de API aparte, se traen por esa linea.
+  const fuentesMeta = { settings, wa, lineas: deps.lineas, registro: deps.registro };
+  const traerPlantillas = async () => {
+    const cliente = await clienteDeMeta(fuentesMeta).catch(() => null);
+    if (!cliente) return;
+    if (cliente === wa && !settings.isConfigured()) return;
+    await syncTemplates(cliente, repos, { marcarAusentes: true }).catch((error) =>
       warn('fallo la sincronizacion de plantillas', { detalle: error instanceof Error ? error.message : String(error) }),
     );
-  }, 30 * 60_000);
+  };
+  const sincronizadorPlantillas = setInterval(() => void traerPlantillas(), 30 * 60_000);
   sincronizadorPlantillas.unref?.();
+  // Y una vez al arrancar: una plantilla aprobada mientras el sistema estaba apagado vale ya.
+  const primeraSincronizacion = setTimeout(() => void traerPlantillas(), 20_000);
+  primeraSincronizacion.unref?.();
 
   // Conversaciones sin movimiento: se respaldan y se limpian solas.
   const stopSweeper = startArchiveSweeper(
@@ -113,6 +129,8 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
       repos,
       dir: config.ARCHIVE_DIR,
       ia: () => (deps.ia?.estado().tieneToken ? { completar: (m, o) => deps.ia!.completar(m, o) } : null),
+      // El mismo catalogo de etiquetas que Chats (el de fabrica si el negocio no guardo uno).
+      catalogo: repos.chatEtiquetas ? () => catalogoVigente(repos.chatEtiquetas!) : undefined,
       pedidoDe: entregas ? (phone) => entregas.pedidoDe(phone) : undefined,
       nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
       log: info,
@@ -132,6 +150,7 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     repos,
     sender,
     wa,
+    hayLineaConectada: deps.hayLineaConectada,
     gsg,
     opciones: opcionesDesdeConfig(config),
     nombreNegocio: () => ajustes?.nombreNegocio() ?? config.businessName,
@@ -150,6 +169,9 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
     // El primer mensaje de una entrega de GSG: la plantilla con producto, empresa, codigo, monto...
     textoSolicitud: entregas ? (s) => entregas.textoSolicitudUbicacion({ phone: s.phone, referencia: s.referencia, loteId: s.loteId }) : undefined,
     plantillaSolicitud: entregas ? (s) => entregas.plantillaSolicitudUbicacion(s) : undefined,
+    datosPedido: entregas ? (s) => entregas.datosPlantillaPedido(s) : undefined,
+    // Principal por QR y una línea de API en uso: la plantilla aprobada de Ajustes de chat.
+    plantillaMeta: entregas ? async () => (await entregas.usaPlantillaMeta()) && (await hayApiEnUso(fuentesMeta)) : undefined,
     primerMensaje: entregas?.primerMensajeReparto,
     // Antes de escribirle, GSG dice si ese envio sigue (si hay ruta de consulta configurada).
     antesDeEscribir: entregas ? (s) => entregas.antesDeEscribirReparto(s) : undefined,
@@ -212,12 +234,18 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
   const desconectarBus = bus ? encolarEventos(bus, repos.webhooks, warn) : () => undefined;
   const stopWebhooks = bus ? startDespachadorWebhooks({ repo: repos.webhooks, log: warn }) : () => undefined;
 
+  // Un mensaje del pedido que WhatsApp avisa DESPUES que no entrego: deja de
+  // contar como intento y el pedido pasa a incidencia con el motivo. Ver src/rutas/no-llego.ts.
+  const stopNoLlego = bus ? vigilarMensajesNoEntregados(bus, { repos, log: warn }) : () => undefined;
+
   return () => {
+    stopNoLlego();
     desconectarBus();
     stopWebhooks();
     stopScheduler();
     stopGoteo();
     clearInterval(sincronizadorPlantillas);
+    clearTimeout(primeraSincronizacion);
     stopSweeper();
     stopMotorRutas();
     stopMotorLista();

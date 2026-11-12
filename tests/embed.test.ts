@@ -104,14 +104,16 @@ describe('el token', () => {
 });
 
 describe('POST /api/v1/embed/token', () => {
-  it('exige el permiso embed:emitir', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('exige el permiso embed:emitir', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: con(TODO), payload: { operador: 'ana' } });
     expect(r.statusCode).toBe(200);
     const sin = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: { 'x-api-key': 'wak_noExiste00000000000000000000000000' }, payload: { operador: 'ana' } });
     expect(sin.statusCode).toBe(401);
   });
 
-  it('emite lo justo: permisos del chat, acotados a los de la clave', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('emite lo justo: permisos del chat, acotados a los de la clave', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/v1/embed/token', headers: con(EMISORA), payload: { operador: 'ana', telefono: '+51 987 654 321' } });
     expect(r.statusCode).toBe(200);
     const cuerpo = r.json() as { token: string; permisos: string[]; telefono: string; url: string; caduca: string };
@@ -134,7 +136,8 @@ describe('con un token embebido', () => {
     return (r.json() as { token: string }).token;
   }
 
-  it('limitado a un telefono: ve y escribe solo ese hilo', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('limitado a un telefono: ve y escribe solo ese hilo', async () => {
     const t = await token('51987654321');
     const lista = await app.inject({ method: 'GET', url: '/api/v1/conversaciones', headers: con(t) });
     expect(lista.statusCode).toBe(200);
@@ -153,7 +156,8 @@ describe('con un token embebido', () => {
     expect((await app.inject({ method: 'POST', url: '/api/v1/conversaciones/51987654321/leido', headers: con(t) })).statusCode).toBe(200);
   });
 
-  it('sin telefono: la bandeja entera, pero nada fuera del chat', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('sin telefono: la bandeja entera, pero nada fuera del chat', async () => {
     const t = await token();
     const lista = await app.inject({ method: 'GET', url: '/api/v1/conversaciones', headers: con(t) });
     expect(lista.json().conversaciones.length).toBe(2);
@@ -163,14 +167,16 @@ describe('con un token embebido', () => {
     expect((await app.inject({ method: 'GET', url: '/api/v1/contactos', headers: con(t) })).statusCode).toBe(403);
   });
 
-  it('caducado o manipulado: 401', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('caducado o manipulado: 401', async () => {
     const viejo = firmarTokenEmbebido(secretoDeEmbebido(config), { operador: 'ana', telefono: null, permisos: ['conversaciones:leer'] }, 1, Date.now() - 10 * 60_000);
     expect((await app.inject({ method: 'GET', url: '/api/v1/conversaciones', headers: con(viejo) })).statusCode).toBe(401);
     const t = await token();
     expect((await app.inject({ method: 'GET', url: '/api/v1/conversaciones', headers: con(t.slice(0, -3) + 'abc') })).statusCode).toBe(401);
   });
 
-  it('el flujo en vivo entrega solo lo del telefono del token, y acepta el token en la query', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('el flujo en vivo entrega solo lo del telefono del token, y acepta el token en la query', async () => {
     const t = await token('51987654321');
     const direccion = await app.listen({ port: 0, host: '127.0.0.1' });
     try {
@@ -211,7 +217,8 @@ describe('con un token embebido', () => {
 });
 
 describe('la pagina y el script', () => {
-  it('frame-ancestors: solo este sitio y los dominios del ajuste', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('frame-ancestors: solo este sitio y los dominios del ajuste', async () => {
     expect(frameAncestors([])).toBe("frame-ancestors 'self'");
     expect(frameAncestors(['https://stoky.app', 'basura', 'https://tienda.com/'])).toBe("frame-ancestors 'self' https://stoky.app https://tienda.com/");
 
@@ -228,7 +235,8 @@ describe('la pagina y el script', () => {
     expect(con.headers['cache-control']).toBe('no-store');
   });
 
-  it('embed.js apunta a este servidor y expone WA.montar', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('embed.js apunta a este servidor y expone WA.montar', async () => {
     const r = await app.inject({ method: 'GET', url: '/embed.js' });
     expect(r.statusCode).toBe(200);
     expect(r.headers['content-type']).toContain('javascript');
@@ -240,7 +248,8 @@ describe('la pagina y el script', () => {
     expect(r.body).toContain("'/embed/chat'");
   });
 
-  it('la pagina no necesita sesion ni redirige al login', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): embed del chat.
+  it.skip('la pagina no necesita sesion ni redirige al login', async () => {
     const r = await app.inject({ method: 'GET', url: '/embed/chat' });
     expect(r.statusCode).toBe(200);
     expect(r.headers.location).toBeUndefined();
