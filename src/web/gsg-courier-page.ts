@@ -166,7 +166,8 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
 .courier-grid>[data-na][hidden]{display:none}
 .na-apis{margin:14px 0}.na-apis code{overflow-wrap:anywhere}
 .na-clave{margin:6px 0 14px}
-.courier-card h2{font-size:18px;margin-bottom:10px}.courier-cab{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:14px}.courier-cab h2{margin-bottom:4px}.courier-cab p{margin:0}.courier-api{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--primario-suave);color:var(--primario);margin-right:4px}@media(max-width:640px){.courier-cab{flex-direction:column}}.courier-card>h3{margin-top:22px}.courier-card>small{color:var(--texto-suave)}`,
+.courier-card h2{font-size:18px;margin-bottom:10px}.courier-cab{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:14px}.courier-cab h2{margin-bottom:4px}.courier-cab p{margin:0}.courier-api{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--primario-suave);color:var(--primario);margin-right:4px}@media(max-width:640px){.courier-cab{flex-direction:column}}.courier-card>h3{margin-top:22px}.courier-card>small{color:var(--texto-suave)}
+.av-hook{border:1px solid var(--borde);border-radius:12px;padding:16px;margin:12px 0}.av-hook h3{margin:0 0 4px;font-size:15px;overflow-wrap:anywhere}.av-hook .av-meta{margin:0 0 10px;font-size:13px;color:var(--texto-suave);overflow-wrap:anywhere}.av-eventos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.av-ev{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--superficie-2);border-radius:8px;font-size:13px;line-height:1.4}.courier-card .av-ev input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.av-ev code{font-weight:700}.av-ev.destacado{outline:2px solid var(--primario);outline-offset:-2px}.av-todos{margin:0 0 10px}.av-falta{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11.5px;font-weight:700}.av-ok{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:11.5px;font-weight:700}@media(max-width:800px){.av-eventos{grid-template-columns:1fr}}`,
     contenido: `<nav class="na-pestanas s-pestanas" aria-label="Nuestra API">
       <a href="#t-resumen" data-na="resumen">Resumen</a>
       <a href="#t-api1" data-na="api1"><span class="api-num">API 1</span>Pedidos</a>
@@ -177,6 +178,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       <a href="#t-validar" data-na="validar">Probar y validar</a>
       <a href="#t-llamadas" data-na="llamadas">Últimas llamadas</a>
       <a href="#t-meta" data-na="meta">Webhook de Meta</a>
+      <a href="#t-avisos" data-na="avisos">Avisos a GSG</a>
     </nav>
     <div class="courier-grid">
       <section class="courier-card courier-wide" data-na="resumen"><h2>GSG llama → GSGchat recibe → el sistema procesa</h2>
@@ -303,6 +305,12 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <h3>Lo último que llegó</h3>
         <div id="meta-eventos" class="courier-scroll tablewrap"></div>
         <small>Mientras la app de Meta esté en modo desarrollo solo llegan los avisos de prueba del panel de Meta; los mensajes reales empiezan a llegar cuando la app pasa a modo Live.</small>
+      </section>
+      <section class="courier-card courier-wide" id="avisos-gsg" data-na="avisos">
+        <div class="courier-cab"><div><h2>Avisos a GSG (webhooks)</h2><p class="muted">Lo que GSGchat le avisa a GSG al momento, sin que GSG tenga que preguntar. Marca qué avisos recibe cada dirección: el cambio vale al instante y GSG no tiene que cambiar nada.</p></div><button class="btn sm" type="button" id="avisos-refrescar">Actualizar</button></div>
+        <div class="courier-status av-clave"><b>mensaje.estado</b> es el aviso del estado real de cada mensaje (le llegó, lo leyó o no le llegó, con el porqué). Sin él, GSG solo ve el estado nuevo al recargar la conversación.</div>
+        <div id="avisos-lista"></div>
+        <p id="avisos-aviso" class="courier-status" role="status" aria-live="polite" hidden></p>
       </section>
       <section class="courier-card courier-wide" data-na="llamadas"><div class="courier-cab"><div><h2>Últimas llamadas (API 1 y API 2)</h2><p class="muted">Lo que GSG nos envió: pedidos, órdenes de cancelar o reintentar, y las pruebas hechas desde esta pantalla.</p></div><button class="btn sm" id="courier-refrescar">Actualizar estado</button></div><div id="courier-bitacora" class="courier-scroll tablewrap"></div></section>
       <section class="courier-card courier-wide" id="courier-campos" data-na="api1"><h2>Campos que envía Courier (API 1)</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
@@ -606,6 +614,62 @@ ${MENSAJE_ERROR_HTTP_JS}
       if (activa) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     if (destino && destino.scrollIntoView) destino.scrollIntoView({ block: 'start' }); else if (window.scrollTo) window.scrollTo(0, 0);
+  }
+  /* «Avisos a GSG»: cada webhook con sus eventos para marcar. */
+  function avisosMsg(t, mal) { var el = $('avisos-aviso'); el.hidden = !t; el.textContent = t || ''; el.style.color = mal ? '#b91c1c' : ''; }
+  function pintarAvisos(d) {
+    var eventos = d.eventos || [];
+    if (!d.webhooks || !d.webhooks.length) {
+      $('avisos-lista').innerHTML = '<div class="vacio compacto"><h3>GSG todavía no registró ninguna dirección</h3><p>GSG la registra con <code>POST /api/v1/webhooks</code> (con su clave). Cuando exista, aparecerá aquí para elegir sus avisos.</p></div>';
+      return;
+    }
+    $('avisos-lista').innerHTML = d.webhooks.map(function (w) {
+      var todos = (w.eventos || []).indexOf('*') >= 0;
+      var tiene = todos || (w.eventos || []).indexOf('mensaje.estado') >= 0;
+      var estado = w.activo ? 'Activo' : ('Apagado' + (w.motivoPausa ? ': ' + w.motivoPausa : ''));
+      return '<div class="av-hook" data-id="' + esc(w.id) + '">' +
+        '<h3>' + esc(w.descripcion || w.url) + (tiene ? '<span class="av-ok">recibe mensaje.estado</span>' : '<span class="av-falta">sin mensaje.estado</span>') + '</h3>' +
+        '<p class="av-meta">' + esc(w.url) + ' · ' + esc(estado) + (w.ultimoOkAt ? ' · último aviso recibido por GSG: ' + esc(new Date(w.ultimoOkAt).toLocaleString('es-PE')) : '') + '</p>' +
+        '<label class="av-ev av-todos"><input type="checkbox" data-todos' + (todos ? ' checked' : '') + '><span><b>Todos los avisos</b><br>Incluye los que se agreguen en el futuro.</span></label>' +
+        '<div class="av-eventos">' + eventos.map(function (e) {
+          var marcado = todos || (w.eventos || []).indexOf(e.nombre) >= 0;
+          return '<label class="av-ev' + (e.nombre === 'mensaje.estado' ? ' destacado' : '') + '"><input type="checkbox" data-evento="' + esc(e.nombre) + '"' + (marcado ? ' checked' : '') + (todos ? ' disabled' : '') + '><span><code>' + esc(e.nombre) + '</code><br>' + esc(e.descripcion) + '</span></label>';
+        }).join('') + '</div>' +
+        '<div class="courier-actions"><button class="btn primario" type="button" data-guardar>Guardar avisos</button>' +
+        (tiene ? '' : '<button class="btn" type="button" data-agregar-estado>Agregar solo mensaje.estado</button>') + '</div></div>';
+    }).join('');
+    document.querySelectorAll('.av-hook').forEach(function (caja) {
+      var id = caja.getAttribute('data-id');
+      var todosBox = caja.querySelector('[data-todos]');
+      var cajas = function () { return Array.prototype.slice.call(caja.querySelectorAll('[data-evento]')); };
+      todosBox.onchange = function () { cajas().forEach(function (x) { x.disabled = todosBox.checked; if (todosBox.checked) x.checked = true; }); };
+      var guardar = async function (lista, boton) {
+        boton.disabled = true;
+        try {
+          await api('/admin/webhooks-gsg/' + encodeURIComponent(id) + '/eventos', 'POST', { eventos: lista });
+          avisosMsg('Guardado: GSG ya recibe estos avisos en ' + (caja.querySelector('.av-meta').textContent.split(' · ')[0]) + '.');
+          await cargarAvisos();
+        } catch (e) { avisosMsg(e.message, true); boton.disabled = false; }
+      };
+      caja.querySelector('[data-guardar]').onclick = function () {
+        var lista = todosBox.checked ? ['*'] : cajas().filter(function (x) { return x.checked; }).map(function (x) { return x.getAttribute('data-evento'); });
+        guardar(lista, this);
+      };
+      var agregar = caja.querySelector('[data-agregar-estado]');
+      if (agregar) agregar.onclick = function () {
+        var lista = cajas().filter(function (x) { return x.checked; }).map(function (x) { return x.getAttribute('data-evento'); });
+        if (lista.indexOf('mensaje.estado') < 0) lista.push('mensaje.estado');
+        guardar(lista, this);
+      };
+    });
+  }
+  async function cargarAvisos() {
+    if (!$('avisos-gsg')) return;
+    try { pintarAvisos(await api('/admin/webhooks-gsg')); } catch (e) { avisosMsg(e.message, true); }
+  }
+  if ($('avisos-gsg')) {
+    $('avisos-refrescar').onclick = function () { avisosMsg(''); cargarAvisos(); };
+    cargarAvisos();
   }
   window.addEventListener('hashchange', mostrarPestana);
   mostrarPestana();
