@@ -35,6 +35,7 @@ export const ERRORES_REPORTADOS = [
   'numero_largo',
   'numero_fijo',
   'sin_whatsapp',
+  'numero_inaccesible',
   'envio_fallido',
   'tracking_falta',
   'tracking_invalido',
@@ -75,6 +76,10 @@ export const TEXTOS_REPORTADOS: Record<ErrorReportado, { titulo: string; mensaje
     titulo: 'Número inválido: no tiene WhatsApp',
     mensaje: (d) => `El número ${tel(d)} no es válido: no tiene WhatsApp. Corrige el número del cliente y vuelve a mandarlo.`,
   },
+  numero_inaccesible: {
+    titulo: 'Número inaccesible',
+    mensaje: (d) => `Ni el número principal ni el segundo número del cliente son accesibles (el último probado: ${tel(d)}). Corrige los teléfonos del cliente y vuelve a mandarlo.`,
+  },
   envio_fallido: {
     titulo: 'Falló el envío por WhatsApp',
     mensaje: (d) => `El mensaje por WhatsApp al ${tel(d)} falló y no se reintenta solo. Revisa el número y mándalo corregido.`,
@@ -109,6 +114,7 @@ export const TEXTOS_REPORTADOS: Record<ErrorReportado, { titulo: string; mensaje
 export function errorDeEnvio(codigo: string | null | undefined): ErrorReportado | null {
   const c = codigo ?? '';
   if (c === 'sin_whatsapp') return 'sin_whatsapp';
+  if (c === 'numero_inaccesible') return 'numero_inaccesible';
   if (c === 'numero_corto' || c === 'numero_largo' || c === 'numero_fijo') return c;
   if (c === 'numero_invalido' || c === 'telefono_invalido') return 'telefono_invalido';
   // Fallos de WhatsApp que ya no se reintentan solos. Las guardas propias

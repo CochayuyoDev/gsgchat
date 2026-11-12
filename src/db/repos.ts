@@ -23,6 +23,7 @@ import { createAjustesGeneralesRepo, type AjustesGeneralesRepo } from '../ajuste
 import { createActividadRepo, type ActividadRepo } from '../auth/actividad.js';
 import { createStickersRepo, type StickersRepo } from '../stickers/stickers.js';
 import { createWebhooksRepo, type WebhooksRepo } from '../webhooks/repo.js';
+import { createRutasGsgRepo, type RutasGsgRepo } from '../rutas-gsg/repo.js';
 import { createConectoresRepo, type ConectoresRepo } from '../conectores/repo.js';
 import { createEnvioAutomaticoRepo, type EnvioAutomaticoRepo } from '../envio-automatico/repo.js';
 import { createPedidosRepo, type PedidosRepo } from '../pedidos/repo.js';
@@ -624,6 +625,8 @@ export interface Repos {
   stickers: StickersRepo;
   /** Webhooks salientes: a quien se le cuenta lo que pasa. Ver src/webhooks. */
   webhooks: WebhooksRepo;
+  /** El webhook de estados de rutas de GSG: rutas, chats cerrados por ruta y su bitacora. Ver src/rutas-gsg. */
+  rutasGsg: RutasGsgRepo;
   /** Conectores de tiendas (WooCommerce, Shopify). Ver src/conectores. */
   conectores: ConectoresRepo;
   /** La lista de numeros a los que el sistema escribe solo. Ver src/envio-automatico. */
@@ -2073,6 +2076,7 @@ export function createRepos(pool: Pool): Repos {
     actividad: createActividadRepo(pool),
     stickers: createStickersRepo(pool),
     webhooks: createWebhooksRepo(pool),
+    rutasGsg: createRutasGsgRepo(pool),
     conectores: createConectoresRepo(pool),
     envioAutomatico: createEnvioAutomaticoRepo(pool),
     pedidos: createPedidosRepo(pool),

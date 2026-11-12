@@ -167,7 +167,8 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
 .na-apis{margin:14px 0}.na-apis code{overflow-wrap:anywhere}
 .na-clave{margin:6px 0 14px}
 .courier-card h2{font-size:18px;margin-bottom:10px}.courier-cab{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:14px}.courier-cab h2{margin-bottom:4px}.courier-cab p{margin:0}.courier-api{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--primario-suave);color:var(--primario);margin-right:4px}@media(max-width:640px){.courier-cab{flex-direction:column}}.courier-card>h3{margin-top:22px}.courier-card>small{color:var(--texto-suave)}
-.av-hook{border:1px solid var(--borde);border-radius:12px;padding:16px;margin:12px 0}.av-hook h3{margin:0 0 4px;font-size:15px;overflow-wrap:anywhere}.av-hook .av-meta{margin:0 0 10px;font-size:13px;color:var(--texto-suave);overflow-wrap:anywhere}.av-eventos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.av-ev{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--superficie-2);border-radius:8px;font-size:13px;line-height:1.4}.courier-card .av-ev input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.av-ev code{font-weight:700}.av-ev.destacado{outline:2px solid var(--primario);outline-offset:-2px}.av-todos{margin:0 0 10px}.av-falta{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11.5px;font-weight:700}.av-ok{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:11.5px;font-weight:700}@media(max-width:800px){.av-eventos{grid-template-columns:1fr}}`,
+.av-hook{border:1px solid var(--borde);border-radius:12px;padding:16px;margin:12px 0}.av-hook h3{margin:0 0 4px;font-size:15px;overflow-wrap:anywhere}.av-hook .av-meta{margin:0 0 10px;font-size:13px;color:var(--texto-suave);overflow-wrap:anywhere}.av-eventos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.av-ev{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--superficie-2);border-radius:8px;font-size:13px;line-height:1.4}.courier-card .av-ev input{width:auto;flex-shrink:0;margin-top:3px;accent-color:var(--primario)}.av-ev code{font-weight:700}.av-ev.destacado{outline:2px solid var(--primario);outline-offset:-2px}.av-todos{margin:0 0 10px}.av-falta{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11.5px;font-weight:700}.av-ok{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:var(--primario-suave);color:var(--primario);font-size:11.5px;font-weight:700}@media(max-width:800px){.av-eventos{grid-template-columns:1fr}}
+.rw-fila{display:flex;gap:10px}.rw-fila input{flex:1}.rw-nota{margin:8px 0 0;font-size:13px}.rw-prueba{display:grid;grid-template-columns:2fr 1fr;gap:12px}.rw-prueba label{display:block;margin-bottom:6px;font-weight:600;font-size:13px}.rw-prueba input,.rw-prueba select{width:100%}.rw-chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--superficie-2)}.rw-chip.cerrada,.rw-chip.error{background:#fee2e2;color:#991b1b}.rw-chip.abierta,.rw-chip.aplicado{background:var(--primario-suave);color:var(--primario)}.rw-chip.sin_pedidos,.rw-chip.ignorado_viejo,.rw-chip.recibido{background:#fef3c7;color:#92400e}@media(max-width:800px){.rw-prueba{grid-template-columns:1fr}.rw-fila{flex-direction:column}}`,
     contenido: `<nav class="na-pestanas s-pestanas" aria-label="Nuestra API">
       <a href="#t-resumen" data-na="resumen">Resumen</a>
       <a href="#t-api1" data-na="api1"><span class="api-num">API 1</span>Pedidos</a>
@@ -179,6 +180,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       <a href="#t-llamadas" data-na="llamadas">Últimas llamadas</a>
       <a href="#t-meta" data-na="meta">Webhook de Meta</a>
       <a href="#t-avisos" data-na="avisos">Avisos a GSG</a>
+      <a href="#t-rutas" data-na="rutas">Webhook de rutas</a>
     </nav>
     <div class="courier-grid">
       <section class="courier-card courier-wide" data-na="resumen"><h2>GSG llama → GSGchat recibe → el sistema procesa</h2>
@@ -311,6 +313,43 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <div class="courier-status av-clave"><b>mensaje.estado</b> es el aviso del estado real de cada mensaje (le llegó, lo leyó o no le llegó, con el porqué). Sin él, GSG solo ve el estado nuevo al recargar la conversación.</div>
         <div id="avisos-lista"></div>
         <p id="avisos-aviso" class="courier-status" role="status" aria-live="polite" hidden></p>
+      </section>
+      <section class="courier-card courier-wide" id="rutas-webhook" data-na="rutas">
+        <div class="courier-cab"><div><h2>Webhook de estados de rutas</h2><p class="muted">El sistema de rutas de GSG avisa aquí cuando una ruta cambia de estado. El código de ruta es el <b>tracking del pedido</b>. Si pasa a <b>inactiva o finalizada</b>, el chat de ese cliente se cierra: no sale ningún mensaje (ni automático ni escrito a mano) y no se gasta. Si vuelve a estar <b>en ruta, activa</b> o cualquier otro estado, se abren solos y lo pendiente sigue.</p></div><button class="btn sm" type="button" id="rw-refrescar">Actualizar</button></div>
+        <h3>1. Conexión</h3>
+        <label for="rw-url">Dirección (POST)</label>
+        <div class="rw-fila"><input id="rw-url" readonly><button class="btn" type="button" id="rw-copiar-url">Copiar</button></div>
+        <p class="muted rw-nota">Header de seguridad: <code>x-webhook-secret: &lt;secreto&gt;</code> · Cuerpo JSON · Sin clave de API: la llave es el secreto.</p>
+        <div id="rw-secreto-estado" class="courier-status">Leyendo…</div>
+        <div class="courier-actions"><button class="btn primario" type="button" id="rw-generar">Generar secreto</button></div>
+        <div id="rw-secreto-nuevo" class="clave-secret-panel" hidden><h3>Secreto nuevo</h3><p><strong>Cópialo ahora: no se vuelve a mostrar.</strong> Dáselo al sistema de rutas de GSG; el anterior ya no vale.</p><code id="rw-secreto" class="courier-secret"></code><div class="courier-actions"><button class="btn" type="button" id="rw-copiar-secreto">Copiar secreto</button><button class="btn" type="button" id="rw-ocultar">Ocultar (ya lo copié)</button></div></div>
+        <h3>2. Qué manda GSG</h3>
+        <pre class="api-json">{
+  "ruta": "GSG123456",
+  "estado": "INACTIVA",
+  "fecha": "2026-11-12T15:30:00-05:00"
+}</pre>
+        <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Qué es</th></tr></thead><tbody>
+          <tr><td><code>ruta</code></td><td>Sí</td><td>El código de ruta: es el <b>tracking</b> del pedido, el mismo que GSG manda en la API 1 (por ejemplo <code>GSG123456</code>). Se cierra o abre el chat de ese pedido. También se acepta <code>idRuta</code>, <code>codigoRuta</code> o <code>rutaId</code>.</td></tr>
+          <tr><td><code>estado</code></td><td>Sí</td><td>El estado nuevo, tal cual lo llama GSG. Cierran el chat: inactiva, finalizada, cerrada, terminada, cancelada, anulada, completada, suspendida (con o sin tildes, mayúsculas o «_»). Cualquier otro (en ruta, activa…) lo abre.</td></tr>
+          <tr><td><code>fecha</code></td><td>No (recomendado)</td><td>Cuándo cambió, en ISO 8601. Un aviso más viejo que el último aplicado a esa ruta se ignora: los avisos pueden llegar desordenados.</td></tr>
+        </tbody></table></div>
+        <small>Se acepta un aviso o una lista: <code>[ {…}, {…} ]</code> (hasta 200).</small>
+        <div class="courier-scroll"><table><thead><tr><th>Respuesta</th><th>Significado</th></tr></thead><tbody>
+          <tr><td><b>202</b></td><td>Recibido. Se contesta al momento y se procesa detrás; el resultado queda abajo, en «Lo último que llegó».</td></tr>
+          <tr><td><b>400</b></td><td>El aviso no se entiende: <code>{ "ok": false, "codigo": "VALIDACION", "error": "…", "detalles": [{ "campo", "mensaje" }] }</code>.</td></tr>
+          <tr><td><b>401</b></td><td>Falta el header <code>x-webhook-secret</code> o no es el vigente.</td></tr>
+          <tr><td><b>503</b></td><td>Todavía no se generó el secreto (paso 1).</td></tr>
+        </tbody></table></div>
+        <h3>3. Probar</h3>
+        <p class="muted">Simula un aviso de GSG. <b>Cierra o abre los chats de verdad</b> y queda en la bitácora marcado como prueba.</p>
+        <div class="rw-prueba"><div><label for="rw-p-ruta">Código de ruta (tracking del pedido)</label><input id="rw-p-ruta" maxlength="120" placeholder="GSG123456"></div><div><label for="rw-p-estado">Estado</label><select id="rw-p-estado"><option>INACTIVA</option><option>FINALIZADA</option><option>EN RUTA</option><option>ACTIVA</option></select></div></div>
+        <div class="courier-actions"><button class="btn primario" type="button" id="rw-probar">Probar aviso</button></div>
+        <p id="rw-aviso" class="courier-status" role="status" aria-live="polite" hidden></p>
+        <h3>4. Rutas y chats cerrados</h3>
+        <div id="rw-rutas" class="courier-scroll tablewrap"></div>
+        <h3>5. Lo último que llegó</h3>
+        <div id="rw-eventos" class="courier-scroll tablewrap"></div>
       </section>
       <section class="courier-card courier-wide" data-na="llamadas"><div class="courier-cab"><div><h2>Últimas llamadas (API 1 y API 2)</h2><p class="muted">Lo que GSG nos envió: pedidos, órdenes de cancelar o reintentar, y las pruebas hechas desde esta pantalla.</p></div><button class="btn sm" id="courier-refrescar">Actualizar estado</button></div><div id="courier-bitacora" class="courier-scroll tablewrap"></div></section>
       <section class="courier-card courier-wide" id="courier-campos" data-na="api1"><h2>Campos que envía Courier (API 1)</h2><p>Obligatorios: tracking, empresa, cliente, telefono, metodoPago y montoCobrar. Si falta uno, la API responde 400 con el campo y el pedido. Los demás son opcionales; los textos admiten hasta 200 caracteres.</p><div class="courier-scroll"><table><thead><tr><th>Campo de Courier</th><th>Nombre JSON</th><th>Obligatorio</th><th>Detalle</th></tr></thead><tbody>${CAMPOS.map(([nombre, json, obligatorio, detalle]) => `<tr><td>${escapeHtml(nombre)}</td><td><code>${escapeHtml(json)}</code></td><td>${obligatorio ? 'Sí' : 'No'}</td><td>${escapeHtml(detalle)}</td></tr>`).join('')}</tbody></table></div><small>Campos anteriores que se siguen aceptando (fuera del contrato): ${CAMPOS_ANTERIORES.map((c) => escapeHtml(c)).join(', ')}.</small></section>
@@ -670,6 +709,69 @@ ${MENSAJE_ERROR_HTTP_JS}
   if ($('avisos-gsg')) {
     $('avisos-refrescar').onclick = function () { avisosMsg(''); cargarAvisos(); };
     cargarAvisos();
+  }
+  /* «Webhook de rutas»: dirección, secreto, prueba, rutas cerradas y bitácora. */
+  var RESULTADO_RW = { recibido: 'Procesando', aplicado: 'Aplicado', sin_pedidos: 'Sin pedidos aún', ignorado_viejo: 'Ignorado (viejo)', error: 'Error' };
+  function rwMsg(t, mal) { var el = $('rw-aviso'); el.hidden = !t; el.textContent = t || ''; el.style.color = mal ? '#b91c1c' : ''; }
+  function fechaRw(v) { try { return new Date(v).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return String(v || ''); } }
+  var rwConfirmar = false;
+  function pintarRutas(d) {
+    $('rw-url').value = d.url;
+    $('rw-secreto-estado').innerHTML = d.secreto.configurado
+      ? 'Secreto vigente: <code>whr_…' + esc(d.secreto.ultimos) + '</code>, generado el ' + esc(fechaRw(d.secreto.creadoAt)) + '. Si lo perdiste, genera otro: el anterior deja de valer.'
+      : '<b>Todavía no hay secreto:</b> el webhook contesta 503 hasta que generes uno.';
+    $('rw-generar').textContent = d.secreto.configurado ? 'Generar otro secreto' : 'Generar secreto';
+    $('rw-rutas').innerHTML = d.rutas.length
+      ? '<table><thead><tr><th>Ruta</th><th>Estado</th><th>Chats cerrados</th><th>Cambió</th><th></th></tr></thead><tbody>' + d.rutas.map(function (r) {
+          return '<tr><td><b>' + esc(r.rutaTexto) + '</b></td><td><span class="rw-chip ' + (r.activa ? 'abierta' : 'cerrada') + '">' + esc(r.estado) + '</span></td><td>' + esc(r.chatsCerrados) + '</td><td class="nowrap suave">' + esc(fechaRw(r.cambiadoAt)) + '</td><td>' + (r.activa ? '' : '<button class="btn sm" type="button" data-reactivar="' + esc(r.ruta) + '">Reactivar a mano</button>') + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="vacio compacto"><h3>Todavía no llegó ningún aviso de ruta</h3><p>Aparecerán aquí las rutas y cuántos chats tiene cerrados cada una.</p></div>';
+    $('rw-eventos').innerHTML = d.eventos.length
+      ? '<table><thead><tr><th>Llegó</th><th>Ruta</th><th>Estado</th><th>Resultado</th><th>Chats</th><th>Detalle</th></tr></thead><tbody>' + d.eventos.map(function (e) {
+          return '<tr><td class="nowrap suave">' + esc(fechaRw(e.recibidoAt)) + '</td><td>' + esc(e.rutaTexto) + '</td><td>' + esc(e.estado || '') + '</td><td><span class="rw-chip ' + esc(e.resultado) + '">' + esc(RESULTADO_RW[e.resultado] || e.resultado) + '</span>' + (e.prueba ? ' <span class="chip tono-azul sin-punto">prueba</span>' : '') + '</td><td>' + esc(e.chats) + '</td><td>' + esc(e.detalle || '') + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="vacio compacto"><h3>Nada todavía</h3><p>Cada aviso que llegue (o cada prueba) queda aquí con lo que se hizo.</p></div>';
+    document.querySelectorAll('[data-reactivar]').forEach(function (b) {
+      b.onclick = async function () {
+        b.disabled = true;
+        try { var r = await api('/admin/rutas-webhook/reactivar', 'POST', { ruta: b.getAttribute('data-reactivar') }); rwMsg('Reactivada: ' + r.detalle); await cargarRutas(); }
+        catch (e) { rwMsg(e.message, true); b.disabled = false; }
+      };
+    });
+  }
+  async function cargarRutas() {
+    if (!$('rutas-webhook')) return;
+    try { pintarRutas(await api('/admin/rutas-webhook')); } catch (e) { rwMsg(e.message, true); }
+  }
+  async function copiarRw(texto) {
+    try { await navigator.clipboard.writeText(texto); rwMsg('Copiado.'); }
+    catch (e) { rwMsg('Selecciona y copia el texto a mano; el navegador no permitió copiar.'); }
+  }
+  if ($('rutas-webhook')) {
+    $('rw-refrescar').onclick = function () { rwMsg(''); cargarRutas(); };
+    $('rw-copiar-url').onclick = function () { copiarRw($('rw-url').value); };
+    $('rw-copiar-secreto').onclick = function () { copiarRw($('rw-secreto').textContent); };
+    $('rw-ocultar').onclick = function () { $('rw-secreto-nuevo').hidden = true; $('rw-secreto').textContent = ''; };
+    $('rw-generar').onclick = async function () {
+      var boton = this;
+      var hay = /vigente/.test($('rw-secreto-estado').textContent);
+      if (hay && !rwConfirmar) { rwConfirmar = true; boton.textContent = '¿Seguro? El secreto actual deja de valer: pulsa otra vez'; return; }
+      rwConfirmar = false; boton.disabled = true;
+      try { var r = await api('/admin/rutas-webhook/secreto', 'POST', {}); $('rw-secreto').textContent = r.secreto; $('rw-secreto-nuevo').hidden = false; await cargarRutas(); }
+      catch (e) { rwMsg(e.message, true); }
+      finally { boton.disabled = false; }
+    };
+    $('rw-probar').onclick = async function () {
+      var boton = this;
+      var ruta = $('rw-p-ruta').value.trim();
+      if (!ruta) { rwMsg('Escribe el código de la ruta.', true); return; }
+      var cuerpo = { ruta: ruta, estado: $('rw-p-estado').value };
+      boton.disabled = true;
+      try { var r = await api('/admin/rutas-webhook/probar', 'POST', cuerpo); rwMsg(r.resultados.map(function (x) { return (RESULTADO_RW[x.resultado] || x.resultado) + ': ' + x.detalle; }).join(' · ')); await cargarRutas(); }
+      catch (e) { rwMsg(e.message, true); }
+      finally { boton.disabled = false; }
+    };
+    cargarRutas();
   }
   window.addEventListener('hashchange', mostrarPestana);
   mostrarPestana();

@@ -48,6 +48,8 @@ import { estadoDelReporteAGsg, type ReporteAGsg } from '../../entregas/reportado
 import { despacharReportes, encolarProblemaGsg, problemaParaGsg, type PuertoGsg } from '../../rutas/gsg.js';
 import type { Reporte, RutasRepo } from '../../db/rutas.js';
 import type { Entrega } from '../../entregas/repo.js';
+import type { ServicioRutasGsg } from '../../rutas-gsg/servicio.js';
+import type { ResultadoAvisoCambio } from '../../entregas/aviso-cambio.js';
 
 export interface ApiEntregasGsgDeps {
   entregas: ServicioEntregas;
@@ -67,6 +69,10 @@ export interface ApiEntregasGsgDeps {
   /** Peticiones por minuto y por clave (por defecto LIMITE_POR_MINUTO). */
   limitePorMinuto?: number;
   ahora?: () => number;
+  /** El webhook de estados de rutas: un pedido de una ruta inactiva entra con el chat cerrado. Ver src/rutas-gsg. */
+  rutasGsg?: ServicioRutasGsg;
+  /** Avisar al cliente cuando GSG cambia datos de su pedido (dentro de 24 h). Ver src/entregas/aviso-cambio.ts. */
+  avisarCambio?: (antes: Entrega, despues: Entrega) => Promise<ResultadoAvisoCambio>;
 }
 
 /** Tope por clave y minuto en /api/v1/entregas*. GSG manda en tandas de hasta 600 por llamada. */
@@ -478,8 +484,25 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const aceptados: Pedido[] = [];
     const vistos = new Map<string, string>();
     const delDia: Entrega[] = deps.repo ? await deps.repo.listar({ dia: entregas.diaDeHoy(), limit: 5000 }).catch(() => [] as Entrega[]) : [];
+    // Segundo numero (pedido del dueño, 12/11): el principal no sirve y el telefono2 si → se usa el segundo.
+    const pasadosAlSegundo = new Map<string, { anterior: string; nuevo: string; motivo: string }>();
     for (const p of lectura) {
       const crudo = p as unknown as Record<string, unknown>;
+      const segundo = String(p.telefono2 ?? '').trim();
+      if (telefonoNoSirve(p.telefono) && segundo) {
+        const motivo = TEXTOS_REPORTADOS[errorDeTelefono(p.telefono)].titulo.toLowerCase();
+        if (telefonoNoSirve(segundo)) {
+          const detalle = `ni el número principal (${String(p.telefono)}: ${motivo}) ni el segundo número (${segundo}: ${TEXTOS_REPORTADOS[errorDeTelefono(segundo)].titulo.toLowerCase()}) son válidos`;
+          descartadas.push({ referencia: p.referencia, motivo: `${TEXTOS_REPORTADOS.numero_inaccesible.titulo}: ${detalle}`, indice: indiceDe.get(p) ?? 0, error: 'numero_inaccesible' });
+          await reportar('numero_inaccesible', crudo, detalle);
+          continue;
+        }
+        // `crudo` es el mismo objeto que `p`: el principal se guarda antes de pisarlo.
+        const principal = String(p.telefono);
+        pasadosAlSegundo.set(p.referencia.toLowerCase(), { anterior: principal, nuevo: segundo, motivo });
+        (p as { telefono: string | number; telefono2?: unknown }).telefono = segundo;
+        (p as { telefono2?: unknown }).telefono2 = principal;
+      }
       const phone = entregas.normalizarTelefono(String(p.telefono));
       const tracking = String(p.tracking).trim();
       const k = tracking.toLowerCase();
@@ -579,7 +602,24 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
       for (const c of creadas) {
         const leida = await entregas.entrega(c.id);
         if (!leida) throw new Error(`el pedido ${c.referencia} (id ${c.id}) no aparece guardado tras crearlo`);
+        // Llego con el numero principal malo: se anota que se usa el segundo (y si tampoco tiene WhatsApp, es «inaccesible»).
+        const alSegundo = pasadosAlSegundo.get(leida.entrega.referencia.toLowerCase());
+        if (alSegundo && deps.repo) await deps.repo.registrarEvento(leida.entrega.id, 'nota', `El número principal ${alSegundo.anterior} no es válido (${alSegundo.motivo}): se le escribe al segundo número ${alSegundo.nuevo}.`, { segundoNumero: true, anterior: alSegundo.anterior, nuevo: alSegundo.nuevo, motivo: alSegundo.motivo }).catch(() => undefined);
         salida.push(entregaParaApi(leida.entrega));
+        // Un pedido de una ruta que GSG ya dio por inactiva entra con el chat cerrado.
+        await deps.rutasGsg?.alPedido(leida.entrega);
+      }
+      // Los que ya estaban: si GSG cambio datos que le importan al cliente, se le
+      // avisa (solo dentro de las 24 h, maximo 2 avisos) y se revisa su ruta.
+      const avisosCambio: Array<{ referencia: string } & ResultadoAvisoCambio> = [];
+      for (const ref of repetidas) {
+        const despues = await porReferencia(ref);
+        if (!despues) continue;
+        await deps.rutasGsg?.alPedido(despues);
+        const antes = delDia.find((e) => e.referencia.toLowerCase() === ref.toLowerCase());
+        if (!antes || !deps.avisarCambio) continue;
+        const aviso = await deps.avisarCambio(antes, despues).catch(() => null);
+        if (aviso?.cambios.length) avisosCambio.push({ referencia: ref, ...aviso });
       }
       // Los que ya estaban: con su id, para que quien reintenta sepa que ya quedaron.
       const existentes: Array<{ referencia: string; id: number | null }> = [];
@@ -601,6 +641,7 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         creadas: salida,
         repetidas,
         existentes,
+        ...(avisosCambio.length ? { avisosCambio } : {}),
         descartadas: descartadas.map(({ referencia, motivo, error }) => ({ referencia, motivo, ...(error ? { error } : {}) })),
         ...(telefonosCorregidos.length ? { telefonosCorregidos } : {}),
         whatsapp,
@@ -720,12 +761,19 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
     const otrosCambios = cambios.filter((c) => !c.startsWith('teléfono corregido'));
     if (otrosCambios.length) await deps.repo.registrarEvento(e.id, 'sincronizada', `GSG cambió (${quien}): ${otrosCambios.join('; ')}`, null, new Date());
     const fila = await porReferencia(request.params.referencia);
+    // Su ruta (si cambio a una inactiva, el chat se cierra) y el aviso al cliente
+    // si cambio algo que le importa (producto, monto, pago, direccion, horario).
+    let avisoCliente: ResultadoAvisoCambio | null = null;
+    if (fila) {
+      await deps.rutasGsg?.alPedido(fila);
+      if (deps.avisarCambio && Object.keys(patch).length) avisoCliente = await deps.avisarCambio(e, fila).catch(() => null);
+    }
     // Lo reportado de este tracking queda corregido si cambio el telefono o el tracking.
     const trackingDespues = fila?.datosEnvio?.tracking ?? fila?.referencia ?? trackingAntes;
     const corregidos = deps.reportados && (telefonoCorregido || trackingDespues !== trackingAntes)
       ? await deps.reportados.marcarCorregidos(trackingAntes, { telefono: telefonoCorregido, tracking: trackingDespues !== trackingAntes ? trackingDespues : null, por: quien, via: 'PATCH /api/v1/entregas' }, new Date()).catch(() => [])
       : [];
-    return { ok: true, cambios, entrega: fila ? entregaParaApi(fila) : null, corregidos: corregidos.map((r) => reportadoParaApi(r)), whatsapp: await whatsappDe([e.id]), detalle: `Pedido ${e.referencia} cambiado: ${cambios.join('; ')}.` };
+    return { ok: true, cambios, entrega: fila ? entregaParaApi(fila) : null, corregidos: corregidos.map((r) => reportadoParaApi(r)), whatsapp: await whatsappDe([e.id]), ...(avisoCliente?.cambios.length ? { avisoCliente } : {}), detalle: `Pedido ${e.referencia} cambiado: ${cambios.join('; ')}.${avisoCliente?.cambios.length ? (avisoCliente.enviado ? ' Se le avisó al cliente.' : ` No se le avisó al cliente: ${avisoCliente.motivo}`) : ''}` };
   });
 
   // ------------------------------------------------ numeros reportados

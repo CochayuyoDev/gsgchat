@@ -17,6 +17,7 @@ export type CodigoIncidencia =
   | 'numero_invalido'
   | 'numero_fijo'
   | 'sin_whatsapp'
+  | 'numero_inaccesible'
   | 'numero_equivocado'
   | 'sin_respuesta'
   | 'respondio_sin_ubicacion'
@@ -88,6 +89,17 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     titulo: 'Número inválido: no tiene WhatsApp',
     explicacion: 'El número existe y está bien escrito, pero no hay una cuenta de WhatsApp detrás.',
     queHacer: 'El motorizado lo llama por teléfono; no hay nada que mandar por aquí.',
+    requiereHumano: true,
+    reintentable: false,
+    reportable: true,
+  },
+  // Pedido del dueño (12/11): si el numero no es accesible se le escribe al
+  // segundo numero del pedido (telefono2); si tampoco lo es, es esto.
+  numero_inaccesible: {
+    codigo: 'numero_inaccesible',
+    titulo: 'Número inaccesible',
+    explicacion: 'Ni el número principal ni el segundo número del cliente son accesibles (sin WhatsApp o no válidos).',
+    queHacer: 'Corregir los teléfonos del cliente en GSG y volver a mandar el pedido, o llamarlo.',
     requiereHumano: true,
     reintentable: false,
     reportable: true,

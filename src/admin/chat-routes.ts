@@ -846,6 +846,8 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
     }
 
     const etiqueta = (await etiquetasDe([contact.phone]))(contact.phone);
+    // Webhook de rutas (src/rutas-gsg): con la ruta inactiva el chat esta cerrado y el emisor no deja salir nada.
+    const rutaCerrada = await repos.rutasGsg?.bloqueoDe(contact.id).catch(() => null) ?? null;
     return responderLectura(request, reply, {
       contact,
       etiqueta,
@@ -855,8 +857,9 @@ export async function registerChatRoutes(app: FastifyInstance, deps: ChatDeps): 
       // dueño (10/11): la ventana de 24 h de Meta no cierra el chat; se escribe
       // libre siempre (fuera de la ventana Meta puede no entregarlo). Solo la
       // baja del cliente lo cierra.
-      canWrite: !contact.optOutAt,
-      blockedReason: contact.optOutAt ? 'el contacto se dio de baja' : null,
+      canWrite: !contact.optOutAt && !rutaCerrada,
+      blockedReason: contact.optOutAt ? 'el contacto se dio de baja' : rutaCerrada ? 'chat cerrado: ruta inactiva' : null,
+      rutaCerrada: rutaCerrada ? { ruta: rutaCerrada.ruta, estado: rutaCerrada.estado, desde: rutaCerrada.desde } : null,
       ventanaEnEsteChat,
       messages: pagina,
       scopeId: request.usuario?.chatSesion?.sid ?? 'api',

@@ -42,6 +42,9 @@ import type { ServicioStickers } from './stickers/stickers.js';
 import { registerStickersRoutes } from './admin/stickers-routes.js';
 import { registerApiV1 } from './api/v1/routes.js';
 import { registerApiEntregasGsg } from './api/v1/entregas-gsg.js';
+import { crearServicioRutasGsg } from './rutas-gsg/servicio.js';
+import { avisarCambioDePedido } from './entregas/aviso-cambio.js';
+import { registerRutasGsgRoutes } from './rutas-gsg/routes.js';
 import { registerApiConversacionesGsg } from './api/v1/conversaciones-gsg.js';
 import { registerArchivosGsg } from './api/v1/archivos-gsg.js';
 import type { Bus } from './eventos/bus.js';
@@ -419,10 +422,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await registerApiV1(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, numeroDeSalud: deps.numeroDeSalud, repos, config, settings, sender, queue, wa, politica, webhooks: deps.webhooks, bus: deps.bus, ia, plan: deps.plan, voz, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, fetchImpl: deps.webhooks?.fetchImpl });
   // GSG empuja sus pedidos por la API (POST /api/v1/entregas) en vez de esperar la consulta. Ver src/api/v1/entregas-gsg.ts.
   // El chat de GSG: GET (el historial de un tracking) y POST (un usuario de GSG escribe). Ver src/api/v1/conversaciones-gsg.ts.
-  await registerApiConversacionesGsg(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET } });
+  await registerApiConversacionesGsg(app, { lineas: deps.lineas, registroClientes: deps.registroClientes, repos, sender, mediaDir, archivos: { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, timezone: config.timezone });
   // Los archivos de ese historial (`archivo.url`): enlace firmado, sin clave. Ver src/api/v1/archivos-gsg.ts.
   await registerArchivosGsg(app, { repos, secreto: config.TRACKING_SECRET, mediaDir, wa, registroClientes: deps.registroClientes });
-  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg });
+  // El webhook de estados de rutas de GSG: cierra o abre los chats de una ruta. Ver src/rutas-gsg.
+  const rutasGsg = crearServicioRutasGsg({ repos, log: (m, d) => app.log.warn(d ?? {}, m) });
+  await registerRutasGsgRoutes(app, { repos, servicio: rutasGsg, publicBase: config.PUBLIC_BASE_URL });
+  if (entregas) await registerApiEntregasGsg(app, { entregas, repo: repos.entregas, actividad: repos.actividad, reportados: repos.reportados, rutas: repos.rutas, gsg, rutasGsg, avisarCambio: (antes, despues) => avisarCambioDePedido({ repos, sender }, antes, despues) });
   // Los procesos: sus pantallas, lo que ellas piden y POST /api/v1/procesos/:id/personas. Ver src/procesos.
 
   // El chat embebido en otras webs (iframe + embed.js). Ver src/embed.

@@ -66,6 +66,8 @@ export interface Eventos {
     entrega?: { estado: import('../whatsapp/estado-entrega.js').EstadoEntrega; descripcion: string };
     /** Solo con estado failed: por que no salio (ver src/whatsapp/errores-envio.ts). */
     error?: import('../whatsapp/errores-envio.js').ErrorDeEnvio;
+    /** Solo si no llego: la nota del chat «Mensaje no llegó al cliente», con la misma forma que la `nota` del historial. Ver src/chat/nota-no-llego.ts. */
+    nota?: ReturnType<typeof import('../chat/nota-no-llego.js').notaNoLlegoParaGsg>;
   };
   /** Se consiguio una ubicacion (pin nativo o link de mapa). */
   'ubicacion.recibida': {
@@ -143,7 +145,7 @@ export const NOMBRES_EVENTOS: NombreEvento[] = [
 export const DESCRIPCION_EVENTOS: Record<NombreEvento, string> = {
   'mensaje.recibido': 'El cliente escribio (texto, ubicacion, foto, audio...).',
   'mensaje.enviado': 'Salio un mensaje hacia el cliente, lo mandara quien lo mandara.',
-  'mensaje.estado': 'Un mensaje enviado cambio de estado: sent, delivered, read o failed. llegoAWhatsapp dice si llego al WhatsApp del cliente (true, false o null = aun sin confirmar). Con failed trae error: codigo, motivo, queHacer y reintentar.',
+  'mensaje.estado': 'Un mensaje enviado cambio de estado: sent, delivered, read o failed. llegoAWhatsapp dice si llego al WhatsApp del cliente (true, false o null = aun sin confirmar). Con failed trae error: codigo, motivo, queHacer y reintentar, y nota: la nota del chat «Mensaje no llegó al cliente» (la misma del historial).',
   'ubicacion.recibida': 'Se consiguio la ubicacion de un cliente (pin o link de mapa).',
   'contacto.alta': 'Un contacto dio su consentimiento para recibir mensajes.',
   'contacto.baja': 'Un contacto pidio no recibir mas mensajes.',

@@ -204,14 +204,25 @@ export interface MotorDeps {
   antesDeEscribir?: (solicitud: Solicitud) => Promise<boolean>;
 }
 
+/**
+ * Segundo numero (pedido del dueño, 12/11): si el numero del cliente no es
+ * accesible, el pedido pasa a su telefono2 (`segundoNumero`: no se marca
+ * incidencia ni se reporta el numero viejo; el pedido sigue con el nuevo).
+ * Si tampoco lo es (`inaccesible`), la incidencia es `numero_inaccesible`.
+ */
+export interface SegundoNumeroDecision {
+  segundoNumero?: boolean;
+  inaccesible?: boolean;
+}
+
 /** Ver MotorDeps.primerMensaje. */
 export interface PrimerMensajeReparto {
   /** Justo antes del primer mensaje. false = no se manda ahora (otro intento en curso o espera a una persona). */
   antes(solicitud: Solicitud): Promise<boolean>;
   /** Lo que paso. `esperaMs`: cuando reintentar un fallo pasajero; `detener`: no insistir solo (incierto, permanente o tope de reintentos). */
-  despues(solicitud: Solicitud, salida: SendOutcome): Promise<{ esperaMs?: number; detener?: string } | void>;
+  despues(solicitud: Solicitud, salida: SendOutcome): Promise<SegundoNumeroDecision & { esperaMs?: number; detener?: string } | void>;
   /** Antes de enviar ya se supo que el numero no tiene WhatsApp. */
-  sinWhatsApp(solicitud: Solicitud, detalle: string): Promise<void>;
+  sinWhatsApp(solicitud: Solicitud, detalle: string): Promise<SegundoNumeroDecision | void>;
 }
 
 export interface ResultadoTick {
@@ -710,12 +721,19 @@ export function crearMotor(deps: MotorDeps): Motor {
     if (solicitud.intentos === 0 && deps.wa?.tieneWhatsApp && !esNumeroDePrueba(phone)) {
       const tiene = await deps.wa.tieneWhatsApp(phone).catch(() => null);
       if (tiene === false) {
-        await anotarIncidencia(
-          solicitud,
-          'sin_whatsapp',
-          `el número ${phone} no tiene una cuenta de WhatsApp`,
-        );
-        if (paso === 'solicitud') await deps.primerMensaje?.sinWhatsApp(solicitud, `el número ${phone} no tiene una cuenta de WhatsApp`).catch((error: unknown) => deps.log?.('no se pudo anotar el primer mensaje', { detalle: String(error) }));
+        // Primero el pedido: si tiene segundo numero, se le escribe a ese (sin incidencia).
+        const segundo = paso === 'solicitud'
+          ? ((await deps.primerMensaje?.sinWhatsApp(solicitud, `el número ${phone} no tiene una cuenta de WhatsApp`).catch((error: unknown) => {
+              deps.log?.('no se pudo anotar el primer mensaje', { detalle: String(error) });
+            })) ?? {})
+          : {};
+        if (!segundo.segundoNumero) {
+          await anotarIncidencia(
+            solicitud,
+            segundo.inaccesible ? 'numero_inaccesible' : 'sin_whatsapp',
+            segundo.inaccesible ? `número inaccesible: el ${phone} no tiene una cuenta de WhatsApp y era el segundo número del pedido` : `el número ${phone} no tiene una cuenta de WhatsApp`,
+          );
+        }
         // Que lo sepa el resto del sistema: una campana o una secuencia no
         // tienen por que volver a descubrirlo a base de intentos fallidos.
         await repos.contacts
@@ -826,11 +844,18 @@ export function crearMotor(deps: MotorDeps): Motor {
       return { accion: 'envio', solicitudId: solicitud.id, paso };
     }
 
+    // El pedido paso a su segundo numero: esta solicitud (la del numero viejo) ya se solto y el pedido sigue con el nuevo.
+    if (decision.segundoNumero) {
+      return { accion: 'nada', solicitudId: solicitud.id, motivo: 'el número no es accesible: se le escribe al segundo número del pedido' };
+    }
+
     if (salida.blocked) {
       // Sin socket no se toca la solicitud: no es una incidencia del cliente
       // ni del numero, es que WhatsApp esta cerrado. Se vuelve a intentar en
       // dos minutos y el motor no vuelve a mirar hasta entonces.
-      if (salida.code === 'sin_conexion' || salida.code === 'sin_lineas_disponibles' || salida.code === 'limite_diario') {
+      // La ruta inactiva (webhook de rutas) tambien es una espera: el chat se abre
+      // solo cuando GSG reactiva la ruta, y entonces se despierta el motor.
+      if (salida.code === 'sin_conexion' || salida.code === 'sin_lineas_disponibles' || salida.code === 'limite_diario' || salida.code === 'ruta_inactiva') {
         esperar(solicitud, salida.code, salida.reason, salida.retryAfterMs ?? 2 * 60_000);
         await repos.rutas.actualizarSolicitud(solicitud.id, {
           proximoIntentoAt: new Date(momento.getTime() + (salida.retryAfterMs ?? 2 * 60_000)),
@@ -847,7 +872,7 @@ export function crearMotor(deps: MotorDeps): Motor {
       // El monitor aparto a este contacto porque Meta dijo que no tiene
       // WhatsApp: es una incidencia con nombre, no una espera de un mes.
       if (salida.code === 'contact_suppressed' && /131026|no tiene whatsapp/i.test(salida.reason)) {
-        await anotarIncidencia(solicitud, 'sin_whatsapp', salida.reason.slice(0, 300));
+        await anotarIncidencia(solicitud, decision.inaccesible ? 'numero_inaccesible' : 'sin_whatsapp', salida.reason.slice(0, 300));
         return { accion: 'incidencia', solicitudId: solicitud.id };
       }
       // Una guarda que no se va a abrir sola (baja del cliente, modo prueba,
@@ -878,7 +903,7 @@ export function crearMotor(deps: MotorDeps): Motor {
     // tropiezo pasajero.
     const codigo = incidenciaDeErrorDeEnvio(salida.error, salida.code);
     if (codigo === 'sin_whatsapp' || codigo === 'numero_invalido') {
-      await anotarIncidencia(solicitud, codigo, salida.error.slice(0, 300));
+      await anotarIncidencia(solicitud, decision.inaccesible ? 'numero_inaccesible' : codigo, salida.error.slice(0, 300));
       return { accion: 'incidencia', solicitudId: solicitud.id };
     }
     // El primer mensaje de un pedido con un resultado incierto, un rechazo que

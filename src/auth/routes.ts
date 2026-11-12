@@ -122,7 +122,8 @@ const PAGINAS_PRIVADAS = ['/conexion-gsg', '/api-gsgchat', '/panel', '/chat', '/
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
 
 /** Rutas de la API publica que no piden clave. */
-const API_SIN_CLAVE = ['/api/v1/conexion/canjear', '/api/v1/errores'];
+// El webhook de rutas entra sin clave de API: su llave es el header x-webhook-secret (src/rutas-gsg/routes.ts).
+const API_SIN_CLAVE = ['/api/v1/conexion/canjear', '/api/v1/errores', '/api/v1/rutas/estado'];
 
 /** Cada cuanto se anota el "ultimo uso" de una clave: no una escritura por peticion. */
 const ANOTAR_USO_CADA_MS = 60_000;
