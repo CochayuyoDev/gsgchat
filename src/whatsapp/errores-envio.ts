@@ -39,6 +39,7 @@ export const MOTIVOS_EN_PALABRAS: Record<string, string> = {
   contact_daily_cap: 'Ese cliente ya recibió el máximo de mensajes del día.',
   contact_spacing: 'Hacía muy poco que se le había escrito a ese cliente.',
   rhythm: 'El marcapasos del número lo dejó para más tarde (ritmo, horario o pausa).',
+  ruta_inactiva: 'El chat está cerrado porque GSG avisó que la ruta del cliente está inactiva o finalizada.',
 };
 
 /** Si conviene volver a mandar: nunca, despues de esperar, o ya (fallo pasajero). */
@@ -221,6 +222,7 @@ const QUE_HACER_INTERNO: Record<string, { queHacer: string; reintentar: Reintent
   contact_daily_cap: { queHacer: 'Esperar al día siguiente.', reintentar: 'esperar' },
   contact_spacing: { queHacer: 'Esperar unos minutos antes de volver a escribirle.', reintentar: 'esperar' },
   rhythm: { queHacer: 'Nada: sale solo más tarde, con el ritmo del número.', reintentar: 'si' },
+  ruta_inactiva: { queHacer: 'Nada: el chat se abre solo cuando GSG avise que la ruta vuelve a estar activa (o reactívala a mano en Nuestra API → Webhook de rutas).', reintentar: 'esperar' },
 };
 
 /**

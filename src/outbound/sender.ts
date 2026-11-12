@@ -585,6 +585,26 @@ export function createSender(deps: SenderDeps): Sender {
         return { ok: true, wamid, deliveryId };
       }
 
+      // Webhook de estados de rutas (src/rutas-gsg): la ruta del cliente esta
+      // inactiva o finalizada y su chat quedo cerrado. No sale NADA, ni lo
+      // automatico ni lo escrito a mano: no se gasta en un pedido que ya no
+      // va. Se abre solo cuando GSG avisa que la ruta vuelve a estar activa.
+      const bloqueoRuta = await repos.rutasGsg?.bloqueoDe(contact.id).catch(() => null);
+      if (bloqueoRuta) {
+        const deliveryId = await repos.deliveries.create({
+          contactId: contact.id,
+          campaignId: job.campaignId ?? null,
+          kind: job.kind,
+          templateName: job.templateName ?? null,
+          category: job.category,
+          variables: job.variables,
+          businessInitiated: false,
+        });
+        const reason = `el chat esta cerrado: la ruta ${bloqueoRuta.ruta} esta «${bloqueoRuta.estado}» segun GSG; se abre solo cuando la ruta vuelva a estar activa`;
+        await repos.deliveries.markBlocked(deliveryId, `ruta_inactiva: ${reason}`);
+        return { ok: false, blocked: true, code: 'ruta_inactiva', reason, retryAfterMs: 10 * 60_000, deliveryId };
+      }
+
       // "De este me encargo yo": con el bot callado en este chat no sale nada
       // automatico (respuestas, seguimientos, rutas, campanas), venga de la
       // cola que venga. Lo escrito a mano (manual u origen 'persona', que es lo de la

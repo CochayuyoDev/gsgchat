@@ -813,7 +813,12 @@ export interface ServicioEntregas {
    * por el flujo normal (o queda esperando «Confirmar y enviar» si ese ajuste
    * esta encendido).
    */
-  corregirTelefono(id: number, telefono: string, quien: string): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }>;
+  /**
+   * WhatsApp rechazo despues el numero de ese telefono (sin WhatsApp / no valido): sus pedidos de GSG
+   * pasan a su segundo numero si lo tienen. «agotado»: ya se probo o tampoco sirve (numero inaccesible).
+   */
+  segundoNumeroTrasRechazo(phone: string, codigo: string, motivo: string): Promise<{ accion: 'cambiado' | 'agotado' | 'nada'; detalle?: string }>;
+  corregirTelefono(id: number, telefono: string, quien: string, opciones?: { retener?: boolean }): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }>;
   /** Lo que ya se hizo por WhatsApp con cada tracking de `dia` (todos, o solo esos ids). */
   fichasTrackings(dia: string, soloIds?: number[]): Promise<FichaTracking[]>;
   /** La bandeja de errores de mensajes de esta tienda. */
@@ -1015,6 +1020,9 @@ const ESTADOS_FINALES: EstadoEntrega[] = ['entregada', 'terminada', 'cancelada']
  * manda su pin, la entrega sale de «necesita a alguien» y sigue sola. Las
  * demas («no soy yo», baja, un cambio...) las sigue viendo una persona.
  */
+/** Los codigos de «el numero no es accesible»: con ellos se prueba el segundo numero del pedido. */
+const NO_ACCESIBLE: ReadonlySet<string> = new Set(['sin_whatsapp', 'numero_invalido']);
+
 const LIBERA_CON_PIN = new Set(['sin_ubicacion', 'sin_respuesta', 'respondio_sin_ubicacion', 'consulta_ajena', 'ya_en_curso', 'ubicacion_fuera_de_zona', 'sin_whatsapp', 'envio_bloqueado', 'error_envio', 'no_se_le_escribio']);
 
 /** «No soy yo»: la incidencia con la que se aparta el pedido (y lo que cuenta la bitacora). */
@@ -4504,7 +4512,17 @@ ${lista}
    * Aplica lo que pasó con un intento (solo si el mensaje sigue en uno de
    * `desde`) y dice al motor qué hacer: cuándo reintentar o que pare.
    */
-  async function aplicarDesenlace(e: Entrega, d: Desenlace, desde: readonly EstadoMensaje[] = ['enviando']): Promise<{ esperaMs?: number; detener?: string }> {
+  async function aplicarDesenlace(e: Entrega, d: Desenlace, desde: readonly EstadoMensaje[] = ['enviando']): Promise<{ esperaMs?: number; detener?: string; segundoNumero?: boolean; inaccesible?: boolean }> {
+    // El numero no es accesible: se prueba el segundo numero del pedido; si ya se probo, es «numero inaccesible».
+    let inaccesible = false;
+    if (d.tipo === 'permanente' && NO_ACCESIBLE.has(d.codigo)) {
+      const s2 = await segundoNumeroDe(e, d.codigo, d.motivo);
+      if (s2.accion === 'cambiado') return { detener: s2.detalle, segundoNumero: true };
+      if (s2.accion === 'agotado') {
+        d = { tipo: 'permanente', codigo: 'numero_inaccesible', motivo: s2.detalle };
+        inaccesible = true;
+      }
+    }
     const en = ahora();
     const cfg = cfgReintentos();
     const intentos = (e.mensajeIntentos ?? 0) + 1;
@@ -4535,7 +4553,42 @@ ${lista}
     const act = await repo.cambiarMensaje(e.id, desde, { mensajeEstado: estado, mensajeIntentos: intentos, mensajeUltimoIntentoAt: en, mensajeProximoAt: null, mensajeErrorCodigo: d.codigo, mensajeError: d.motivo.slice(0, 500), mensajePermanente: d.tipo === 'permanente' });
     if (act) await evento(act, 'incidencia', d.tipo === 'incierto' ? `no se sabe si le llegó el primer mensaje (${d.motivo.slice(0, 120)}): no se reenvía solo` : `el primer mensaje no se puede mandar: ${motivoLegible(d.codigo, d.motivo)}`);
     if (act && estado === 'fallido') await reportarFalloDeEnvio(act, d.codigo, d.motivo);
-    return { detener: motivoLegible(d.codigo, d.motivo) };
+    return { detener: motivoLegible(d.codigo, d.motivo), ...(inaccesible ? { inaccesible: true } : {}) };
+  }
+
+  /**
+   * Segundo numero (pedido del dueño, 12/11). El numero del pedido no es
+   * accesible (sin WhatsApp o no valido):
+   *  - si el pedido trae telefono2 valido y todavia no se probo, el pedido pasa
+   *    a ese numero y se le escribe (sin incidencia ni reporte del viejo);
+   *  - si ya se probo, o el telefono2 tampoco sirve: «agotado» → numero_inaccesible;
+   *  - sin telefono2: «nada» (lo de siempre, con su error concreto).
+   */
+  async function segundoNumeroDe(e: Entrega, codigo: string, motivo: string): Promise<{ accion: 'cambiado'; detalle: string } | { accion: 'agotado'; detalle: string } | { accion: 'nada' }> {
+    try {
+      if (!NO_ACCESIBLE.has(codigo) || ESTADOS_FINALES.includes(e.estado)) return { accion: 'nada' };
+      const fresca = (await repo.entrega(e.id)) ?? e;
+      const eventos = await repo.eventos(fresca.id, 500).catch(() => [] as Awaited<ReturnType<typeof repo.eventos>>);
+      const paso = eventos.find((ev) => ev.payload?.segundoNumero === true);
+      const crudo = String(fresca.datosEnvio?.telefono2 ?? '').trim();
+      const porQue = motivoLegible(codigo, motivo).replace(/[.:]\s*corrige.*$/i, '');
+      if (paso) {
+        return { accion: 'agotado', detalle: `ni el número principal (${String(paso.payload?.anterior ?? '?')}: ${String(paso.payload?.motivo ?? 'no accesible')}) ni el segundo número (${fresca.phone}: ${porQue}) son accesibles` };
+      }
+      if (!crudo) return { accion: 'nada' };
+      const revision = revisarTelefono(crudo, plan);
+      if (!revision.ok) return { accion: 'agotado', detalle: `ni el número principal (${fresca.phone}: ${porQue}) ni el segundo número (${crudo}: ${motivoTelefono(revision)}) son accesibles` };
+      if (revision.phone === fresca.phone) return { accion: 'agotado', detalle: `el número principal (${fresca.phone}: ${porQue}) no es accesible y el segundo número es el mismo` };
+      const r = await corregirTelefono(fresca.id, revision.phone, 'GSGchat (segundo número)', { retener: false });
+      if (!r.ok) return { accion: 'agotado', detalle: `ni el número principal (${fresca.phone}: ${porQue}) ni el segundo número (${revision.phone}: ${r.motivo}) son accesibles` };
+      const detalle = `El número principal ${fresca.phone} no es accesible (${porQue}): se le escribe al segundo número ${revision.phone}.`;
+      await evento(r.entrega, 'nota', detalle, { segundoNumero: true, anterior: fresca.phone, nuevo: revision.phone, motivo: porQue });
+      log('pedido pasado a su segundo número', { referencia: fresca.referencia });
+      return { accion: 'cambiado', detalle };
+    } catch (error) {
+      log('no se pudo probar el segundo número', { referencia: e.referencia, detalle: String(error) });
+      return { accion: 'nada' };
+    }
   }
 
   // ---------------------------------------------- numeros reportados a GSG
@@ -4654,21 +4707,30 @@ ${lista}
     async despues(s, salida) {
       if (!s.phone) return;
       const d = desenlaceDeEnvio(salida);
-      let decision: { esperaMs?: number; detener?: string } = {};
+      let decision: { esperaMs?: number; detener?: string; segundoNumero?: boolean; inaccesible?: boolean } = {};
       const ids = pedidosEnEnvio.get(`${s.loteId}:${s.phone}`) ?? [];
       for (const e of await repo.vivasDeLoteYTelefono(s.loteId, s.phone)) {
         if (!ids.includes(e.id) || e.mensajeEstado !== 'enviando') continue;
         const r = await aplicarDesenlace(e, d);
-        decision = { esperaMs: Math.max(decision.esperaMs ?? 0, r.esperaMs ?? 0) || undefined, detener: decision.detener ?? r.detener };
+        decision = {
+          esperaMs: Math.max(decision.esperaMs ?? 0, r.esperaMs ?? 0) || undefined,
+          detener: decision.detener ?? r.detener,
+          segundoNumero: decision.segundoNumero || r.segundoNumero || undefined,
+          inaccesible: decision.inaccesible || r.inaccesible || undefined,
+        };
       }
       pedidosEnEnvio.delete(`${s.loteId}:${s.phone}`);
       return decision;
     },
     async sinWhatsApp(s, detalle) {
       if (!s.phone) return;
+      const marcas: { segundoNumero?: boolean; inaccesible?: boolean } = {};
       for (const e of await repo.vivasDeLoteYTelefono(s.loteId, s.phone)) {
-        await aplicarDesenlace(e, { tipo: 'permanente', codigo: 'sin_whatsapp', motivo: detalle }, ['pendiente', 'encolado', 'reintentando', 'enviando']);
+        const r = await aplicarDesenlace(e, { tipo: 'permanente', codigo: 'sin_whatsapp', motivo: detalle }, ['pendiente', 'encolado', 'reintentando', 'enviando']);
+        if (r.segundoNumero) marcas.segundoNumero = true;
+        if (r.inaccesible) marcas.inaccesible = true;
       }
+      return marcas;
     },
   };
 
@@ -4993,7 +5055,7 @@ ${lista}
   }
 
   /** GSG corrigio el telefono (ver ServicioEntregas.corregirTelefono). */
-  async function corregirTelefono(id: number, telefono: string, quien: string): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }> {
+  async function corregirTelefono(id: number, telefono: string, quien: string, opciones: { retener?: boolean } = {}): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }> {
     const e = await repo.entrega(id);
     if (!e) return { ok: false, codigo: 'no_existe', motivo: 'el pedido no existe' };
     if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, codigo: 'cerrada', motivo: `el pedido ${e.referencia} ya está cerrado (${e.estado})` };
@@ -5004,8 +5066,9 @@ ${lista}
     const viejo = e.phone;
     // Lo que se le pedia al numero viejo se suelta (salvo que otro pedido suyo siga esperando).
     await soltarDeLaEntrega(e, `GSG corrigió el teléfono del pedido ${e.referencia}`);
-    // Con «Confirmar y enviar» encendido, el numero corregido vuelve a esperar a una persona.
-    const retener = ajustes.confirmarListaGsg !== false;
+    // Con «Confirmar y enviar» encendido, el numero corregido vuelve a esperar a una persona
+    // (el paso automatico al segundo numero no: ese pedido ya estaba confirmado).
+    const retener = opciones.retener ?? ajustes.confirmarListaGsg !== false;
     const confirmacionEstado = e.confirmacionEstado === 'pedida' || e.confirmacionEstado === 'rechazada' ? ('pendiente' as const) : e.confirmacionEstado;
     let act = (await repo.actualizar(e.id, {
       phone: revision.phone,
@@ -5969,6 +6032,15 @@ ${lista}
     },
     reportarNumero: reportarNumeroInterno,
     corregirTelefono,
+    async segundoNumeroTrasRechazo(phone, codigo, motivo) {
+      let resultado: { accion: 'cambiado' | 'agotado' | 'nada'; detalle?: string } = { accion: 'nada' };
+      for (const e of await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])) {
+        if (!esDeGsg(e)) continue;
+        const r = await segundoNumeroDe(e, codigo, motivo);
+        if (r.accion === 'cambiado' || (r.accion === 'agotado' && resultado.accion === 'nada')) resultado = r;
+      }
+      return resultado;
+    },
     fichasTrackings,
     revisarMensajes,
     bandejaMensajes,

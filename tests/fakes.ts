@@ -37,6 +37,7 @@ import { createSettingsService, type SettingsRepo, type SettingsService } from '
 import { createFakeAutomation, type FakeAutomation } from './fakes-automation.js';
 import { createFakeMessages, type FakeMessages } from './fakes-messages.js';
 import { createFakeWebhooks, type FakeWebhooks } from './fakes-webhooks.js';
+import { createRutasGsgEnMemoria } from '../src/rutas-gsg/repo.js';
 import { createFakeConectores, type FakeConectores } from './fakes-conectores.js';
 import { createFakeEnvioAutomatico, type FakeEnvioAutomatico } from './fakes-envio-automatico.js';
 import { createFakePedidos, type FakePedidos } from './fakes-pedidos.js';
@@ -65,6 +66,7 @@ export interface FakeRepos extends Repos {
   archives: FakeArchives;
   rutas: FakeRutas;
   webhooks: FakeWebhooks;
+  rutasGsg: ReturnType<typeof createRutasGsgEnMemoria>;
   envioAutomatico: FakeEnvioAutomatico;
   conectores: FakeConectores;
   pedidos: FakePedidos;
@@ -355,6 +357,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     _stickers: stickersMem,
     stickers,
     webhooks: createFakeWebhooks(),
+    rutasGsg: createRutasGsgEnMemoria(),
     conectores: createFakeConectores(),
     envioAutomatico: createFakeEnvioAutomatico(),
     pedidos: createFakePedidos(() => [...contactsByPhone.values()]),

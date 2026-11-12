@@ -203,6 +203,11 @@ export async function quePasoConSolicitud(
     avisos.push({ tono: 'bad', texto: `El cliente escribió ${escribioDespues.length} vez${escribioDespues.length === 1 ? '' : 'es'} después del último mensaje, pero el reparto no lo tiene como respuesta: puede que lo mandara desde otro número o que llegara a otro chat. Revisa su chat.` });
   }
   if (!solicitud.contactId) faltan.push('el chat (la solicitud no está ligada a un contacto)');
+  // Webhook de rutas (src/rutas-gsg): con la ruta inactiva el chat esta cerrado y no sale nada.
+  const cerrado = solicitud.contactId ? await repos.rutasGsg?.bloqueoDe(solicitud.contactId).catch(() => null) : null;
+  if (cerrado) {
+    avisos.unshift({ tono: 'bad', texto: `El chat está cerrado: GSG avisó que la ruta ${cerrado.ruta} está «${cerrado.estado}». No sale ningún mensaje a este cliente hasta que la ruta vuelva a estar activa (o se reactive a mano en Nuestra API → Webhook de rutas).` });
+  }
   if (solicitud.intentos > 0 && solicitud.phone && !delPedido.length) {
     avisos.push({ tono: 'muted', texto: 'No quedan registros de los intentos de envío de este pedido (pueden haberse borrado por antigüedad): lo de abajo sale de la bitácora y del chat.' });
   }

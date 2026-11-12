@@ -170,6 +170,45 @@ export function openApi(baseUrl: string): Json {
       },
 
 
+      '/rutas/estado': {
+        post: {
+          tags: ['rutas'],
+          summary: 'Webhook de estados de rutas: GSG avisa que una ruta cambió de estado (cierra o abre los chats de sus clientes)',
+          description: [
+            'Sin clave de API: la llave es el header `x-webhook-secret` (se genera en Nuestra API → Webhook de rutas; se ve una vez).',
+            'Si la ruta pasa a inactiva o finalizada (también cerrada, terminada, cancelada, anulada, completada, suspendida),',
+            'el chat del pedido con ese código de ruta (su tracking, el mismo de la API 1) se cierra: no sale ningún mensaje a',
+            'ese cliente, ni automático ni escrito a mano. Cualquier otro estado (en ruta, activa…) lo vuelve a abrir.',
+            'La ruta se identifica solo por su código (el tracking). Un aviso más viejo que el último aplicado a esa ruta se ignora.',
+            'Se contesta 202 al momento y se procesa detrás; acepta un aviso o una lista (hasta 200).',
+            'En la plataforma, la dirección lleva el nombre de la tienda: `/tienda/<tienda>/api/v1/rutas/estado`.',
+          ].join(' '),
+          parameters: [{ name: 'x-webhook-secret', in: 'header', required: true, schema: { type: 'string' } }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['ruta', 'estado'],
+                  properties: {
+                    ruta: { type: 'string', maxLength: 120, example: 'GSG123456', description: 'El código de ruta: el tracking del pedido (alias: idRuta, codigoRuta, rutaId)' },
+                    estado: { type: 'string', maxLength: 60, example: 'INACTIVA', description: 'El estado nuevo, tal cual lo llama GSG' },
+                    fecha: { type: 'string', format: 'date-time', example: '2026-11-12T15:30:00-05:00', description: 'Cuándo cambió (opcional; por defecto, al recibirlo)' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            202: json({ type: 'object', properties: { ok: { type: 'boolean' }, recibidos: { type: 'integer' }, eventos: { type: 'array', items: { type: 'integer' } }, detalle: { type: 'string' } } }),
+            400: error('El aviso no se entiende (VALIDACION): `detalles` dice el campo'),
+            401: error('Falta x-webhook-secret o no es el vigente (SECRETO_INVALIDO)'),
+            503: error('Todavía no se generó el secreto (SIN_CONFIGURAR)'),
+          },
+        },
+      },
+
       '/estado': {
         get: {
           tags: ['estado'],
@@ -804,7 +843,7 @@ export function openApi(baseUrl: string): Json {
             tracking: { type: 'string', nullable: true },
             referencia: { type: 'string', nullable: true },
             telefono: { type: 'string', nullable: true, description: 'Tal como llego de GSG' },
-            error: { type: 'string', enum: ['telefono_invalido', 'numero_corto', 'numero_largo', 'numero_fijo', 'sin_whatsapp', 'envio_fallido', 'tracking_falta', 'tracking_invalido', 'tracking_duplicado', 'tracking_de_otro_pedido', 'telefono_de_motorizado', 'no_soy_yo'] },
+            error: { type: 'string', enum: ['telefono_invalido', 'numero_corto', 'numero_largo', 'numero_fijo', 'sin_whatsapp', 'numero_inaccesible', 'envio_fallido', 'tracking_falta', 'tracking_invalido', 'tracking_duplicado', 'tracking_de_otro_pedido', 'telefono_de_motorizado', 'no_soy_yo'] },
             titulo: { type: 'string' },
             mensaje: { type: 'string', description: 'Que paso y que hacer, en castellano' },
             detalle: { type: 'string', nullable: true },
@@ -994,6 +1033,7 @@ export function openApi(baseUrl: string): Json {
             reintentarEnMs: { type: 'integer', nullable: true, description: 'si viene, vale la pena volver a intentar entonces' },
             entregaId: { type: 'integer' },
             llegoAWhatsapp: { type: 'boolean', enum: [false], description: 'No salió: no le llegó.' },
+            nota: { type: 'object', nullable: true, description: 'Solo si no salió: la nota del chat «Mensaje no llegó al cliente», con la misma forma que la `nota` del historial: { codigo: "mensaje_no_llego", nombre, descripcion: "Mensaje no llegó al cliente, por favor comunícate con tu número personal por mensaje o llamada de saldo.", dia, origen: "reglas", actualizadaEn }.' },
             entrega: { type: 'object', description: 'estado: no_entregado, con `error` (codigo, motivo, queHacer, reintentar).', properties: { estado: { type: 'string' }, descripcion: { type: 'string' }, error: { type: 'object' } } },
           },
         },
@@ -1005,6 +1045,7 @@ export function openApi(baseUrl: string): Json {
             error: { type: 'string' },
             reintentable: { type: 'boolean' },
             llegoAWhatsapp: { type: 'boolean', nullable: true, description: 'false = WhatsApp lo rechazó; null = no se sabe si salió (sin respuesta del proveedor): revisar el historial antes de reenviarlo.' },
+            nota: { type: 'object', nullable: true, description: 'Solo si no salió: la nota del chat «Mensaje no llegó al cliente», con la misma forma que la `nota` del historial: { codigo: "mensaje_no_llego", nombre, descripcion: "Mensaje no llegó al cliente, por favor comunícate con tu número personal por mensaje o llamada de saldo.", dia, origen: "reglas", actualizadaEn }.' },
             entrega: { type: 'object', properties: { estado: { type: 'string' }, descripcion: { type: 'string' }, error: { type: 'object', nullable: true } } },
           },
         },

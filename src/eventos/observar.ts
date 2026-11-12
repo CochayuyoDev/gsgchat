@@ -19,6 +19,7 @@ import { archivoDeMensaje, type ArchivoDeMensaje } from '../api/v1/archivos-gsg.
 import { payloadExterno } from '../util/payload-externo.js';
 import { errorDeEnvio } from '../whatsapp/errores-envio.js';
 import { entregaDelMensaje } from '../whatsapp/estado-entrega.js';
+import { notaNoLlegoParaGsg } from '../chat/nota-no-llego.js';
 import type { Message } from '../db/messages.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
@@ -36,7 +37,7 @@ const esHistorial = (payload: unknown) => Boolean(payload && typeof payload === 
 /** Quien mando un saliente, con los tres valores del contrato (ver sender.ts `conOrigen`). */
 const autorDe = (origen: unknown): 'persona' | 'ia' | 'sistema' => (origen === 'persona' || origen === 'ia' ? origen : 'sistema');
 
-export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: string; secreto: string }): Repos {
+export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: string; secreto: string }, timezone?: string): Repos {
   /** El enlace firmado del archivo del mensaje (foto, video, audio...), o null. Nunca rompe el guardado. */
   const archivoDe = (id: number, message: Parameters<Repos['messages']['add']>[0]): ArchivoDeMensaje | null => {
     if (!archivos) return null;
@@ -142,6 +143,8 @@ export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: s
         llegoAWhatsapp: entrega?.llegoAWhatsapp ?? null,
         ...(entrega ? { entrega: { estado: entrega.estado, descripcion: entrega.descripcion } } : {}),
         ...(porQue ? { error: porQue } : {}),
+        // No llego: la nota del chat «Mensaje no llegó al cliente», empujada (la misma del historial).
+        ...(entrega?.llegoAWhatsapp === false ? { nota: notaNoLlegoParaGsg(new Date(), timezone) } : {}),
       });
     },
   };

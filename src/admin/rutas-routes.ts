@@ -111,7 +111,7 @@ const VISTAS: Record<string, Partial<ConsultaSolicitudes>> = {
   respondieron: { estado: 'respondio' },
   pendientes: { estado: 'pendiente' },
   sin_whatsapp: { incidencia: 'sin_whatsapp' },
-  numero_malo: { incidencias: ['numero_corto', 'numero_largo', 'numero_invalido', 'numero_fijo'] },
+  numero_malo: { incidencias: ['numero_corto', 'numero_largo', 'numero_invalido', 'numero_fijo', 'numero_inaccesible'] },
   derivados: { estado: 'derivado' },
   supervision: { estado: 'supervision' },
   requieren_persona: { requiereHumano: true },
@@ -499,7 +499,7 @@ export async function registerRutasRoutes(
       if (grupo.estado === 'respondio') sumar('respondieron', n);
       if (grupo.estado === 'pendiente') sumar('pendientes', n);
       if (grupo.incidencia === 'sin_whatsapp') sumar('sin_whatsapp', n);
-      if (['numero_corto', 'numero_largo', 'numero_invalido', 'numero_fijo'].includes(grupo.incidencia ?? '')) sumar('numero_malo', n);
+      if (['numero_corto', 'numero_largo', 'numero_invalido', 'numero_fijo', 'numero_inaccesible'].includes(grupo.incidencia ?? '')) sumar('numero_malo', n);
       if (grupo.estado === 'derivado') sumar('derivados', n);
       if (grupo.estado === 'supervision') sumar('supervision', n);
       if (grupo.requiereHumano) sumar('requieren_persona', n);

@@ -32,6 +32,8 @@ export interface DepsNoLlego {
   repos: Repos;
   ahora?: () => Date;
   log?: (mensaje: string, detalle?: Record<string, unknown>) => void;
+  /** Segundo numero (12/11): un numero sin WhatsApp pasa al telefono2 del pedido; ver src/entregas/servicio.ts. */
+  segundoNumero?: (phone: string, codigo: string, motivo: string) => Promise<{ accion: 'cambiado' | 'agotado' | 'nada'; detalle?: string }>;
   /** Cuánto esperar entre búsquedas cuando el aviso llega antes que el mensaje (pruebas: 0). */
   esperasMs?: number[];
 }
@@ -45,6 +47,8 @@ export type ResultadoNoLlego =
   | 'ya_no_aplica'
   /** Fallo pasajero de WhatsApp: se vuelve a intentar solo. */
   | 'reintento'
+  /** El numero no tiene WhatsApp y el pedido paso a su segundo numero. */
+  | 'segundo_numero'
   /** Queda en incidencia para que una persona decida (llamar, corregir el número...). */
   | 'incidencia';
 
@@ -139,9 +143,24 @@ export async function mensajeNoLlego(deps: DepsNoLlego, wamid: string, error: Er
   // Lo demás no se arregla insistiendo (fuera de las 24 h, número sin WhatsApp,
   // límite de Meta, plantilla...): una persona decide. Queda en incidencia, con
   // el motivo, y a GSG le llega como cualquier incidencia del reparto.
+  // El numero no es accesible: si el pedido tiene segundo numero, se le escribe a ese.
+  let codigoFinal = codigo;
+  let detalleFinal = detalle;
+  if ((codigo === 'sin_whatsapp' || codigo === 'numero_invalido') && deps.segundoNumero && solicitud.phone) {
+    const s2 = await deps.segundoNumero(solicitud.phone, codigo, motivo).catch(() => ({ accion: 'nada' as const }));
+    if (s2.accion === 'cambiado') {
+      await repos.rutas.registrarEvento(solicitud.id, 'incidencia', `${detalle} ${s2.detalle ?? 'Se le escribe al segundo número del pedido.'}`, { ...marca, segundoNumero: true });
+      despertarMotorRutas();
+      return 'segundo_numero';
+    }
+    if (s2.accion === 'agotado') {
+      codigoFinal = 'numero_inaccesible';
+      detalleFinal = `Número inaccesible: ${s2.detalle ?? motivo}`.slice(0, 300);
+    }
+  }
   const actualizada = await repos.rutas.actualizarSolicitud(solicitud.id, { intentos, estado });
-  await repos.rutas.registrarEvento(solicitud.id, 'incidencia', detalle, marca);
-  await anotarIncidenciaDeSolicitud({ repos, ahora, log: deps.log }, actualizada ?? { ...solicitud, intentos, estado }, codigo, detalle);
+  await repos.rutas.registrarEvento(solicitud.id, 'incidencia', detalleFinal, marca);
+  await anotarIncidenciaDeSolicitud({ repos, ahora, log: deps.log }, actualizada ?? { ...solicitud, intentos, estado }, codigoFinal, detalleFinal);
   despertarMotorRutas();
   return 'incidencia';
 }

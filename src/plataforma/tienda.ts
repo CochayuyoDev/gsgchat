@@ -189,7 +189,7 @@ export async function armarTienda(o: OpcionesTienda): Promise<TiendaViva> {
     try {
 
       const bus = crearBus((m, d) => log(m, d));
-      const repos = observarRepos(createRepos(pool), bus, { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET });
+      const repos = observarRepos(createRepos(pool), bus, { publicBase: config.PUBLIC_BASE_URL, secreto: config.TRACKING_SECRET }, config.timezone);
       const settingsRepo = createSettingsRepo(pool);
       const settings = await createSettingsService(settingsRepo, config, o.secretos.settingsKey);
 

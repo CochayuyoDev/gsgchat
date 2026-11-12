@@ -82,6 +82,7 @@ export function motivoLegible(codigo: string | null | undefined, detalle?: strin
   const extra = detalle ? ` (${detalle.slice(0, 160)})` : '';
   if (c === 'numero_invalido' || c === 'telefono_invalido') return `El teléfono no es válido: corrígelo en GSG y vuelve a mandar el pedido.${extra}`;
   if (c === 'sin_whatsapp') return 'Ese número no tiene WhatsApp: corrige el teléfono del cliente y vuelve a mandar el pedido.';
+  if (c === 'numero_inaccesible') return `Número inaccesible: ni el número principal ni el segundo número del cliente son accesibles. Corrige los teléfonos en GSG y vuelve a mandar el pedido.${extra}`;
   if (c === 'sin_plantilla' || c.startsWith('template_') || c === 'window_closed') return `Falta una plantilla aprobada por Meta para escribirle fuera de las 24 h: actívala en Pedidos GSG → Ajustes de chat → Plantillas aprobadas por Meta.${extra}`;
   if (c === 'opt_out' || c === 'no_opt_in') return 'El cliente pidió no recibir mensajes: no se le escribe.';
   if (c === 'allowlist') return 'El modo prueba está activo y este número no está en la lista de prueba.';
@@ -90,6 +91,7 @@ export function motivoLegible(codigo: string | null | undefined, detalle?: strin
   if (c === 'limite_diario') return 'La línea elegida llegó a su máximo de mensajes por día.';
   if (c === 'linea_fuera_de_modo') return 'La línea elegida está en pausa por el modo de Conexión: elige otra línea o cambia el modo.';
   if (c === 'sin_conexion') return 'WhatsApp está desconectado: se reintenta solo en cuanto vuelva.';
+  if (c === 'ruta_inactiva') return `El chat está cerrado: GSG avisó que la ruta del cliente está inactiva o finalizada. Sale solo cuando la ruta vuelva a estar activa.${extra}`;
   if (c === 'resultado_incierto') return `No se sabe si le llegó: el envío se cortó a mitad. Revisa su chat antes de reintentar.${extra}`;
   if (c === 'reintentos_agotados') return `WhatsApp falló varias veces seguidas y se dejó de reintentar solo.${extra}`;
   if (c === 'no_encolado') return `No se pudo poner en la cola del reparto: se reintenta solo.${extra}`;

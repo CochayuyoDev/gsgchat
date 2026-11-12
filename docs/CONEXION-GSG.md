@@ -148,7 +148,7 @@ clave de permiso `conversaciones:leer`). Junto a `tracking`, `contacto` y `mensa
 ```
 
 `codigo` y `nombre` son los del catálogo del negocio; `origen` es `ia` (la puso la IA), `manual` (una persona) o
-`reglas` (el bot, p. ej. al cambiar el cliente su ubicación). Es la **última** nota de ese WhatsApp: si se vuelve a
+`reglas` (el bot o el sistema, p. ej. al cambiar el cliente su ubicación o cuando un mensaje no le llegó: `mensaje_no_llego`). Es la **última** nota de ese WhatsApp: si se vuelve a
 etiquetar, cambia. `null` si el chat aún no tiene ninguna (o la IA no pudo clasificarlo). En cuanto se guarda,
 GSG la ve en la siguiente llamada: no hay envíos que fallen ni reintentos. Ver `src/api/v1/conversaciones-gsg.ts`
 y la documentación de la API (`/api/v1/openapi.json`).
@@ -202,6 +202,24 @@ los pintaba como enviados. Por eso cada mensaje **saliente** del historial trae 
 | `true` | `entregado` / `leido` | ✓✓ (le llegó) |
 | `null` | `sin_confirmar` / `enviado` | 🕓 esperando confirmación de WhatsApp |
 | `false` | `no_entregado` | ⚠ **No le llegó**, con `error.motivo` y `error.queHacer`: hay que llamar al cliente |
+
+**La nota «Mensaje no llegó al cliente» (12/11).** Cuando un mensaje no le llega al cliente, el chat queda con
+una nota **por el mismo camino que las notas de la IA** (la `nota` del historial, ver «Las notas de los chats» más
+arriba). GSG no necesita nada nuevo:
+
+```json
+"nota": { "codigo": "mensaje_no_llego", "nombre": "Mensaje no llegó al cliente",
+          "descripcion": "Mensaje no llegó al cliente, por favor comunícate con tu número personal por mensaje o llamada de saldo.",
+          "dia": "2026-11-12", "origen": "reglas", "actualizadaEn": "2026-11-12T15:31:02.000Z" }
+```
+
+- Se pone cuando un mensaje escrito por GSG (API 4) no sale (frenado o rechazado al momento) y cuando WhatsApp avisa
+  después que no entregó un mensaje. Si no se sabe si salió (el proveedor no respondió), no se pone.
+- Es una nota del sistema: no está en el catálogo que la IA usa para clasificar, y no pisa una nota puesta a mano.
+- Como toda nota del chat, es la última: si después la IA o una persona etiquetan el chat, cambia.
+- **Además va empujada**, con la misma forma, para que GSG no tenga que volver a pedir el historial:
+  - en el webhook **`mensaje.estado`** cuando WhatsApp avisa que no lo entregó (`datos.nota`, junto a `llegoAWhatsapp: false`);
+  - en la **respuesta de la API 4** (`POST /api/v1/chat`) cuando el mensaje del motorizado no sale al momento (`nota`).
 
 - Los mensajes del cliente (`entrante`) llevan `llegoAWhatsapp: null` y `entrega: null`.
 - Un `null` que dura mucho lo avisa la propia `descripcion` (desde 30 minutos): teléfono apagado, sin internet o
@@ -402,6 +420,87 @@ Google ni clave, y las registra y las manda a GSG igual que un pin (`send-locati
 - Un mismo mensaje de WhatsApp no se procesa dos veces (por su `wamid`): un reintento no manda dos ubicaciones.
 
 Lo que hay que hacer en la base al desplegarlo: `docs/MIGRACIONES-ETIQUETAS.md`.
+
+## Webhook de estados de rutas (12/11)
+
+El sistema de rutas de GSG avisa a GSGchat cuando una ruta cambia de estado. Se configura y se ve en
+**Nuestra API → Webhook de rutas** (dirección, secreto, prueba, rutas con chats cerrados y bitácora).
+
+**Para qué:** si una ruta pasa a **inactiva o finalizada**, los chats de sus clientes se **cierran**: no sale ningún
+mensaje a esos clientes, ni automático ni escrito a mano (Chats o la API 4), y no se gasta en pedidos que ya no
+van. Si la ruta vuelve a **en ruta, activa** o a cualquier otro estado, los chats se **abren solos** y lo que estaba
+esperando (el pedido de ubicación, un recordatorio) sigue.
+
+```http
+POST https://<gsgchat>/tienda/<tienda>/api/v1/rutas/estado
+x-webhook-secret: whr_…
+Content-Type: application/json
+
+{ "ruta": "GSG123456", "estado": "INACTIVA", "fecha": "2026-11-12T15:30:00-05:00" }
+```
+
+| Campo | Obligatorio | Qué es |
+|---|---|---|
+| `ruta` | Sí | El código de ruta: es el **tracking** del pedido, el mismo `tracking` de la API 1 (alias: `idRuta`, `codigoRuta`, `rutaId`). Es lo único que identifica la ruta. |
+| `estado` | Sí | El estado nuevo, como lo llama GSG. Cierran: inactiva, finalizada, cerrada, terminada, cancelada, anulada, completada, suspendida (sin importar tildes, mayúsculas ni `_`). Cualquier otro abre. |
+| `fecha` | No (recomendado) | Cuándo cambió (ISO 8601). Un aviso más viejo que el último aplicado a esa ruta se ignora. |
+
+Se acepta un aviso o una lista (hasta 200).
+
+| Respuesta | Cuándo |
+|---|---|
+| `202` | Recibido: se contesta al momento y se procesa detrás (GSG no espera ni reintenta por tiempo). `{ ok, recibidos, eventos, detalle }`. |
+| `400 VALIDACION` | El aviso no se entiende; `detalles` dice el campo. |
+| `401 SECRETO_INVALIDO` | Falta `x-webhook-secret` o no es el vigente. |
+| `503 SIN_CONFIGURAR` | Todavía no se generó el secreto. |
+
+Reglas:
+
+- **Asociación ruta-chat:** el código de ruta es el tracking del pedido, y el pedido une su teléfono y su chat. El
+  JSON de pedidos de la API 1 no cambia.
+  Un pedido que llega con un tracking cuya ruta ya está inactiva entra con el chat cerrado.
+- **Un chat lo pueden cerrar varias rutas:** se abre cuando ya no lo cierra ninguna.
+- **Seguridad:** el secreto lo genera GSGchat (se ve una sola vez; se guarda solo su huella). Generar otro invalida el anterior.
+- **Control de costos:** el bloqueo está en el emisor (`src/outbound/sender.ts`), antes de cualquier envío. El envío
+  queda frenado con el código `ruta_inactiva` (en los intentos de envío, no como mensaje del chat). La API 4
+  contesta que no salió y por qué. El reparto lo trata como espera: no gasta intentos ni marca incidencia.
+- **Dónde se ve:** el chat del cliente dice que está cerrado y por qué, «Ver qué pasó con este pedido» lo avisa,
+  la bitácora del pedido anota cada cierre y apertura, y Nuestra API permite reactivar una ruta a mano.
+
+Código: `src/rutas-gsg/` (servicio, rutas y repo) y `db/migrations/021_webhook_rutas.sql`.
+
+## Segundo número del cliente (12/11)
+
+Si el número del cliente (`telefono`) no es accesible, GSGchat le escribe al segundo número del pedido
+(`telefono2`). Si ninguno es accesible, a GSG le llega el error **`numero_inaccesible`**.
+
+| Cuándo se nota | Con `telefono2` válido | Sin `telefono2` válido |
+|---|---|---|
+| Al recibir: el `telefono` no es un número válido (corto, largo, fijo…) | El pedido se guarda con el `telefono2` y se le escribe ahí. | Si `telefono2` viene pero tampoco es válido: se descarta con `numero_inaccesible`. Sin `telefono2`: el error de siempre (`numero_corto`, `numero_fijo`…). |
+| Al escribir: el número no tiene WhatsApp (o WhatsApp lo rechaza después, 131026) | El pedido pasa al `telefono2` y se le escribe ahí. No se marca incidencia ni se reporta el primero. | Si el pedido ya estaba en su segundo número o el `telefono2` no sirve: `numero_inaccesible`. Sin `telefono2`: `sin_whatsapp`, como siempre. |
+
+- `numero_inaccesible` llega por los mismos caminos que los demás problemas de número: la bandeja
+  `GET /api/v1/reportados` y la ruta de problemas de Conexión con GSG (motivo `TELEFONO_MAL`), con el detalle de cada
+  número («ni el número principal (…: no tiene WhatsApp) ni el segundo número (…) son accesibles»).
+- El cambio queda en la bitácora del pedido: «El número principal … no es accesible (…): se le escribe al segundo número …».
+- El segundo número se prueba una sola vez por pedido.
+
+Código: `segundoNumeroDe` en `src/entregas/servicio.ts`, la recepción en `src/api/v1/entregas-gsg.ts` y el rechazo
+posterior en `src/rutas/no-llego.ts`.
+
+## Aviso al cliente cuando GSG cambia datos del pedido (12/11)
+
+Si GSG cambia datos de un pedido (`PATCH /api/v1/entregas/{referencia}` o volviendo a mandarlo por la API 1), al
+cliente le llega un texto: «le informamos un cambio en su pedido GSG-E-1: se ha cambiado su llanta Pirelli por llanta
+Michelin…».
+
+- Solo dentro de la **ventana de 24 h**: el cliente tiene que haber escrito en las últimas 24 horas. Fuera de ella no
+  se le escribe y queda anotado por qué.
+- Como mucho **2 avisos por pedido**.
+- Solo lo que le importa al cliente: producto, detalle, monto, método de pago, dirección, distrito y horario.
+- La respuesta del `PATCH` trae `avisoCliente: { enviado, cambios, motivo }`, y la de la API 1, `avisosCambio`.
+
+Código: `src/entregas/aviso-cambio.ts`.
 
 ## Dónde está cada cosa
 

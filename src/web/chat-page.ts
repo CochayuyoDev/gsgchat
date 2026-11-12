@@ -2130,6 +2130,11 @@ function renderComposer(data) {
     locked.innerHTML = '<b>' + esc(data.blockedReason || 'En este grupo no se puede escribir.') + '</b><br>Los grupos se atienden con el WhatsApp vinculado por QR en <a class="link" href="/setup">Conectar</a>.';
     return;
   }
+  if (data.rutaCerrada) {
+    /* Webhook de rutas de GSG: la ruta del cliente está inactiva o finalizada. */
+    locked.innerHTML = '<b>Chat cerrado: la ruta ' + esc(data.rutaCerrada.ruta) + ' está «' + esc(data.rutaCerrada.estado) + '» según GSG.</b><br>No sale ningún mensaje a este cliente, ni automático ni escrito aquí, para no gastar en un pedido que ya no va. Se abre solo cuando GSG avise que la ruta vuelve a estar activa, o a mano en <a class="link" href="/api-gsgchat#t-rutas">Nuestra API → Webhook de rutas</a>.';
+    return;
+  }
   if (data.contact.optOutAt) {
     locked.innerHTML = '<b>Este contacto se dio de baja.</b><br>No se le puede escribir: una baja ignorada se convierte en bloqueo, y el bloqueo sí castiga la calidad del número.';
     return;

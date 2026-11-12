@@ -116,7 +116,9 @@ export type GateCode =
   // regla del dueño en «Solo lo de GSG»: un texto del modelo nunca sale a un cliente
   | 'regla_gsg'
   // "De este me encargo yo": con el bot callado en el chat, lo automatico no sale
-  | 'bot_pausado';
+  | 'bot_pausado'
+  // webhook de estados de rutas: la ruta del cliente esta inactiva y su chat cerrado (src/rutas-gsg)
+  | 'ruta_inactiva';
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
