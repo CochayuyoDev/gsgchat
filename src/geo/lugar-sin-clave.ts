@@ -37,16 +37,35 @@ export interface OpcionesLugarSinClave {
 }
 
 /**
+ * Las cookies de «ya acepté» de Google. Sin ellas, a un servidor en Europa (o a
+ * uno que Google no conoce) la búsqueda lo manda a la pantalla de cookies
+ * (consent.google.com) y no hay punto que leer. En una PC de Perú no hacen falta.
+ */
+const COOKIES_CONSENTIMIENTO = 'CONSENT=YES+cb.20240101-00-p0.es+FX+000; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVzIAEaBgiA_LyaBg';
+
+/** El resultado con su motivo cuando no sale: va a los avisos del enlace y al registro del servidor. */
+export interface ResultadoLugarSinClave {
+  punto: Coordinates | null;
+  /** Por qué no salió (null si salió): Google mandó a otra página, un captcha, cambió el formato, sin red… */
+  motivo: string | null;
+}
+
+/**
  * El punto del lugar `ftid` buscando `texto` (su nombre y dirección, tal como
  * venía en el enlace) en la búsqueda de Google Maps. null si no aparece ESE
  * lugar, si no hay red o si la respuesta no tiene el formato esperado.
  */
 export async function buscarLugarSinClave(texto: string, ftid: string, opts: OpcionesLugarSinClave = {}): Promise<Coordinates | null> {
+  return (await buscarLugarSinClaveConMotivo(texto, ftid, opts)).punto;
+}
+
+/** Igual, pero diciendo por qué no salió: sin esto un fallo en el servidor no deja rastro. */
+export async function buscarLugarSinClaveConMotivo(texto: string, ftid: string, opts: OpcionesLugarSinClave = {}): Promise<ResultadoLugarSinClave> {
   const limpio = texto.replace(/\s+/g, ' ').trim();
-  if (!limpio || limpio.length > 200 || !esFtid(ftid)) return null;
+  if (!limpio || limpio.length > 200 || !esFtid(ftid)) return { punto: null, motivo: 'el enlace no trae un nombre o un ftid válido' };
   const clave = ftid.toLowerCase();
   const guardado = cache.get(clave);
-  if (guardado !== undefined) return guardado;
+  if (guardado !== undefined) return { punto: guardado, motivo: guardado ? null : 'Google ya dijo antes que ese lugar no aparece (se recuerda un día)' };
 
   const { timeoutMs = 8000, fetchImpl = fetch } = opts;
   const url = new URL('https://www.google.com/search');
@@ -63,13 +82,22 @@ export async function buscarLugarSinClave(texto: string, ftid: string, opts: Opc
       headers: {
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
         'accept-language': 'es-PE,es;q=0.9',
+        cookie: COOKIES_CONSENTIMIENTO,
       },
     });
     // Un captcha o un redirect (consentimiento): no se sabe, y no se recuerda.
-    if (r.status !== 200) return null;
+    if (r.status !== 200) {
+      const destino = r.headers.get('location') ?? '';
+      const motivo = /consent\./i.test(destino)
+        ? 'Google mandó a la pantalla de cookies (consent)'
+        : /\/sorry\//i.test(destino) || r.status === 429
+          ? 'Google pidió un captcha (demasiadas búsquedas desde este servidor)'
+          : `Google respondió ${r.status}${destino ? ` → ${destino.slice(0, 80)}` : ''}`;
+      return { punto: null, motivo };
+    }
     cuerpo = (await r.text()).slice(0, TOPE);
-  } catch {
-    return null;
+  } catch (error) {
+    return { punto: null, motivo: `no se pudo preguntar a Google: ${error instanceof Error ? error.message : String(error)}` };
   } finally {
     clearTimeout(reloj);
   }
@@ -77,8 +105,17 @@ export async function buscarLugarSinClave(texto: string, ftid: string, opts: Opc
   const punto = puntoDelLugar(cuerpo, ftid);
   // Solo se recuerda una respuesta con el formato esperado (empieza con `)]}'`):
   // un HTML de error no dice nada sobre el lugar.
-  if (punto || cuerpo.startsWith(")]}'")) cache.set(clave, punto);
-  return punto;
+  const formatoEsperado = cuerpo.startsWith(")]}'");
+  if (punto || formatoEsperado) cache.set(clave, punto);
+  if (punto) return { punto, motivo: null };
+  return {
+    punto: null,
+    motivo: formatoEsperado
+      ? 'la búsqueda de Google no trae ese lugar (su ftid no aparece)'
+      : /captcha|unusual traffic|tráfico inusual/i.test(cuerpo)
+        ? 'Google pidió un captcha (demasiadas búsquedas desde este servidor)'
+        : 'Google respondió con un formato distinto al esperado (¿cambió su búsqueda?)',
+  };
 }
 
 /**

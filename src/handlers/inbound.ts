@@ -857,6 +857,12 @@ async function handleInboundMessageEnFila(
   // Un enlace de mapa de otra ciudad no se reconoce: ni coordenadas ni respuesta.
   const leerEnlace = async (t: string) => {
     const r = await extractLocation(t, { bbox: config.bbox, pais: config.pais, porDireccion: porDireccionDe(deps), porLugar: porLugarDe(deps), porLugarConNombre: porLugarConNombreDe(deps) });
+    // Un enlace de mapa que no dio ubicación deja su motivo en el registro del
+    // servidor: si no, un fallo que solo pasa allá (Google responde distinto a
+    // un servidor que a una PC) no se puede ver (13/11).
+    if (!r.ok && enlacesDeMapa(t).length) {
+      console.warn('[enlace de mapa] no dio ubicación', { de: message.from, motivo: r.reason, enlace: r.resolvedUrl ?? r.originalUrl ?? null, avisos: r.warnings });
+    }
     return !r.ok && r.reason === 'outside_bbox' ? ({ ok: false, reason: 'no_coordinates_found', warnings: [] } as const) : r;
   };
   const phone = message.from;
