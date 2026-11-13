@@ -16,7 +16,7 @@ import type {
 import { PARSERS, safeDecode, type ParseTarget } from './parsers.js';
 import { enlacesDeLaPagina, needsResolution, resolveShortLink } from './resolve.js';
 import { isAllowedHost } from '../util/net-guard.js';
-import { buscarLugarSinClave, esFtid } from './lugar-sin-clave.js';
+import { buscarLugarSinClaveConMotivo, esFtid } from './lugar-sin-clave.js';
 import { precisionFromDecimals, validate } from './validate.js';
 
 const URL_RE = /\b(?:https?:\/\/|www\.|(?:maps\.app\.)?goo\.gl\/|maps\.google\.[a-z.]{2,6}\/|google\.[a-z.]{2,6}\/maps|maps\.apple\.com\/|(?:ul\.)?waze\.com\/)[^\s<>"']+/gi;
@@ -297,8 +297,14 @@ export async function extractLocation(
     // En las pruebas, nunca contra el Google real: solo con un fetch falso.
     const sinClave = opts.buscarLugarSinClave ?? !(process.env.VITEST && !opts.fetchImpl);
     if (!punto && shouldResolve && sinClave) {
-      punto = await buscarLugarSinClave(texto, lugar.ftid, { timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl }).catch(() => null);
+      const sin = await buscarLugarSinClaveConMotivo(texto, lugar.ftid, { timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl }).catch((error) => ({ punto: null, motivo: String(error) }));
+      punto = sin.punto;
       como = 'en la búsqueda de Google Maps, sin clave';
+      // Sin esto un fallo en el servidor no deja rastro: el motivo va a los avisos (y al registro).
+      if (!punto && sin.motivo) {
+        warnings.push(`no se pudo ubicar el lugar «${texto}» sin clave: ${sin.motivo}`);
+        if (!result.ok) result = { ...result, warnings: [...result.warnings, warnings[warnings.length - 1]!] };
+      }
     }
     if (punto && Number.isFinite(punto.lat) && Number.isFinite(punto.lng)) {
       const enPais = opts.pais ? validate(punto.lat, punto.lng, opts.pais) : null;

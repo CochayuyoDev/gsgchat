@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { direccionDelEnlace, enlacesDeMapa, extractLocation, extractLocationSync, lugarConNombreDelEnlace, placeIdDelEnlace } from '../src/geo/extract.js';
 import { crearGeocodificadorGoogle } from '../src/entregas/geocodificar.js';
-import { buscarLugarSinClave, puntoDelLugar } from '../src/geo/lugar-sin-clave.js';
+import { buscarLugarSinClave, buscarLugarSinClaveConMotivo, puntoDelLugar } from '../src/geo/lugar-sin-clave.js';
 import { clearResolveCache, enlacesDeLaPagina } from '../src/geo/resolve.js';
 import { PERU_BBOX } from '../src/geo/validate.js';
 
@@ -463,5 +463,58 @@ describe('lugar compartido por su nombre, sin clave de Google', () => {
     expect(await buscarLugarSinClave(texto, FTID, { fetchImpl: f })).toEqual({ lat: -12.015631, lng: -77.0805262 });
     expect(pedidas.filter((u) => u === BUSQUEDA)).toHaveLength(1);
     expect(await buscarLugarSinClave(texto, 'no es un ftid', { fetchImpl: f })).toBeNull();
+  });
+});
+
+// 13/11: en producción el enlace de Alemania 2130 no salió y no quedó rastro del
+// porqué. A un servidor Google le responde distinto que a una PC de Perú.
+describe('lugar sin clave: lo que Google le responde a un servidor', () => {
+  afterEach(() => clearResolveCache());
+  const FTID = '0x9105c929739eb98b:0x945c83da233a7ef0';
+  const TEXTO = 'Alemania 2130, Lima 15082';
+  const responde = (r: { status?: number; cuerpo?: string; location?: string }, vistas: RequestInit[] = []) =>
+    (async (_u: string | URL, init?: RequestInit) => {
+      vistas.push(init ?? {});
+      return r.location ? new Response(null, { status: r.status ?? 302, headers: { location: r.location } }) : new Response(r.cuerpo ?? '', { status: r.status ?? 200 });
+    }) as typeof fetch;
+
+  it('manda las cookies de «ya acepté» para que no lo desvíe a la pantalla de cookies', async () => {
+    const vistas: RequestInit[] = [];
+    const real = `)]}'\n[[null,null,-12.0489028,-77.0597519],"${FTID}","Alemania 2130"]`;
+    expect(await buscarLugarSinClave(TEXTO, FTID, { fetchImpl: responde({ cuerpo: real }, vistas) })).toEqual({ lat: -12.0489028, lng: -77.0597519 });
+    expect(new Headers(vistas[0]!.headers).get('cookie')).toMatch(/CONSENT=YES/);
+  });
+
+  it.each([
+    [{ location: 'https://consent.google.com/ml?continue=x' }, /pantalla de cookies/],
+    [{ location: 'https://www.google.com/sorry/index?continue=x' }, /captcha/],
+    [{ status: 429, cuerpo: 'Too Many Requests' }, /captcha/],
+    [{ status: 200, cuerpo: '<html>Our systems have detected unusual traffic</html>' }, /captcha/],
+    [{ status: 200, cuerpo: '<html>otra cosa</html>' }, /formato distinto/],
+    [{ status: 200, cuerpo: `)]}'\n[["otro lugar"]]` }, /no trae ese lugar/],
+    [{ status: 500, cuerpo: 'error' }, /respondió 500/],
+  ])('si Google responde %j, dice por qué no salió', async (r, motivo) => {
+    const res = await buscarLugarSinClaveConMotivo(TEXTO, FTID, { fetchImpl: responde(r) });
+    expect(res.punto).toBeNull();
+    expect(res.motivo).toMatch(motivo);
+  });
+
+  it('sin red también dice por qué', async () => {
+    const res = await buscarLugarSinClaveConMotivo(TEXTO, FTID, { fetchImpl: (async () => { throw new TypeError('fetch failed'); }) as typeof fetch });
+    expect(res).toMatchObject({ punto: null, motivo: expect.stringMatching(/no se pudo preguntar a Google: fetch failed/) });
+  });
+
+  it('el enlace que no salió lleva el motivo en sus avisos (lo que va al registro del servidor)', async () => {
+    const CORTO = 'https://maps.app.goo.gl/89vKKSexr2nkdY2K6?g_st=iw';
+    const FINAL = `https://maps.google.com/?q=Alemania+2130,+Lima+15082&ftid=${FTID}&entry=gps&g_st=iw`;
+    const f = (async (u: string | URL) => {
+      if (String(u) === CORTO) return new Response(null, { status: 302, headers: { location: FINAL } });
+      if (String(u) === FINAL) return new Response('<html></html>');
+      if (String(u).startsWith('https://www.google.com/search')) return new Response(null, { status: 302, headers: { location: 'https://consent.google.com/ml' } });
+      return new Response('no', { status: 404 });
+    }) as typeof fetch;
+    const r = await extractLocation(CORTO, { ...opts, fetchImpl: f });
+    expect(r.ok).toBe(false);
+    expect(r.warnings.join(' ')).toMatch(/Alemania 2130.*pantalla de cookies/);
   });
 });
