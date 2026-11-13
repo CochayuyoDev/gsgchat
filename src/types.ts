@@ -17,7 +17,9 @@ export type CoordSource =
   | 'll_param' // ?ll= ?sll= ?center= ?coordinate=
   | 'geo_uri' // geo:19.4,-99.1
   | 'at_viewport' // @lat,lng,17z : centro del viewport, ultimo recurso
-  | 'address_geocoded'; // el enlace solo traia una direccion (?q=Av. ... 865): se encontro en el mapa con su numero de puerta
+  | 'address_geocoded' // el enlace solo traia una direccion (?q=Av. ... 865): se encontro en el mapa con su numero de puerta
+  | 'place_id' // el enlace solo traia el lugar de Google (place_id, !1sChIJ...): su punto lo dio Google
+  | 'place_search'; // el enlace era un lugar con nombre (?q=Bodega X, Mz D1 Lt 15...&ftid=): Google lo encontro por su nombre
 
 export type Confidence = 'exact' | 'high' | 'medium' | 'low';
 
@@ -91,6 +93,23 @@ export interface ExtractOptions {
    * donde cae esa direccion en el mapa, o null si no se encuentra con seguridad.
    */
   porDireccion?: (direccion: string) => Promise<Coordinates | null>;
+  /**
+   * Un enlace que solo trae el lugar de Google (`query_place_id=`, `place_id:` o
+   * `!1sChIJ...`, sin coordenadas): donde esta ese lugar, o null si no se sabe.
+   */
+  porLugar?: (placeId: string) => Promise<Coordinates | null>;
+  /**
+   * Un enlace de un lugar compartido por su nombre (lo que manda el iPhone:
+   * `?q=Bodega Heidi & Adrian, MZ D1 Lt 15, San Martin de Porres&ftid=0x…`,
+   * sin coordenadas ni place_id): donde esta ese lugar, o null si no se sabe.
+   */
+  porLugarConNombre?: (texto: string) => Promise<Coordinates | null>;
+  /**
+   * Sin clave de Google, un lugar compartido por su nombre se busca como lo hace
+   * la web de Google Maps (src/geo/lugar-sin-clave.ts). Default true (si se
+   * resuelven enlaces); false lo apaga.
+   */
+  buscarLugarSinClave?: boolean;
 }
 
 /** Candidato crudo emitido por un parser, antes de validar. */

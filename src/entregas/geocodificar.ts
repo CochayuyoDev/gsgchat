@@ -31,11 +31,71 @@ export interface ResultadoGeo {
 export interface Geocodificador {
   /** null = no se encontró, no hay red o tardó demasiado: se sigue sin el mapa. */
   buscar(direccion: string, distrito?: string | null): Promise<ResultadoGeo | null>;
+  /**
+   * Donde esta un lugar de Google por su place_id (el de un enlace de Maps sin
+   * coordenadas). Solo lo sabe Google: el buscador libre no lo tiene.
+   */
+  lugar?(placeId: string): Promise<{ lat: number; lng: number; texto: string | null } | null>;
+  /**
+   * Un lugar por su nombre y direccion, como lo comparte el iPhone («Bodega X, Mz D1
+   * Lt 15, San Martin de Porres»). Solo si Google encuentra UN lugar.
+   */
+  lugarPorNombre?(texto: string): Promise<{ lat: number; lng: number; texto: string | null } | null>;
 }
 
 /** Google propone el punto; el servicio exige numeración y confirmación. */
 export function crearGeocodificadorGoogle(apiKey: string, pedir: typeof fetch = fetch): Geocodificador {
-  return { async buscar(direccion, distrito) {
+  /** Un mismo lugar no se le pregunta dos veces a Google (cada consulta se paga). */
+  const lugares = new Map<string, { lat: number; lng: number; texto: string | null } | null>();
+  return { async lugar(placeId) {
+    if (!apiKey.trim() || !/^[A-Za-z0-9_-]{10,400}$/.test(placeId)) return null;
+    if (lugares.has(placeId)) return lugares.get(placeId) ?? null;
+    const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+    url.search = new URLSearchParams({ place_id: placeId, key: apiKey, language: 'es' }).toString();
+    try {
+      const r = await pedir(url, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return null;
+      const body = await r.json() as { status?: string; results?: Array<{ formatted_address?: string; geometry?: { location?: { lat: number; lng: number } } }> };
+      // ZERO_RESULTS o NOT_FOUND: ese lugar no existe (se recuerda). Lo demas es un error pasajero.
+      if (body.status === 'ZERO_RESULTS' || body.status === 'NOT_FOUND') {
+        lugares.set(placeId, null);
+        return null;
+      }
+      const lugar = body.status === 'OK' ? body.results?.[0] : undefined;
+      const punto = lugar?.geometry?.location;
+      if (!punto || !Number.isFinite(punto.lat) || !Number.isFinite(punto.lng) || Math.abs(punto.lat) > 90 || Math.abs(punto.lng) > 180) return null;
+      const res = { lat: punto.lat, lng: punto.lng, texto: lugar?.formatted_address ?? null };
+      if (lugares.size >= 1000) lugares.delete(lugares.keys().next().value!);
+      lugares.set(placeId, res);
+      return res;
+    } catch { return null; }
+  }, async lugarPorNombre(texto) {
+    const limpio = texto.replace(/\s+/g, ' ').trim();
+    if (!apiKey.trim() || !limpio || limpio.length > 200) return null;
+    const clave = `nombre:${limpio.toLowerCase()}`;
+    if (lugares.has(clave)) return lugares.get(clave) ?? null;
+    // Find Place (Places API): el lugar por su nombre, cerca de Lima, en Peru.
+    const url = new URL('https://maps.googleapis.com/maps/api/place/findplacefromtext/json');
+    url.search = new URLSearchParams({ input: limpio, inputtype: 'textquery', fields: 'name,formatted_address,geometry', locationbias: 'circle:80000@-12.05,-77.04', language: 'es', key: apiKey }).toString();
+    try {
+      const r = await pedir(url, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return null;
+      const body = await r.json() as { status?: string; candidates?: Array<{ name?: string; formatted_address?: string; geometry?: { location?: { lat: number; lng: number } } }> };
+      if (body.status === 'ZERO_RESULTS') {
+        lugares.set(clave, null);
+        return null;
+      }
+      // Varios candidatos: no se elige uno (se le pide el pin al cliente).
+      if (body.status !== 'OK' || body.candidates?.length !== 1) return null;
+      const lugar = body.candidates[0]!;
+      const punto = lugar.geometry?.location;
+      if (!punto || !Number.isFinite(punto.lat) || !Number.isFinite(punto.lng) || Math.abs(punto.lat) > 90 || Math.abs(punto.lng) > 180) return null;
+      const res = { lat: punto.lat, lng: punto.lng, texto: [lugar.name, lugar.formatted_address].filter(Boolean).join(', ') || null };
+      if (lugares.size >= 1000) lugares.delete(lugares.keys().next().value!);
+      lugares.set(clave, res);
+      return res;
+    } catch { return null; }
+  }, async buscar(direccion, distrito) {
     if (!apiKey.trim()) return null;
     const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
     url.search = new URLSearchParams({ address: [direccion, distrito, 'Perú'].filter(Boolean).join(', '), key: apiKey, language: 'es', components: 'country:PE' }).toString();

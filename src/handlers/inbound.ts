@@ -75,6 +75,10 @@ import { clasificarConReglas } from '../archive/clasificar.js';
 /** Un enlace que solo trae una dirección: se busca en el mapa (solo vale con número de puerta). */
 const porDireccionDe = (deps: { entregas?: { ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null> } | null }) =>
   deps.entregas ? (direccion: string) => deps.entregas!.ubicarDireccionDeEnlace(direccion) : undefined;
+const porLugarDe = (deps: { entregas?: { ubicarLugarDeEnlace?(placeId: string): Promise<{ lat: number; lng: number } | null> } | null }) =>
+  deps.entregas?.ubicarLugarDeEnlace ? (placeId: string) => deps.entregas!.ubicarLugarDeEnlace!(placeId) : undefined;
+const porLugarConNombreDe = (deps: { entregas?: { ubicarLugarConNombre?(texto: string): Promise<{ lat: number; lng: number } | null> } | null }) =>
+  deps.entregas?.ubicarLugarConNombre ? (texto: string) => deps.entregas!.ubicarLugarConNombre!(texto) : undefined;
 import { horaEnPalabras, horarioEnPalabras, TEXTOS_POR_DEFECTO } from '../entregas/textos.js';
 import type { Solicitud } from '../db/rutas.js';
 import { ID_LINEA_PRINCIPAL } from '../whatsapp/lineas.js';
@@ -852,7 +856,7 @@ async function handleInboundMessageEnFila(
   const { repos, wa, config } = deps;
   // Un enlace de mapa de otra ciudad no se reconoce: ni coordenadas ni respuesta.
   const leerEnlace = async (t: string) => {
-    const r = await extractLocation(t, { bbox: config.bbox, pais: config.pais, porDireccion: porDireccionDe(deps) });
+    const r = await extractLocation(t, { bbox: config.bbox, pais: config.pais, porDireccion: porDireccionDe(deps), porLugar: porLugarDe(deps), porLugarConNombre: porLugarConNombreDe(deps) });
     return !r.ok && r.reason === 'outside_bbox' ? ({ ok: false, reason: 'no_coordinates_found', warnings: [] } as const) : r;
   };
   const phone = message.from;
@@ -1310,24 +1314,6 @@ async function handleInboundMessageEnFila(
     await cerrarChat({ repos, entregas: deps.entregas, ...(deps.entregas?.ahora ? { ahora: () => deps.entregas!.ahora!() } : {}) }, contact, yaTuvoCierre ? 'ubicación registrada (tras el cierre)' : 'ubicación registrada').catch(() => undefined);
   };
 
-  /**
-   * Con la regla del dueño, un pin (o enlace) que cae lejos del distrito de su
-   * pedido no se registra a ciegas: queda propuesto y se le pregunta UNA vez si
-   * es ahí, con botones SÍ / NO (ver entregas.revisarPin). true = ya se atendió.
-   */
-  const pinLejano = async (lat: number, lng: number, mapsUrl: string | null | undefined, fuente: string): Promise<boolean> => {
-    if (!deps.entregas || (!reglaGsg() && !fuente.startsWith('enlace de mapa'))) return false;
-    // Con el bot callado no se le pregunta «¿es ahí?»: el pin se registra y se agradece.
-    if (botCallado()) return false;
-    const r = await deps.entregas.revisarPin(contact, { lat, lng, mapsUrl: mapsUrl ?? null, fuente }).catch((error) => {
-      request_log(deps, 'no se pudo revisar si el pin tiene sentido', error);
-      return { atendida: false as const };
-    });
-    if (!r.atendida) return false;
-    if (r.responder) await responderEntrega(r);
-    return true;
-  };
-
   const askForLocation = (body: string) =>
     sender.send({
       phone,
@@ -1454,9 +1440,6 @@ async function handleInboundMessageEnFila(
       await reply(explicarFallo(result.reason) + seguir);
       return;
     }
-    // El pin tiene que tener sentido (regla del dueño, 25/09): si cae lejos del
-    // distrito de su pedido, no se registra a ciegas; se le pregunta si es ahí.
-    if (await pinLejano(result.lat, result.lng, result.mapsUrl, 'pin de whatsapp')) return;
     const id = await repos.locations.save(contact.id, result, JSON.stringify(message.location));
     await repos.locations.confirm(id);
 
@@ -1674,8 +1657,8 @@ async function handleInboundMessageEnFila(
     if (hecho !== 'seguir') return;
   }
 
-  // Un enlace de mapa lejos del distrito de su pedido: como con el pin, se le pregunta si es ahí.
-  if (result.ok && (await pinLejano(result.lat, result.lng, result.mapsUrl, `enlace de mapa (${result.source})`))) return;
+  // Un enlace de mapa se registra directo, como el pin de WhatsApp: sin
+  // preguntar «¿es ahí?» (pedido del dueño, 13/11).
 
   // Con una solicitud de ubicacion abierta, esto es su respuesta: un enlace
   // de mapa la resuelve, y cualquier otra cosa la aparta para que la mire una

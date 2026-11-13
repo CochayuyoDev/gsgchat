@@ -8,6 +8,7 @@
 
 import { TtlCache } from '../util/cache.js';
 import { assertPublicHost, isAllowedHost, isShortLinkHost } from '../util/net-guard.js';
+import { limpiarCacheLugarSinClave } from './lugar-sin-clave.js';
 
 const cache = new TtlCache<string>();
 
@@ -19,6 +20,8 @@ export interface ResolveOptions {
 
 export function clearResolveCache(): void {
   cache.clear();
+  cacheEnlaces.clear();
+  limpiarCacheLugarSinClave();
 }
 
 export function needsResolution(url: URL): boolean {
