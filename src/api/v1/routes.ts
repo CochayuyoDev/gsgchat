@@ -34,7 +34,7 @@ import { DESCRIPCION_EVENTOS, NOMBRES_EVENTOS, esNombreEvento, type Bus, type No
 
 import { PERMISOS } from '../../auth/permisos.js';
 import { generarSecretoWebhook } from '../../webhooks/firma.js';
-import { entregarUna, type DespachadorDeps } from '../../webhooks/despachador.js';
+import { entregarUna, esMensajeQueNoSalio, type DespachadorDeps } from '../../webhooks/despachador.js';
 import { openApi } from './openapi.js';
 import { confirmacionSchema } from '../../ia/ordenes.js';
 import type { ServicioIA } from '../../ia/servicio.js';
@@ -49,7 +49,7 @@ import { obtenerMedia } from './media-saliente.js';
 import { archivoDeMensaje } from './archivos-gsg.js';
 import { crearIdempotencia } from './idempotencia.js';
 import { entregaDelMensaje, type EntregaDelMensaje } from '../../whatsapp/estado-entrega.js';
-import { camposDeEntrega, entregasDelHilo } from './entrega-mensajes.js';
+import { camposDeEntrega, entregasDelHilo, noSalioPorWhatsapp } from './entrega-mensajes.js';
 
 export interface ApiV1Deps {
   /** Las lineas de WhatsApp: `/estado` dice cada una y «conectado» = queda alguna viva. */
@@ -456,7 +456,9 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
 
   /** El hilo de un contacto: lo comparten la consulta por telefono y la consulta por tracking. */
   const hiloDe = async (contact: NonNullable<Awaited<ReturnType<typeof repos.contacts.getByPhone>>>, q: z.infer<typeof hiloSchema>) => {
-    const messages = await repos.messages.listMessages(contact.id, q.limite, q.antesDe);
+    const pagina = await repos.messages.listMessages(contact.id, q.limite, q.antesDe);
+    // Lo que no salio por WhatsApp no sale afuera, igual que el historial de GSG (regla de GSG, 12/11).
+    const messages = pagina.filter((m) => !noSalioPorWhatsapp(m));
     // Si cada saliente llego al WhatsApp del cliente: igual que el historial de GSG.
     const entregas = await entregasDelHilo(repos, contact.phone, messages);
     const ventanaAbierta = Boolean(contact.lastInboundAt && Date.now() - contact.lastInboundAt.getTime() < 24 * 60 * 60 * 1000);
@@ -491,7 +493,7 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
           ...camposDeEntrega(entregas, m),
         };
       }),
-      hayMas: messages.length === q.limite,
+      hayMas: pagina.length === q.limite,
     };
   };
 
@@ -545,6 +547,8 @@ export async function registerApiV1(app: FastifyInstance, deps: ApiV1Deps): Prom
       return p?.contacto?.telefono ?? null;
     };
     const soltar = bus.escucharTodo((evento: NombreEvento, payload) => {
+      // Lo que no salio por WhatsApp no sale afuera (regla de GSG, 12/11): ver src/webhooks/despachador.ts.
+      if (esMensajeQueNoSalio(evento, payload)) return;
       const tel = telefonoDe(payload);
       // mensaje.estado no trae telefono: pasa siempre (es un doble check).
       if (limite && tel && tel !== limite) return;

@@ -148,7 +148,7 @@ clave de permiso `conversaciones:leer`). Junto a `tracking`, `contacto` y `mensa
 ```
 
 `codigo` y `nombre` son los del catálogo del negocio; `origen` es `ia` (la puso la IA), `manual` (una persona) o
-`reglas` (el bot o el sistema, p. ej. al cambiar el cliente su ubicación o cuando un mensaje no le llegó: `mensaje_no_llego`). Es la **última** nota de ese WhatsApp: si se vuelve a
+`reglas` (el bot o el sistema, p. ej. al cambiar el cliente su ubicación). Es la **última** nota de ese WhatsApp: si se vuelve a
 etiquetar, cambia. `null` si el chat aún no tiene ninguna (o la IA no pudo clasificarlo). En cuanto se guarda,
 GSG la ve en la siguiente llamada: no hay envíos que fallen ni reintentos. Ver `src/api/v1/conversaciones-gsg.ts`
 y la documentación de la API (`/api/v1/openapi.json`).
@@ -182,44 +182,24 @@ Ver `src/api/v1/archivos-gsg.ts`.
 
 ### ¿Le llegó el mensaje al cliente? `llegoAWhatsapp` (11/11)
 
-**Un mensaje en el historial NO significa que le llegó.** GSGchat lo guarda en cuanto el proveedor lo acepta, y
-WhatsApp puede rechazarlo minutos después (más de 24 h sin que el cliente escriba, límite de marketing de Meta,
-número sin WhatsApp…). Pasó el 11/11 con el pedido GSG-E-269342: tres mensajes guardados, ninguno entregado, y GSG
-los pintaba como enviados. Por eso cada mensaje **saliente** del historial trae ahora:
+**Lo que no sale por WhatsApp no sale en GSG (12/11).** Si WhatsApp rechaza un mensaje (más de 24 h sin que el
+cliente escriba, límite de marketing de Meta, número sin WhatsApp…) o GSGchat lo frena, a GSG **no le llega nada**:
 
-```json
-"estado": "failed",
-"llegoAWhatsapp": false,
-"entrega": { "llegoAWhatsapp": false, "estado": "no_entregado",
-             "descripcion": "No le llegó: WhatsApp no se lo entregó al cliente. Pasaron más de 24 horas…",
-             "minutosSinConfirmar": null, "error": { … } },
-"error": { "codigo": "131047", "tipo": "meta", "titulo": "Re-engagement message",
-           "motivo": "Pasaron más de 24 horas…", "queHacer": "Mandar una plantilla aprobada…", "reintentar": "no" }
-```
+- El **historial** no lo trae. Si WhatsApp lo rechaza minutos después de aceptarlo, deja de aparecer en el historial.
+- El webhook **`mensaje.estado`** no se manda para un mensaje que no llegó (`failed`), ni al flujo de eventos.
+- No hay nota «Mensaje no llegó al cliente»: se quitó (la que haya quedado guardada tampoco sale en `nota`).
+- En la **API 4** (`POST /api/v1/chat`) la respuesta dice que no salió (`ok: false` con su error), para que GSG no
+  lo pinte. No queda en el chat de GSG.
+
+GSGchat sí lo sigue viendo por dentro (el chat del panel y «Qué pasó con este mensaje»), y el reparto lo trata como
+siempre (ver «El pedido» más abajo).
+
+Cada mensaje **saliente** del historial trae:
 
 | `llegoAWhatsapp` | `entrega.estado` | Qué pintar en GSG |
 |---|---|---|
 | `true` | `entregado` / `leido` | ✓✓ (le llegó) |
 | `null` | `sin_confirmar` / `enviado` | 🕓 esperando confirmación de WhatsApp |
-| `false` | `no_entregado` | ⚠ **No le llegó**, con `error.motivo` y `error.queHacer`: hay que llamar al cliente |
-
-**La nota «Mensaje no llegó al cliente» (12/11).** Cuando un mensaje no le llega al cliente, el chat queda con
-una nota **por el mismo camino que las notas de la IA** (la `nota` del historial, ver «Las notas de los chats» más
-arriba). GSG no necesita nada nuevo:
-
-```json
-"nota": { "codigo": "mensaje_no_llego", "nombre": "Mensaje no llegó al cliente",
-          "descripcion": "Mensaje no llegó al cliente, por favor comunícate con tu número personal por mensaje o llamada de saldo.",
-          "dia": "2026-11-12", "origen": "reglas", "actualizadaEn": "2026-11-12T15:31:02.000Z" }
-```
-
-- Se pone cuando un mensaje escrito por GSG (API 4) no sale (frenado o rechazado al momento) y cuando WhatsApp avisa
-  después que no entregó un mensaje. Si no se sabe si salió (el proveedor no respondió), no se pone.
-- Es una nota del sistema: no está en el catálogo que la IA usa para clasificar, y no pisa una nota puesta a mano.
-- Como toda nota del chat, es la última: si después la IA o una persona etiquetan el chat, cambia.
-- **Además va empujada**, con la misma forma, para que GSG no tenga que volver a pedir el historial:
-  - en el webhook **`mensaje.estado`** cuando WhatsApp avisa que no lo entregó (`datos.nota`, junto a `llegoAWhatsapp: false`);
-  - en la **respuesta de la API 4** (`POST /api/v1/chat`) cuando el mensaje del motorizado no sale al momento (`nota`).
 
 - Los mensajes del cliente (`entrante`) llevan `llegoAWhatsapp: null` y `entrega: null`.
 - Un `null` que dura mucho lo avisa la propia `descripcion` (desde 30 minutos): teléfono apagado, sin internet o
@@ -228,10 +208,10 @@ arriba). GSG no necesita nada nuevo:
   `llegoAWhatsapp`.
 - Lo mismo sale en `GET /api/v1/conversaciones/{telefono}`.
 - **Al escribir** (`POST /api/v1/chat`): `estado: "enviado"` quiere decir «aceptado». La respuesta trae
-  `llegoAWhatsapp: null` (todavía no se sabe); si quedó frenado o WhatsApp lo rechazó al momento, `false` con el
-  porqué en `entrega.error`; si el proveedor no respondió, `null` y hay que mirar el historial antes de reenviarlo.
-- **El aviso al momento:** el webhook `mensaje.estado` trae `llegoAWhatsapp` y `entrega` en cada cambio; con
-  `failed`, también `error`. Suscribiéndose a él, GSG se entera sin volver a pedir el historial.
+  `llegoAWhatsapp: null` (todavía no se sabe); si quedó frenado o WhatsApp lo rechazó al momento, `ok: false` con el
+  porqué, y GSG no lo pinta; si el proveedor no respondió, `null` y hay que mirar el historial antes de reenviarlo.
+- **El aviso al momento:** el webhook `mensaje.estado` trae `llegoAWhatsapp` y `entrega` cuando el mensaje llegó o
+  se leyó. Si WhatsApp lo rechaza (`failed`), no se manda: el mensaje simplemente desaparece del historial.
 - **El pedido:** si el mensaje que no llegó era del reparto, ya no cuenta como intento: el pedido pasa a
   incidencia con el motivo (llega como cualquier incidencia del reparto) y el primer mensaje del pedido
   (`mensaje.estado` en `GET /api/v1/entregas`) queda `fallido`, con «Reintentar». Si fue un fallo pasajero de
@@ -426,23 +406,33 @@ Lo que hay que hacer en la base al desplegarlo: `docs/MIGRACIONES-ETIQUETAS.md`.
 El sistema de rutas de GSG avisa a GSGchat cuando una ruta cambia de estado. Se configura y se ve en
 **Nuestra API → Webhook de rutas** (dirección, secreto, prueba, rutas con chats cerrados y bitácora).
 
-**Para qué:** si una ruta pasa a **inactiva o finalizada**, los chats de sus clientes se **cierran**: no sale ningún
-mensaje a esos clientes, ni automático ni escrito a mano (Chats o la API 4), y no se gasta en pedidos que ya no
-van. Si la ruta vuelve a **en ruta, activa** o a cualquier otro estado, los chats se **abren solos** y lo que estaba
-esperando (el pedido de ubicación, un recordatorio) sigue.
+**Los estados (acordado con GSG, 12/11).** GSG manda solo cuatro:
+
+| Estado | Qué hace con el chat |
+|---|---|
+| `INACTIVO` | Lo **cierra**: no sale ningún mensaje a ese cliente, ni automático ni escrito a mano (Chats o la API 4), y no se gasta en un pedido que ya no va. |
+| `RECHAZADO` | **No lo cierra**: sigue la regla de las 24 horas, como cualquier chat. |
+| `ENTREGADO` | **No lo cierra**: regla de las 24 horas. |
+| `CANCELADO` | **No lo cierra**: regla de las 24 horas. |
+| Cualquier otro (p. ej. `EN RUTA`) | Un operador corrigió una ruta que estaba en uno de los cuatro: quiere decir **«la ruta volvió a estar activa»**. Si el chat estaba cerrado, se **abre solo** y lo que estaba esperando (el pedido de ubicación, un recordatorio) sigue. |
+
+- Da igual mayúsculas, tildes o `_` (`Inactivo`, `inactiva`, `EN_RUTA`).
+- Si una ruta pasa de `INACTIVO` a `RECHAZADO`, `ENTREGADO` o `CANCELADO`, deja de cerrar el chat (ninguno de los
+  tres lo bloquea), pero no despierta lo automático: el pedido ya terminó.
+- Sin el aviso de «volvió a estar activa», un chat cerrado por `INACTIVO` se quedaría cerrado aunque el pedido siga.
 
 ```http
 POST https://<gsgchat>/tienda/<tienda>/api/v1/rutas/estado
 x-webhook-secret: whr_…
 Content-Type: application/json
 
-{ "ruta": "GSG123456", "estado": "INACTIVA", "fecha": "2026-11-12T15:30:00-05:00" }
+{ "ruta": "GSG123456", "estado": "INACTIVO", "fecha": "2026-11-12T15:30:00-05:00" }
 ```
 
 | Campo | Obligatorio | Qué es |
 |---|---|---|
 | `ruta` | Sí | El código de ruta: es el **tracking** del pedido, el mismo `tracking` de la API 1 (alias: `idRuta`, `codigoRuta`, `rutaId`). Es lo único que identifica la ruta. |
-| `estado` | Sí | El estado nuevo, como lo llama GSG. Cierran: inactiva, finalizada, cerrada, terminada, cancelada, anulada, completada, suspendida (sin importar tildes, mayúsculas ni `_`). Cualquier otro abre. |
+| `estado` | Sí | `INACTIVO` (cierra), `RECHAZADO`, `ENTREGADO` o `CANCELADO` (no cierran); cualquier otro = la ruta volvió a estar activa (abre). Ver la tabla de arriba. |
 | `fecha` | No (recomendado) | Cuándo cambió (ISO 8601). Un aviso más viejo que el último aplicado a esa ruta se ignora. |
 
 Se acepta un aviso o una lista (hasta 200).

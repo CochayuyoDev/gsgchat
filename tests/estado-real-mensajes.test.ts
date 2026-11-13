@@ -8,8 +8,9 @@
  * que había que llamarla.
  *
  * Aquí se fija lo que tiene que pasar ahora:
- *  - la API dice en cada mensaje si llegó (`llegoAWhatsapp`: true / false / null)
- *    y por qué no, en el historial, en el hilo, al enviar y en el evento;
+ *  - la API dice en cada mensaje si llegó (`llegoAWhatsapp`: true / null); lo
+ *    que no llegó no sale a GSG (regla de GSG, 12/11): desaparece del historial
+ *    y del hilo, y su mensaje.estado no se encola a los webhooks;
  *  - un acuse que llega antes que el mensaje no se pierde;
  *  - volver a guardar un mensaje no le baja el estado;
  *  - el reparto no cuenta como intento un mensaje que no llegó y lo pasa a
@@ -28,6 +29,7 @@ import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from
 import { generarClaveApi, hashClaveApi, prefijoDeClave } from '../src/auth/claves-api.js';
 import { mensajeNoLlego, vigilarMensajesNoEntregados } from '../src/rutas/no-llego.js';
 import { respuestaDeEnvio } from '../src/api/v1/routes.js';
+import { encolarEventos, esMensajeQueNoSalio } from '../src/webhooks/despachador.js';
 import type { Repos } from '../src/db/repos.js';
 
 const ahora = new Date('2026-11-11T19:00:00Z');
@@ -165,6 +167,43 @@ describe('el evento mensaje.estado dice si llegó', () => {
     await processChange('messages', { statuses: [{ id: r2.wamid, status: 'delivered', timestamp: '1', recipient_id: '51900222333' }] }, { repos, settings: { current: () => ({ phoneNumberId: 'PNID' }) } } as never);
     expect(vistos.at(-1)).toMatchObject({ mensajeId: r2.wamid, llegoAWhatsapp: true, entrega: { estado: 'entregado' } });
   });
+
+  it('el failed se queda dentro: no se encola a los webhooks (GSG) y no lleva nota; el delivered sí sale', async () => {
+    const bus = crearBus();
+    const encolados: Array<{ evento: string; payload: Record<string, unknown> }> = [];
+    const repoWebhooks = {
+      activosPara: async () => [{ id: 1 }],
+      encolar: async (_id: number, evento: string, payload: Record<string, unknown>) => void encolados.push({ evento, payload }),
+    } as never;
+    const soltar = encolarEventos(bus, repoWebhooks);
+    const base = createFakeRepos();
+    const repos = observarRepos(base, bus);
+    const wa = createFakeWhatsApp();
+    const sender = createSender({ repos: base, wa, phoneNumberId: 'PNID', warmup: { startPerDay: 50, growth: 1.5, hardCap: 1000 }, maxMarketingPerContact7d: 2, serviceWindowApplies: false });
+    await base.contacts.upsertFromInbound('51900222334');
+    const r = await sender.send({ phone: '51900222334', kind: 'freeform', category: 'UTILITY', text: 'hola', manual: true });
+    if (!r.ok) throw new Error('no salió');
+    await processChange('messages', fallo(r.wamid, '51900222334', 131047, 'Re-engagement message'), { repos, settings: { current: () => ({ phoneNumberId: 'PNID' }) } } as never);
+    await new Promise((res) => setTimeout(res, 20));
+    expect(encolados.filter((x) => x.evento === 'mensaje.estado')).toHaveLength(0);
+    const r2 = await sender.send({ phone: '51900222334', kind: 'freeform', category: 'UTILITY', text: 'otra', manual: true });
+    if (!r2.ok) throw new Error('no salió');
+    await processChange('messages', { statuses: [{ id: r2.wamid, status: 'delivered', timestamp: '1', recipient_id: '51900222334' }] }, { repos, settings: { current: () => ({ phoneNumberId: 'PNID' }) } } as never);
+    await new Promise((res) => setTimeout(res, 20));
+    const estados = encolados.filter((x) => x.evento === 'mensaje.estado');
+    expect(estados).toHaveLength(1);
+    expect(estados[0]!.payload).toMatchObject({ mensajeId: r2.wamid, llegoAWhatsapp: true });
+    expect(JSON.stringify(encolados)).not.toMatch(/mensaje_no_llego|no llegó al cliente/i);
+    soltar();
+  });
+
+  it('esMensajeQueNoSalio: solo los mensaje.estado que no llegaron', () => {
+    expect(esMensajeQueNoSalio('mensaje.estado', { estado: 'failed', llegoAWhatsapp: false })).toBe(true);
+    expect(esMensajeQueNoSalio('mensaje.estado', { estado: 'blocked_by_gate', llegoAWhatsapp: null })).toBe(true);
+    expect(esMensajeQueNoSalio('mensaje.estado', { estado: 'delivered', llegoAWhatsapp: true })).toBe(false);
+    expect(esMensajeQueNoSalio('mensaje.estado', { estado: 'sent', llegoAWhatsapp: null })).toBe(false);
+    expect(esMensajeQueNoSalio('mensaje.enviado', { estado: 'failed' })).toBe(false);
+  });
 });
 
 describe('el caso del 11/11 de punta a punta: pedido de GSG, Meta no entrega', () => {
@@ -205,7 +244,7 @@ describe('el caso del 11/11 de punta a punta: pedido de GSG, Meta no entrega', (
     expect(s).toMatchObject({ estado: 'enviado', intentos: 1 });
   });
 
-  it('Meta avisa que no lo entregó: el historial dice «no llegó» con el motivo, y el pedido no cuenta ese intento', async () => {
+  it('Meta avisa que no lo entregó: desaparece del historial de GSG (sin nota), y el pedido no cuenta ese intento', async () => {
     const s = (await solicitud())!;
     const eventos = await e.repos.rutas.eventos(s.id);
     const wamid = String(eventos.find((x) => x.tipo === 'envio')!.payload!.wamid);
@@ -213,10 +252,16 @@ describe('el caso del 11/11 de punta a punta: pedido de GSG, Meta no entrega', (
     wamidFallido = wamid;
     await processChange('messages', fallo(wamid, PHONE, 131047, 'Re-engagement message'), { repos, settings: e.settings } as never);
 
+    // Regla de GSG (12/11): si no sale en WhatsApp, no sale en GSG. Ni el mensaje ni una nota.
     const h = await historial();
-    const m = h.mensajes.find((x: any) => x.id === wamid);
-    expect(m).toMatchObject({ llegoAWhatsapp: false, entrega: { estado: 'no_entregado' }, error: { codigo: '131047', reintentar: 'no' } });
-    expect(m.entrega.descripcion).toMatch(/No le llegó/);
+    expect(h.mensajes.find((x: any) => x.id === wamid)).toBeUndefined();
+    expect(h.mensajes.some((x: any) => x.llegoAWhatsapp === false)).toBe(false);
+    expect(h.nota?.codigo ?? null).not.toBe('mensaje_no_llego');
+    // Ni en el hilo por teléfono de la API.
+    const hilo = (await e.app.inject({ method: 'GET', url: `/api/v1/conversaciones/${PHONE}`, headers: { 'x-api-key': clave } })).json();
+    expect(hilo.mensajes.find((x: any) => x.mensajeId === wamid)).toBeUndefined();
+    // GSGchat sí lo sigue guardando (su chat y «Qué pasó» lo muestran).
+    expect(e.repos.messages._all.find((x) => x.wamid === wamid)).toMatchObject({ status: 'failed' });
 
     // El reparto: no es «no contestó», es una incidencia con el motivo, y el intento no cuenta.
     await hasta(async () => (await e.repos.rutas.solicitud(s.id))?.estado === 'incidencia');

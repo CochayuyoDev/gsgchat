@@ -586,7 +586,7 @@ export function createSender(deps: SenderDeps): Sender {
       }
 
       // Webhook de estados de rutas (src/rutas-gsg): la ruta del cliente esta
-      // inactiva o finalizada y su chat quedo cerrado. No sale NADA, ni lo
+      // INACTIVO y su chat quedo cerrado. No sale NADA, ni lo
       // automatico ni lo escrito a mano: no se gasta en un pedido que ya no
       // va. Se abre solo cuando GSG avisa que la ruta vuelve a estar activa.
       const bloqueoRuta = await repos.rutasGsg?.bloqueoDe(contact.id).catch(() => null);

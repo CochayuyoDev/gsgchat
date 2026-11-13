@@ -1,18 +1,24 @@
 /**
  * Webhook de estados de rutas (pedido de GSG, 12/11).
  *
- * El sistema de rutas de GSG avisa cuando una ruta cambia de estado:
+ * El sistema de rutas de GSG avisa cuando una ruta cambia de estado. GSG manda
+ * solo CUATRO estados (acuerdo con GSG, 12/11), y un quinto caso:
  *
- *   - Inactiva o finalizada (y sus parecidos: cerrada, terminada, cancelada,
- *     anulada, completada, suspendida): los chats de los clientes de esa ruta
- *     se CIERRAN. El emisor (src/outbound/sender.ts) no deja salir NINGUN
- *     mensaje a un chat cerrado, ni automatico ni escrito a mano: no se gasta.
- *   - En ruta, activa o cualquier otro estado: esos chats se ABREN solos y lo
- *     que estaba esperando (el pedido de ubicacion, un recordatorio) sigue.
+ *   - INACTIVO: los chats de los clientes de esa ruta se CIERRAN. El emisor
+ *     (src/outbound/sender.ts) no deja salir NINGUN mensaje a un chat cerrado,
+ *     ni automatico ni escrito a mano: no se gasta.
+ *   - RECHAZADO, ENTREGADO y CANCELADO: NO cierran el chat. Sigue la regla de
+ *     siempre, la ventana de 24 h (src/outbound/gates.ts). Si estaba cerrado
+ *     por un INACTIVO anterior, deja de estarlo. Lo automatico que esperaba
+ *     no se despierta: el pedido ya termino.
+ *   - Cualquier otro estado (EN RUTA, ACTIVA…): un operador corrigio una ruta
+ *     que estaba en uno de los cuatro. Quiere decir «la ruta volvio a estar
+ *     activa»: si el chat estaba cerrado se ABRE, y lo que estaba esperando
+ *     (el pedido de ubicacion, un recordatorio) sigue.
  *
  * Contrato (POST /api/v1/rutas/estado, header x-webhook-secret):
  *
- *   { "ruta": "GSG123456", "estado": "INACTIVA", "fecha": "2026-11-12T15:30:00-05:00" }
+ *   { "ruta": "GSG123456", "estado": "INACTIVO", "fecha": "2026-11-12T15:30:00-05:00" }
  *
  *   - `ruta`: el codigo de ruta, que es el TRACKING del pedido (el mismo
  *     `tracking` de la API 1; pedido del dueño, 12/11). Es lo unico que
@@ -36,13 +42,23 @@ import type { EventoRuta, ResultadoAvisoRuta } from './repo.js';
 import { despertarMotorRutas } from '../rutas/despertador.js';
 import { limpiarEsperasEnvio } from '../rutas/espera-envio.js';
 
-/** Los estados que cierran el chat (sin tildes, en minusculas). Cualquier otro lo abre. */
-export const ESTADOS_QUE_CIERRAN = [
-  'inactiva', 'inactivo', 'finalizada', 'finalizado', 'cerrada', 'cerrado', 'terminada', 'terminado',
-  'cancelada', 'cancelado', 'anulada', 'anulado', 'completada', 'completado', 'suspendida', 'suspendido',
-] as const;
+/** El estado que cierra el chat (sin tildes, en minusculas; se acepta tambien en femenino). */
+export const ESTADOS_QUE_CIERRAN = ['inactivo', 'inactiva'] as const;
 
-/** «En Ruta» → «en ruta»; «FINALIZADA» → «finalizada»; «no_activa» → «no activa». */
+/** Los estados finales que NO cierran el chat: siguen la regla de 24 h. */
+export const ESTADOS_FINALES = ['rechazado', 'rechazada', 'entregado', 'entregada', 'cancelado', 'cancelada'] as const;
+
+/** Los cuatro estados que manda GSG, como los escribe GSG. */
+export const ESTADOS_GSG = ['INACTIVO', 'RECHAZADO', 'ENTREGADO', 'CANCELADO'] as const;
+
+/**
+ * Que hace un estado: `cierra` (INACTIVO), `final` (RECHAZADO, ENTREGADO,
+ * CANCELADO: no cierra, regla de 24 h) o `activa` (cualquier otro: la ruta
+ * volvio a estar activa).
+ */
+export type EfectoEstado = 'cierra' | 'final' | 'activa';
+
+/** «En Ruta» → «en ruta»; «INACTIVO» → «inactivo»; «en_ruta» → «en ruta». */
 export function normalizarEstado(estado: string): string {
   return estado
     .normalize('NFD')
@@ -53,10 +69,16 @@ export function normalizarEstado(estado: string): string {
     .trim();
 }
 
-/** Si ese estado cierra los chats de la ruta. */
-export function estadoCierra(estado: string): boolean {
+export function efectoDeEstado(estado: string): EfectoEstado {
   const n = normalizarEstado(estado);
-  return (ESTADOS_QUE_CIERRAN as readonly string[]).includes(n) || n === 'no activa' || n === 'no activo';
+  if ((ESTADOS_QUE_CIERRAN as readonly string[]).includes(n)) return 'cierra';
+  if ((ESTADOS_FINALES as readonly string[]).includes(n)) return 'final';
+  return 'activa';
+}
+
+/** Si ese estado cierra los chats de la ruta (solo INACTIVO). */
+export function estadoCierra(estado: string): boolean {
+  return efectoDeEstado(estado) === 'cierra';
 }
 
 const texto = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
@@ -94,7 +116,7 @@ export function leerAvisos(cuerpo: unknown, ahora: Date): { avisos: AvisoRuta[] 
     const ruta = a.ruta || a.idRuta || a.codigoRuta || a.rutaId || a.routeId || a.route_id || '';
     const estado = a.estado || a.status || a.state || '';
     const fechaTexto = a.fecha || a.fechaCambio || a.fecha_cambio || a.changedAt || a.timestamp || '';
-    if (!estado) return { error: 'Falta el estado nuevo de la ruta (campo "estado"), por ejemplo "INACTIVA" o "EN RUTA".', campo: `${donde}estado` };
+    if (!estado) return { error: 'Falta el estado nuevo de la ruta (campo "estado"): INACTIVO, RECHAZADO, ENTREGADO o CANCELADO (o el estado nuevo si la ruta volvió a estar activa, p. ej. "EN RUTA").', campo: `${donde}estado` };
     if (estado.length > 60) return { error: 'El estado es demasiado largo (60 caracteres como mucho).', campo: `${donde}estado` };
     if (!ruta) return { error: 'Falta el código de ruta (campo "ruta"): el tracking del pedido, por ejemplo "GSG123456".', campo: `${donde}ruta` };
     if (ruta.length > 120) return { error: 'El código de la ruta es demasiado largo (120 caracteres como mucho).', campo: `${donde}ruta` };
@@ -138,7 +160,7 @@ export interface ResultadoAviso {
 }
 
 export interface ServicioRutasGsg {
-  /** Aplica un aviso (cierra o abre los chats). Nunca lanza: el error vuelve en el resultado. */
+  /** Aplica un aviso (cierra, deja abierto o reabre los chats). Nunca lanza: el error vuelve en el resultado. */
   aplicar(aviso: AvisoRuta, opciones?: { prueba?: boolean }): Promise<ResultadoAviso>;
   /** Anota el aviso, lo procesa detras y devuelve su id en la bitacora (para contestar al momento). */
   recibir(aviso: AvisoRuta, opciones?: { prueba?: boolean }): Promise<{ id: number; procesado: Promise<ResultadoAviso> }>;
@@ -177,7 +199,8 @@ export function crearServicioRutasGsg(deps: DepsRutasGsg): ServicioRutasGsg {
 
   async function aplicar(aviso: AvisoRuta, opciones: { prueba?: boolean } = {}): Promise<ResultadoAviso> {
     try {
-      const cierra = estadoCierra(aviso.estado);
+      const efecto = efectoDeEstado(aviso.estado);
+      const cierra = efecto === 'cierra';
       const ruta = aviso.ruta;
       const prueba = opciones.prueba ? ' (prueba desde Nuestra API)' : '';
       const antes = await repos.rutasGsg.ruta(ruta);
@@ -194,11 +217,15 @@ export function crearServicioRutasGsg(deps: DepsRutasGsg): ServicioRutasGsg {
         }
         const cerrados = contactos.length ? await repos.rutasGsg.bloquear(contactos, ruta, aviso.estado, aviso.fecha) : 0;
         for (const e of pedidos) {
-          await repos.entregas.registrarEvento(e.id, 'nota', `Chat cerrado: la ruta ${ruta} pasó a «${aviso.estado}». No sale ningún mensaje a este cliente hasta que la ruta vuelva a estar activa.${prueba}`, { rutaGsg: ruta, estado: aviso.estado, cierra: true }).catch(() => undefined);
+          await repos.entregas.registrarEvento(e.id, 'nota', `Chat cerrado: la ruta ${ruta} pasó a «${aviso.estado}». No sale ningún mensaje a este cliente hasta que la ruta vuelva a estar activa.${prueba}`, { rutaGsg: ruta, estado: aviso.estado, cierra: true, efecto }).catch(() => undefined);
         }
         if (!pedidos.length) return { resultado: 'sin_pedidos', detalle: `Cierra los chats. ${ruta}: todavía no hay pedidos con esa ruta; el estado queda guardado y los que lleguen entran con su chat cerrado.`, chats: 0 };
         return { resultado: 'aplicado', detalle: `Cierra los chats. ${ruta}: ${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'}, ${cerrados} chat${cerrados === 1 ? '' : 's'} cerrado${cerrados === 1 ? '' : 's'}.`, chats: new Set(contactos).size };
       }
+      // RECHAZADO, ENTREGADO o CANCELADO no cierran: el chat sigue con la regla de
+      // 24 h. Si un INACTIVO anterior lo habia cerrado, ese cierre se quita.
+      // Cualquier otro estado: la ruta volvio a estar activa y se reabre.
+      const final = efecto === 'final';
       const abiertos = await repos.rutasGsg.desbloquear(ruta);
       // Los que siguen cerrados por otra ruta no se cuentan como abiertos.
       const delTodo: string[] = [];
@@ -209,13 +236,27 @@ export function crearServicioRutasGsg(deps: DepsRutasGsg): ServicioRutasGsg {
         if (c?.phone) phones.push(c.phone);
       }
       for (const e of pedidos) {
+        if (final) {
+          // Se anota en cada pedido de la ruta: el chat no se cierra y por que.
+          const reabierto = Boolean(e.phone && phones.includes(e.phone));
+          await repos.entregas.registrarEvento(e.id, 'nota', `La ruta ${ruta} pasó a «${aviso.estado}»: el chat no se cierra y sigue la regla de 24 horas${reabierto ? ' (estaba cerrado por un «inactivo» anterior: ya no)' : ''}.${prueba}`, { rutaGsg: ruta, estado: aviso.estado, cierra: false, efecto }).catch(() => undefined);
+          continue;
+        }
         if (!e.phone || !phones.includes(e.phone)) continue;
-        await repos.entregas.registrarEvento(e.id, 'nota', `Chat abierto de nuevo: la ruta ${ruta} pasó a «${aviso.estado}».${prueba}`, { rutaGsg: ruta, estado: aviso.estado, cierra: false }).catch(() => undefined);
+        await repos.entregas.registrarEvento(e.id, 'nota', `Chat abierto de nuevo: la ruta ${ruta} volvió a estar activa («${aviso.estado}»).${prueba}`, { rutaGsg: ruta, estado: aviso.estado, cierra: false, efecto }).catch(() => undefined);
       }
-      if (phones.length) await reanudar(phones);
-      if (!pedidos.length && !abiertos.length) return { resultado: 'sin_pedidos', detalle: `Abre los chats. ${ruta}: no tenía chats cerrados ni pedidos todavía; el estado queda guardado.`, chats: 0 };
+      // Solo una ruta que volvio a estar activa despierta lo que esperaba; un pedido
+      // rechazado, entregado o cancelado ya no necesita el pedido de ubicacion.
+      if (phones.length && !final) await reanudar(phones);
       const siguen = abiertos.length - delTodo.length;
-      return { resultado: 'aplicado', detalle: `Abre los chats. ${ruta}: ${delTodo.length} chat${delTodo.length === 1 ? '' : 's'} abierto${delTodo.length === 1 ? '' : 's'}${siguen ? ` (${siguen} sigue${siguen === 1 ? '' : 'n'} cerrado${siguen === 1 ? '' : 's'} por otra ruta)` : ''}.`, chats: delTodo.length };
+      const otraRuta = siguen ? ` (${siguen} sigue${siguen === 1 ? '' : 'n'} cerrado${siguen === 1 ? '' : 's'} por otra ruta)` : '';
+      if (final) {
+        const quitados = delTodo.length ? ` Se quitó el cierre de ${delTodo.length} chat${delTodo.length === 1 ? '' : 's'} que un «inactivo» anterior había cerrado${otraRuta}.` : '';
+        if (!pedidos.length && !abiertos.length) return { resultado: 'sin_pedidos', detalle: `No cierra el chat (regla de 24 h). ${ruta}: todavía no hay pedidos con esa ruta; el estado queda guardado.`, chats: 0 };
+        return { resultado: 'aplicado', detalle: `No cierra el chat (regla de 24 h). ${ruta}: ${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'}.${quitados}`, chats: delTodo.length };
+      }
+      if (!pedidos.length && !abiertos.length) return { resultado: 'sin_pedidos', detalle: `La ruta volvió a estar activa. ${ruta}: no tenía chats cerrados ni pedidos todavía; el estado queda guardado.`, chats: 0 };
+      return { resultado: 'aplicado', detalle: `La ruta volvió a estar activa: abre los chats. ${ruta}: ${delTodo.length} chat${delTodo.length === 1 ? '' : 's'} abierto${delTodo.length === 1 ? '' : 's'}${otraRuta}.`, chats: delTodo.length };
     } catch (error) {
       log('no se pudo aplicar un aviso de ruta', { ruta: aviso.ruta, detalle: String(error) });
       return { resultado: 'error', detalle: `No se pudo aplicar: ${error instanceof Error ? error.message : String(error)}`, chats: 0 };

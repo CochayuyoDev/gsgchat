@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, type EscenarioEntregas } from './escenario-entregas.js';
-import { estadoCierra, huellaSecreto, leerAvisos } from '../src/rutas-gsg/servicio.js';
+import { efectoDeEstado, estadoCierra, huellaSecreto, leerAvisos } from '../src/rutas-gsg/servicio.js';
 import { loadConfig } from '../src/config.js';
 import { hashClave } from '../src/auth/usuarios.js';
 import { COOKIE_SESION, firmarSesion } from '../src/auth/sesion.js';
@@ -38,9 +38,20 @@ async function procesado(e: EscenarioEntregas) {
 const contactoDe = async (e: EscenarioEntregas, telefono: string) => (await e.repos.contacts.getByPhone(`51${telefono}`))!;
 
 describe('estados que cierran', () => {
-  it('inactiva, finalizada y sus parecidos cierran; en ruta, activa y lo demás abren', () => {
-    for (const x of ['INACTIVA', 'Inactivo', 'FINALIZADA', 'finalizado', 'Cerrada', 'TERMINADA', 'Cancelada', 'no_activa', 'Completada']) expect(estadoCierra(x)).toBe(true);
-    for (const x of ['EN RUTA', 'En_Ruta', 'ACTIVA', 'Activo', 'PROGRAMADA', 'en camino', 'REACTIVADA A MANO (Ali)']) expect(estadoCierra(x)).toBe(false);
+  it('solo INACTIVO cierra; RECHAZADO, ENTREGADO y CANCELADO no; cualquier otro es «volvió a estar activa»', () => {
+    for (const x of ['INACTIVO', 'Inactivo', 'inactiva', 'INACTIVA']) {
+      expect(estadoCierra(x)).toBe(true);
+      expect(efectoDeEstado(x)).toBe('cierra');
+    }
+    for (const x of ['RECHAZADO', 'Entregado', 'CANCELADO', 'cancelada', 'entregada']) {
+      expect(estadoCierra(x)).toBe(false);
+      expect(efectoDeEstado(x)).toBe('final');
+    }
+    // Los de antes (finalizada, cerrada, completada…) ya no cierran: GSG solo manda los cuatro.
+    for (const x of ['EN RUTA', 'En_Ruta', 'ACTIVA', 'PROGRAMADA', 'FINALIZADA', 'Cerrada', 'Completada', 'REACTIVADA A MANO (Ali)']) {
+      expect(estadoCierra(x)).toBe(false);
+      expect(efectoDeEstado(x)).toBe('activa');
+    }
   });
 
   it('lee el aviso con sus alias y explica lo que falta', () => {
@@ -124,6 +135,72 @@ describe('POST /api/v1/rutas/estado', () => {
       e.avanzar(11);
       await e.trabajar();
       expect(e.mensajesA(tel).length).toBeGreaterThan(0);
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  for (const estado of ['RECHAZADO', 'ENTREGADO', 'CANCELADO']) {
+    it(`«${estado}» no cierra el chat: sigue la regla de 24 horas y queda en la bitácora`, async () => {
+      const e = await crearEscenarioEntregas();
+      try {
+        await conSecreto(e);
+        await e.api.post('/api/v1/entregas', pedido());
+        await avisar(e, { ruta: 'R-100', estado, fecha: e.ahora().toISOString() });
+        const ev = await procesado(e);
+        expect(ev).toMatchObject({ resultado: 'aplicado', chats: 0 });
+        expect(ev.detalle).toMatch(/No cierra el chat \(regla de 24 h\)/);
+        const c = await contactoDe(e, tel);
+        expect(await e.repos.rutasGsg.bloqueoDe(c.id)).toBeNull();
+        expect(await e.repos.rutasGsg.ruta('R-100')).toMatchObject({ estado, activa: true });
+        const pedidoGuardado = (await e.repos.entregas.porTracking('R-100'))!;
+        const eventos = await e.repos.entregas.eventos(pedidoGuardado.id);
+        expect(eventos.some((x) => new RegExp(`La ruta R-100 pasó a «${estado}»: el chat no se cierra y sigue la regla de 24 horas`).test(x.detalle ?? ''))).toBe(true);
+        // Un pedido que llega despues con esa ruta no entra cerrado.
+        await e.api.post('/api/v1/entregas', pedido({ tracking: 'R-100', cliente: 'Otro' }));
+        expect(await e.repos.rutasGsg.bloqueoDe(c.id)).toBeNull();
+      } finally {
+        await e.cerrar();
+      }
+    });
+  }
+
+  it('de INACTIVO a ENTREGADO el chat deja de estar cerrado (ninguno de los tres bloquea)', async () => {
+    const e = await crearEscenarioEntregas();
+    try {
+      await conSecreto(e);
+      await e.api.post('/api/v1/entregas', pedido());
+      await avisar(e, { ruta: 'R-100', estado: 'INACTIVO', fecha: e.ahora().toISOString() });
+      await procesado(e);
+      const c = await contactoDe(e, tel);
+      expect(await e.repos.rutasGsg.bloqueoDe(c.id)).not.toBeNull();
+      e.avanzar(1);
+      await avisar(e, { ruta: 'R-100', estado: 'ENTREGADO', fecha: e.ahora().toISOString() });
+      const ev = await procesado(e);
+      expect(ev).toMatchObject({ resultado: 'aplicado', chats: 1 });
+      expect(ev.detalle).toMatch(/Se quitó el cierre de 1 chat/);
+      expect(await e.repos.rutasGsg.bloqueoDe(c.id)).toBeNull();
+    } finally {
+      await e.cerrar();
+    }
+  });
+
+  it('el aviso de corrección (de INACTIVO a cualquier otro estado) reabre el chat como «la ruta volvió a estar activa»', async () => {
+    const e = await crearEscenarioEntregas();
+    try {
+      await conSecreto(e);
+      await e.api.post('/api/v1/entregas', pedido());
+      await avisar(e, { ruta: 'R-100', estado: 'INACTIVO', fecha: e.ahora().toISOString() });
+      await procesado(e);
+      e.avanzar(1);
+      await avisar(e, { ruta: 'R-100', estado: 'PROGRAMADA', fecha: e.ahora().toISOString() });
+      const ev = await procesado(e);
+      expect(ev).toMatchObject({ resultado: 'aplicado', chats: 1 });
+      expect(ev.detalle).toMatch(/La ruta volvió a estar activa/);
+      expect(await e.repos.rutasGsg.bloqueoDe((await contactoDe(e, tel)).id)).toBeNull();
+      const pedidoGuardado = (await e.repos.entregas.porTracking('R-100'))!;
+      const eventos = await e.repos.entregas.eventos(pedidoGuardado.id);
+      expect(eventos.some((x) => /Chat abierto de nuevo: la ruta R-100 volvió a estar activa \(«PROGRAMADA»\)/.test(x.detalle ?? ''))).toBe(true);
     } finally {
       await e.cerrar();
     }
@@ -231,11 +308,11 @@ describe('la pestaña «Webhook de rutas» (Nuestra API)', () => {
       await e.repos.messages.add({ contactId: c.id, direction: 'out', kind: 'text', wamid: 'ruta.primer-mensaje', body: '¿Nos comparte su ubicación?', payload: { origen: 'sistema' } });
       const antes = (await e.app.inject({ url: `/admin/chat/${c.id}?limit=30`, headers: { cookie } })).json();
       expect(antes).toMatchObject({ canWrite: true, rutaCerrada: null });
-      await avisar(e, { ruta: 'R-100', estado: 'FINALIZADA' });
+      await avisar(e, { ruta: 'R-100', estado: 'INACTIVO' });
       await procesado(e);
       const hilo = await e.app.inject({ url: `/admin/chat/${c.id}?limit=30`, headers: { cookie } });
       expect(hilo.statusCode).toBe(200);
-      expect(hilo.json()).toMatchObject({ canWrite: false, blockedReason: 'chat cerrado: ruta inactiva', rutaCerrada: { ruta: 'R-100', estado: 'FINALIZADA' } });
+      expect(hilo.json()).toMatchObject({ canWrite: false, blockedReason: 'chat cerrado: ruta inactiva', rutaCerrada: { ruta: 'R-100', estado: 'INACTIVO' } });
     } finally {
       await e.cerrar();
     }

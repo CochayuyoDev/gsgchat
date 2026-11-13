@@ -49,6 +49,13 @@ export function entregaParaApi(
 const noLlego = (status: string | null) => status === 'failed' || status === 'blocked_by_gate';
 
 /**
+ * Un saliente que no salió por WhatsApp (rechazado o frenado). Regla de GSG
+ * (12/11): si no sale en WhatsApp, no sale en GSG; ni el historial ni los
+ * webhooks lo muestran. GSGchat sí lo sigue mostrando en su propio chat.
+ */
+export const noSalioPorWhatsapp = (m: { direction: string; status: string | null }): boolean => m.direction === 'out' && noLlego(m.status);
+
+/**
  * Todo el hilo de una vez. Los motivos salen de `deliveries` (código y texto
  * de Meta, o el bloqueo interno), y solo se consultan si hay algún saliente que
  * no llegó: leer el historial no tiene que costar más por esto.

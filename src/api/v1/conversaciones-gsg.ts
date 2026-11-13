@@ -30,10 +30,9 @@ import { extensionDe, idDeMedia, mediaDirectory } from '../../whatsapp/local/med
 import { archivoDeMensaje } from './archivos-gsg.js';
 import { payloadExterno } from '../../util/payload-externo.js';
 import { trackingDeEntrega } from '../../entregas/repo.js';
-import { ETIQUETAS_DEL_SISTEMA, nombreDeEtiqueta } from '../../archive/clasificar.js';
-import { anotarMensajeNoLlego, notaNoLlegoParaGsg } from '../../chat/nota-no-llego.js';
+import { ETIQUETAS_DEL_SISTEMA, ETIQUETA_NO_LLEGO_RETIRADA, nombreDeEtiqueta } from '../../archive/clasificar.js';
 import { catalogoVigente, numeroNormalizado } from '../../chat/etiquetar.js';
-import { camposDeEntrega, entregasDelHilo } from './entrega-mensajes.js';
+import { camposDeEntrega, entregasDelHilo, noSalioPorWhatsapp } from './entrega-mensajes.js';
 
 export interface ApiConversacionesGsgDeps {
   repos: Repos;
@@ -48,7 +47,7 @@ export interface ApiConversacionesGsgDeps {
   mediaDir?: string;
   /** Con que se bajan los ficheros de `media.url`. Para pruebas. */
   fetchImpl?: typeof fetch;
-  /** Zona horaria del negocio: el dia de la nota «mensaje no llegó» (src/chat/nota-no-llego.ts). */
+  /** Zona horaria del negocio. */
   timezone?: string;
   /**
    * Las lineas de WhatsApp: el historial dice por cual va ese cliente y si
@@ -152,6 +151,10 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     try {
       const e = (await repo.ultimas([numeroNormalizado(phone)])).get(numeroNormalizado(phone));
       if (!e?.etiqueta) return null;
+      // La vieja nota «Mensaje no llegó al cliente» (12/11) ya no se pone, y la
+      // que haya quedado no se le muestra a GSG: lo que no salió por WhatsApp no
+      // aparece en GSG (ver noSalioPorWhatsapp).
+      if (e.etiqueta === ETIQUETA_NO_LLEGO_RETIRADA) return null;
       const catalogo = await catalogoVigente(repo);
       return {
         codigo: e.etiqueta,
@@ -203,13 +206,17 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
     // Cada saliente dice si llego al WhatsApp del cliente (`llegoAWhatsapp`, `entrega`) y,
     // si no, por que (`error`: codigo, motivo, queHacer, reintentar), lo mismo que se ve en
     // GSGchat en «Qué pasó con este mensaje». Ver src/api/v1/entrega-mensajes.ts.
-    const entregas = await entregasDelHilo(repos, contact.phone, messages);
+    // Lo que no salió por WhatsApp no sale en GSG (regla de GSG, 12/11): un saliente
+    // rechazado o frenado no viaja en el historial, ni con `llegoAWhatsapp: false` ni
+    // con nota. `hayMas` se cuenta sobre la página entera, para no cortar la paginación.
+    const visibles = messages.filter((m) => !noSalioPorWhatsapp(m));
+    const entregas = await entregasDelHilo(repos, contact.phone, visibles);
     return {
       tracking,
       contacto: { id: contact.id, telefono: contact.phone, nombre: contact.name },
       nota: await notaDe(contact.phone),
       linea: await lineaDe(contact.id),
-      mensajes: messages.map((m) => ({ ...mensajeDeChat(m), ...camposDeEntrega(entregas, m) })),
+      mensajes: visibles.map((m) => ({ ...mensajeDeChat(m), ...camposDeEntrega(entregas, m) })),
       hayMas: messages.length === q.limite,
     };
   };
@@ -284,17 +291,12 @@ export async function registerApiConversacionesGsg(app: FastifyInstance, deps: A
           .guardar({ idExterno: b.idExterno, tracking, usuarioId: b.usuario.id, usuarioNombre: b.usuario.nombre ?? null, rol: b.usuario.rol ?? null, phone: entrega.phone, wamid: outcome.wamid ?? null })
           .catch(() => undefined);
       }
-      // No salio (frenado o rechazado al momento): el chat queda con la nota «Mensaje no llegó al cliente»,
-      // la misma via que las notas de la IA. Si no se sabe si salio (incierto), no se afirma nada.
-      const noSalio = !outcome.ok && !('incierto' in outcome && outcome.incierto);
-      if (noSalio) {
-        await anotarMensajeNoLlego({ repos, timezone: deps.timezone }, entrega.phone, 'blocked' in outcome && outcome.blocked ? outcome.reason : 'error' in outcome ? outcome.error : null);
-      }
+      // No salio (frenado o rechazado al momento): la respuesta lo dice con su error, para que GSG
+      // no lo pinte. No queda en el chat de GSG ni se le pone nota (regla de GSG, 12/11).
       const r = respuestaDeEnvio(outcome);
       // Por que linea salio (o lo intento): la del cliente o, si estaba caida, otra viva.
       const lineaId = outcome.ok ? outcome.whatsappNumberId ?? null : (outcome as { whatsappNumberId?: string | null }).whatsappNumberId ?? null;
-      // No salio: la misma nota del chat, empujada en la respuesta (como en el webhook mensaje.estado).
-      return reply.code(r.codigo).send(outcome.ok ? { ...r.cuerpo, duplicado: false, lineaId } : { ...r.cuerpo, lineaId, ...(noSalio ? { nota: notaNoLlegoParaGsg(new Date(), deps.timezone) } : {}) });
+      return reply.code(r.codigo).send(outcome.ok ? { ...r.cuerpo, duplicado: false, lineaId } : { ...r.cuerpo, lineaId });
     } finally {
       enCurso.delete(b.idExterno);
     }

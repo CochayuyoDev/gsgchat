@@ -39,7 +39,6 @@ import { ventanaDeEntrega } from './entregas/horario-distrito.js';
 import { startArchiveSweeper } from './archive/service.js';
 import { catalogoVigente } from './chat/etiquetar.js';
 import { opcionesDesdeConfig, startMotorRutas } from './rutas/motor.js';
-import { vigilarNotaNoLlego } from './chat/nota-no-llego.js';
 import { vigilarMensajesNoEntregados } from './rutas/no-llego.js';
 import { crearPuertoGsg, despacharReportes, paradaPorClave } from './rutas/gsg.js';
 import { startAlertas } from './rutas/alertas.js';
@@ -237,15 +236,12 @@ export function arrancarServicios(deps: ServiciosDeps): () => void {
 
   // Un mensaje del pedido que WhatsApp avisa DESPUES que no entrego: deja de
   // contar como intento y el pedido pasa a incidencia con el motivo. Ver src/rutas/no-llego.ts.
-  // Un mensaje que WhatsApp no entrego deja la nota «Mensaje no llegó al cliente» en su chat (src/chat/nota-no-llego.ts).
-  const stopNotaNoLlego = bus ? vigilarNotaNoLlego(bus, { repos, timezone: config.timezone, log: warn }) : () => undefined;
   const entregasVivas = deps.entregas;
   const stopNoLlego = bus
     ? vigilarMensajesNoEntregados(bus, { repos, log: warn, ...(entregasVivas ? { segundoNumero: (phone: string, codigo: string, motivo: string) => entregasVivas.segundoNumeroTrasRechazo(phone, codigo, motivo) } : {}) })
     : () => undefined;
 
   return () => {
-    stopNotaNoLlego();
     stopNoLlego();
     desconectarBus();
     stopWebhooks();

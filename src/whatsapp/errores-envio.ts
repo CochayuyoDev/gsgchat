@@ -39,7 +39,7 @@ export const MOTIVOS_EN_PALABRAS: Record<string, string> = {
   contact_daily_cap: 'Ese cliente ya recibió el máximo de mensajes del día.',
   contact_spacing: 'Hacía muy poco que se le había escrito a ese cliente.',
   rhythm: 'El marcapasos del número lo dejó para más tarde (ritmo, horario o pausa).',
-  ruta_inactiva: 'El chat está cerrado porque GSG avisó que la ruta del cliente está inactiva o finalizada.',
+  ruta_inactiva: 'El chat está cerrado porque GSG avisó que la ruta del cliente está inactiva.',
 };
 
 /** Si conviene volver a mandar: nunca, despues de esperar, o ya (fallo pasajero). */

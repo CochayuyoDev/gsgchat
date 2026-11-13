@@ -2131,7 +2131,7 @@ function renderComposer(data) {
     return;
   }
   if (data.rutaCerrada) {
-    /* Webhook de rutas de GSG: la ruta del cliente está inactiva o finalizada. */
+    /* Webhook de rutas de GSG: la ruta del cliente está INACTIVO. */
     locked.innerHTML = '<b>Chat cerrado: la ruta ' + esc(data.rutaCerrada.ruta) + ' está «' + esc(data.rutaCerrada.estado) + '» según GSG.</b><br>No sale ningún mensaje a este cliente, ni automático ni escrito aquí, para no gastar en un pedido que ya no va. Se abre solo cuando GSG avise que la ruta vuelve a estar activa, o a mano en <a class="link" href="/api-gsgchat#t-rutas">Nuestra API → Webhook de rutas</a>.';
     return;
   }
