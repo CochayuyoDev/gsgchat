@@ -383,10 +383,29 @@ Si el cliente manda un enlace (`https://maps.app.goo.gl/…`, Google Maps, Waze,
 GSGchat saca las coordenadas del enlace con el mismo algoritmo que el admin de GSG (`gmaps_coords.php`), sin API de
 Google ni clave, y las registra y las manda a GSG igual que un pin (`send-location`).
 
-- **Orden por precisión** (`src/geo/parsers.ts`): primero el pin del lugar (`!3d!4d`, el último), luego `?query=`,
-  `?q=`, `?destination=`, `?daddr=`, `?ll=`, `?coordinate=`, `?to=ll.`, `?center=`, `geo:`, el `/lat,lng` de
-  `/maps/dir/` o `/maps/search/` y, como último recurso, el centro de la cámara (`@`). Se prueban todas las
-  coincidencias de cada patrón, sobre la URL tal cual y decodificada (`%2C`, `,+`).
+- **Orden por precisión** (`src/geo/parsers.ts`): primero el destino escrito (`?destination=`, `?daddr=`), luego el
+  pin del lugar (`!3d!4d`, el último), `?query=`, `?q=`, `?ll=`, `?coordinate=`, `?to=ll.`, `?center=`, `geo:`, el
+  `/lat,lng` de `/maps/dir/` o `/maps/search/` y, como último recurso, el centro de la cámara (`@`). Se prueban
+  todas las coincidencias de cada patrón, sobre la URL tal cual y decodificada (`%2C`, `,+`). Como en la versión
+  Node de GSG (`mapsLink.js`, 13/11): en `/maps/dir/` solo cuenta el **último tramo** (el destino), y solo si la
+  ruta tiene origen y destino; con un tramo solo, o con el destino escrito como dirección, no se toma el origen.
+- **Lugares de Google sin coordenadas** (`place_id`, 13/11): si el enlace solo trae el lugar (`query_place_id=`,
+  `destination_place_id=`, `place_id=`, `place_id:XXXX` dentro de `q`/`query`/`destination`/`daddr`, o `!1sChIJ…`
+  en el `data=`), se le pregunta a Google dónde está (Geocoding API con `place_id`, con la clave
+  `GOOGLE_MAPS_API_KEY` y con «Buscar la dirección en el mapa» encendido) y se valida como cualquier otro punto. Le
+  gana al centro de la cámara (`@`), nunca a un pin de verdad. Sin clave de Google no se puede: se pide el pin.
+- **Lugares compartidos por su nombre** (iPhone, 13/11): `maps.app.goo.gl/…` lleva a
+  `?q=Bodega Heidi & Adrian, MZ D1 Lt 15 COOP, San Martín de Porres&ftid=0x…:0x…`, sin coordenadas ni `place_id`,
+  y la página de Google solo trae el centro por defecto del mapa (no el lugar). Si el enlace trae `ftid` (la marca
+  de que es un lugar concreto), se busca ese nombre en Google: con la clave, si la tienda la tiene (Places API, Find
+  Place, mismo interruptor; vale solo si Google encuentra **un** lugar), y si no, **sin clave**, con la búsqueda que
+  hace por dentro la web de Google Maps (`/search?tbm=map`, `src/geo/lugar-sin-clave.ts`). Sin clave solo se acepta
+  el punto que viene pegado al **mismo `ftid`** del enlace (ese negocio, no otro de la búsqueda); no es una API
+  oficial, así que si Google cambia el formato, pide captcha o no hay red, no se adivina y se pide el pin. Cada
+  lugar se pregunta una vez al día. Va antes que la dirección. Probado con el enlace real del 13/11:
+  `maps.app.goo.gl/yTDuALE63dyWjyHw9` → Bodega Heidi & Adrian, -12.015631, -77.0805262.
+- **Dirección escrita en el enlace**: se lee de `?destination=`, `?daddr=`, `?query=` o `?q=` (en ese orden) y solo
+  vale con número de puerta.
 - **Solo Perú** (`PERU_BBOX`): un par que cae fuera (ids, zoom, Nueva York) se descarta y se prueba el siguiente.
 - **Enlaces cortos** (`src/geo/resolve.ts`): se siguen los saltos a mano (hasta 15, 8 s cada uno, solo https y
   solo hosts de la lista de `src/util/net-guard.ts`). Si la URL final no trae coordenadas (consentimiento,

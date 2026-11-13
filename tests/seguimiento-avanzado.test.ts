@@ -3,6 +3,13 @@ import { crearConsultaSeguimiento, leerSeguimiento, crearCalculadorGoogle, texto
 import { crearGsgSimulado } from '../src/entregas/gsg-simulado.js';
 import { crearEscenarioEntregas } from './escenario-entregas.js';
 import { resolveShortLink, clearResolveCache } from '../src/geo/resolve.js';
+import { FUENTE_DIRECCION_ESCRITA } from '../src/entregas/servicio.js';
+/** Una ubicación propuesta que espera el SÍ del cliente, como la deja una dirección escrita ubicada en el mapa. */
+async function proponer(e: Awaited<ReturnType<typeof crearEscenarioEntregas>>, phone: string, lat: number, lng: number): Promise<void> {
+  for (const x of (await e.repos.entregas.vivasPorTelefono(phone)).filter((x) => x.ubicacionEstado === 'pendiente'))
+    await e.repos.entregas.actualizar(x.id, { pinPropuestoLat: lat, pinPropuestoLng: lng, pinPropuestoAt: e.ahora(), pinPropuestoFuente: FUENTE_DIRECCION_ESCRITA, pinPropuestoDudas: 0 });
+}
+
 
 const ahora = new Date('2026-10-07T17:00:00Z');
 const ruta = { tracking: 'P-1', posicion: { lat: -12.1, lng: -77.1, actualizadaAt: ahora.toISOString() }, puntoActual: 2, puntoCliente: 4, paradas: [{ orden: 3, lat: -12.11, lng: -77.1 }, { orden: 4, lat: -12.12, lng: -77.1 }] };
@@ -13,7 +20,7 @@ describe('seguimiento avanzado', () => {
     try {
       const c = await e.repos.contacts.upsertFromInbound('51987777999', 'Rosa');
       await e.entregas.crearAMano({ referencia: 'REV-1', telefono: c.phone, faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
-      await e.entregas.revisarPin(c, { lat: -12.12, lng: -77.03, fuente: 'enlace de mapa (google)' });
+      await proponer(e, c.phone, -12.12, -77.03);
       const p = (await e.entrega('REV-1'))!;
       const revision = p.pinPropuestoAt!.getTime();
       const r = await e.entregas.responderPinLejos(c.phone, 'si', '', 'botón', `entrega:pinsi:${p.id}:${revision - 1}`);
@@ -82,7 +89,7 @@ describe('seguimiento avanzado', () => {
     try {
       const c = await e.repos.contacts.upsertFromInbound('51987777888', 'Rosa');
       for (const referencia of ['UNO-1', 'DOS-2']) await e.entregas.crearAMano({ referencia, telefono: c.phone, faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
-      await e.entregas.revisarPin(c, { lat: -12.12, lng: -77.03, fuente: 'enlace de mapa (google)' });
+      await proponer(e, c.phone, -12.12, -77.03);
       const ambiguo = await e.entregas.responderPinLejos(c.phone, 'si', 'sí', 'reglas');
       expect(ambiguo?.tipo).toBe('repregunta');
       expect(await e.repos.rutas.reportesRecientes(50, 'ubicacion')).toHaveLength(0);

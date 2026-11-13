@@ -16,6 +16,7 @@ import type {
 import { PARSERS, safeDecode, type ParseTarget } from './parsers.js';
 import { enlacesDeLaPagina, needsResolution, resolveShortLink } from './resolve.js';
 import { isAllowedHost } from '../util/net-guard.js';
+import { buscarLugarSinClave, esFtid } from './lugar-sin-clave.js';
 import { precisionFromDecimals, validate } from './validate.js';
 
 const URL_RE = /\b(?:https?:\/\/|www\.|(?:maps\.app\.)?goo\.gl\/|maps\.google\.[a-z.]{2,6}\/|google\.[a-z.]{2,6}\/maps|maps\.apple\.com\/|(?:ul\.)?waze\.com\/)[^\s<>"']+/gi;
@@ -252,6 +253,76 @@ export async function extractLocation(
     }
   }
 
+  // El enlace es un lugar de Google sin coordenadas (la ficha de un negocio,
+  // una busqueda): solo trae su place_id. Google dice donde esta. Tambien
+  // cuando solo se tenia la camara (`@`): el lugar es el dato bueno.
+  if ((!result.ok || result.source === 'at_viewport') && opts.porLugar) {
+    const placeId = placeIdDelEnlace([resolvedUrl, url.toString()]);
+    const punto = placeId ? await opts.porLugar(placeId).catch(() => null) : null;
+    if (punto && Number.isFinite(punto.lat) && Number.isFinite(punto.lng)) {
+      // Como cualquier otro punto: primero el pais, despues la zona que se cubre.
+      const enPais = opts.pais ? validate(punto.lat, punto.lng, opts.pais) : null;
+      const check = enPais && !enPais.ok ? enPais : validate(punto.lat, punto.lng, opts.bbox);
+      if (check.ok) {
+        result = {
+          ok: true,
+          lat: punto.lat,
+          lng: punto.lng,
+          source: 'place_id',
+          confidence: 'high',
+          precisionMeters: 30,
+          originalUrl: url.toString(),
+          resolvedUrl,
+          mapsUrl: canonicalMapsUrl(punto.lat, punto.lng),
+          warnings: [...warnings, ...check.warnings, `lugar de Google del enlace (place_id ${placeId}) ubicado en el mapa`],
+          needsConfirmation: false,
+        };
+      } else if (!result.ok) {
+        result = { ...result, reason: check.reason, warnings: [...result.warnings, ...check.warnings] };
+      }
+    }
+  }
+
+  // Un lugar compartido por su nombre (el iPhone manda `?q=<nombre, direccion>&ftid=0x…`):
+  // ni coordenadas ni place_id, y la pagina de Google no trae el punto (lo carga
+  // despues con JavaScript). Se busca por ese nombre: con la clave de Google si
+  // la tienda la tiene (Places API) y, si no, como lo hace la web de Google Maps
+  // por dentro, aceptando solo el punto de ESE lugar (su mismo ftid). Va antes
+  // que la direccion: el nombre del negocio lo encuentra mejor que «Mz D1 Lt 15».
+  const lugar = !result.ok || result.source === 'at_viewport' ? lugarDelEnlace([resolvedUrl, url.toString()]) : null;
+  if (lugar) {
+    const texto = lugar.texto;
+    let punto = opts.porLugarConNombre ? await opts.porLugarConNombre(texto).catch(() => null) : null;
+    let como = 'por su nombre en Google';
+    // En las pruebas, nunca contra el Google real: solo con un fetch falso.
+    const sinClave = opts.buscarLugarSinClave ?? !(process.env.VITEST && !opts.fetchImpl);
+    if (!punto && shouldResolve && sinClave) {
+      punto = await buscarLugarSinClave(texto, lugar.ftid, { timeoutMs: opts.timeoutMs, fetchImpl: opts.fetchImpl }).catch(() => null);
+      como = 'en la búsqueda de Google Maps, sin clave';
+    }
+    if (punto && Number.isFinite(punto.lat) && Number.isFinite(punto.lng)) {
+      const enPais = opts.pais ? validate(punto.lat, punto.lng, opts.pais) : null;
+      const check = enPais && !enPais.ok ? enPais : validate(punto.lat, punto.lng, opts.bbox);
+      if (check.ok) {
+        result = {
+          ok: true,
+          lat: punto.lat,
+          lng: punto.lng,
+          source: 'place_search',
+          confidence: 'high',
+          precisionMeters: 30,
+          originalUrl: url.toString(),
+          resolvedUrl,
+          mapsUrl: canonicalMapsUrl(punto.lat, punto.lng),
+          warnings: [...warnings, ...check.warnings, `lugar del enlace encontrado ${como}: ${texto}`],
+          needsConfirmation: false,
+        };
+      } else if (!result.ok) {
+        result = { ...result, reason: check.reason, warnings: [...result.warnings, ...check.warnings] };
+      }
+    }
+  }
+
   // El enlace es un lugar compartido como direccion (?q=Av. Jorge Chavez 865,
   // Santiago de Surco), sin coordenadas: se busca esa direccion en el mapa.
   // Solo vale si quien busca la encuentra con seguridad (pedido del dueño, 29/10).
@@ -329,7 +400,8 @@ const dentroDe = (p: { lat: number; lng: number }, caja: { minLat: number; maxLa
   p.lat >= caja.minLat && p.lat <= caja.maxLat && p.lng >= caja.minLng && p.lng <= caja.maxLng;
 
 /**
- * La direccion que trae un enlace de lugar compartido (?q= o ?query=) cuando no
+ * La direccion que trae un enlace de lugar compartido o de «como llegar»
+ * (?destination=, ?daddr=, ?query= o ?q=, en ese orden, como GSG) cuando no
  * son coordenadas: «Av. Jorge Chávez 865, Santiago de Surco 15049». Tiene que
  * llevar un numero (de puerta): «Miraflores» a secas no es una direccion.
  */
@@ -342,8 +414,73 @@ export function direccionDelEnlace(enlace: string | undefined): string | null {
     return null;
   }
   if (!/(^|\.)google\.[a-z.]+$|^maps\.app\.goo\.gl$|^goo\.gl$/i.test(u.hostname)) return null;
-  const texto = (u.searchParams.get('q') ?? u.searchParams.get('query') ?? '').trim();
-  if (!texto || texto.length > 200 || !/[a-záéíóúñ]{3}/i.test(texto) || !/\d/.test(texto)) return null;
+  const texto = (['destination', 'daddr', 'query', 'q'].map((k) => u.searchParams.get(k)?.trim()).find(Boolean) ?? '');
+  if (!texto || /^place_id:/i.test(texto) || texto.length > 200 || !/[a-záéíóúñ]{3}/i.test(texto) || !/\d/.test(texto)) return null;
   if (/^-?\d{1,3}(\.\d+)?\s*,\s*-?\d{1,3}(\.\d+)?$/.test(texto)) return null;
   return texto;
+}
+
+/**
+ * El nombre del lugar de un enlace compartido como lugar de Google: el `?q=`
+ * (o `?query=`) de un enlace que trae `ftid=0x…:0x…`, la marca de Google de
+ * que es un lugar concreto (un negocio, una casa marcada) y no una busqueda
+ * suelta. Sin `ftid` no se busca por nombre: «Miraflores» no es un lugar.
+ */
+export function lugarConNombreDelEnlace(enlaces: Array<string | undefined>): string | null {
+  return lugarDelEnlace(enlaces)?.texto ?? null;
+}
+
+/** El nombre del lugar (`?q=`) y su marca de Google (`ftid`), o null si el enlace no es un lugar. */
+export function lugarDelEnlace(enlaces: Array<string | undefined>): { texto: string; ftid: string } | null {
+  for (const enlace of enlaces) {
+    if (!enlace) continue;
+    let u: URL;
+    try {
+      u = new URL(enlace);
+    } catch {
+      continue;
+    }
+    if (!/(^|\.)google\.[a-z.]+$/i.test(u.hostname)) continue;
+    const ftid = (u.searchParams.get('ftid') ?? '').trim();
+    if (!esFtid(ftid)) continue;
+    const texto = (u.searchParams.get('q') ?? u.searchParams.get('query') ?? '').replace(/\s+/g, ' ').trim();
+    if (!texto || texto.length > 200 || !/[a-záéíóúñ]{3}/i.test(texto) || /^place_id:/i.test(texto)) continue;
+    if (/^-?\d{1,3}(\.\d+)?\s*,\s*-?\d{1,3}(\.\d+)?$/.test(texto)) continue;
+    return { texto, ftid };
+  }
+  return null;
+}
+
+/** Un place_id de Google: letras, numeros, `_` y `-` (ChIJ..., GhIJ..., Ei...). */
+const PLACE_ID = /^[A-Za-z0-9_-]{10,400}$/;
+
+/**
+ * El place_id de un enlace de Google Maps que no trae coordenadas, en el
+ * orden de GSG (mapsLink.js): `query_place_id=`, `destination_place_id=`,
+ * `place_id=`; luego `place_id:XXXX` dentro de `destination`, `daddr`,
+ * `query` o `q`; y al final `!1sChIJ...` dentro del `data=` (los `!1s0x...`
+ * son otro identificador y no sirven). Solo enlaces de Google.
+ */
+export function placeIdDelEnlace(enlaces: Array<string | undefined>): string | null {
+  for (const enlace of enlaces) {
+    if (!enlace) continue;
+    let u: URL;
+    try {
+      u = new URL(enlace);
+    } catch {
+      continue;
+    }
+    if (!/(^|\.)google\.[a-z.]+$|^maps\.app\.goo\.gl$|^goo\.gl$/i.test(u.hostname)) continue;
+    for (const k of ['query_place_id', 'destination_place_id', 'place_id']) {
+      const v = u.searchParams.get(k)?.trim();
+      if (v && PLACE_ID.test(v)) return v;
+    }
+    for (const k of ['destination', 'daddr', 'query', 'q']) {
+      const m = /^place_id:([A-Za-z0-9_-]+)$/i.exec(u.searchParams.get(k)?.trim() ?? '');
+      if (m && PLACE_ID.test(m[1]!)) return m[1]!;
+    }
+    const enData = /!1s(ChIJ[A-Za-z0-9_-]+)/.exec(safeDecode(u.toString()));
+    if (enData && PLACE_ID.test(enData[1]!)) return enData[1]!;
+  }
+  return null;
 }

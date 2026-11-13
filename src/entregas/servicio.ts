@@ -528,13 +528,6 @@ export interface ServicioEntregas {
   alUbicacion(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null; yaReportada?: boolean }): Promise<RespuestaEntregas>;
   /** El «ubicación registrada» (enlace, horario y soporte) para un cliente sin entrega de hoy. */
   textoUbicacionRegistrada(datos: { nombre?: string | null; mapa?: string | null }): string;
-  /**
-   * El pin tiene que tener sentido: si cae a más de «Distancia máxima entre el
-   * pin y el distrito» del distrito de su pedido, NO se registra: queda
-   * propuesto y se devuelve la pregunta SÍ/NO (con botones). atendida false =
-   * el pin está bien (o no hay distrito con qué comparar): sigue el camino de siempre.
-   */
-  revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas>;
   /** Si ese cliente tiene un pin lejano esperando su SÍ o su NO. */
   pinLejosPendiente(phone: string): Promise<boolean>;
   /** Su respuesta a «¿es ahí donde recibes tu pedido?». null = no tenía nada por confirmar. */
@@ -549,6 +542,10 @@ export interface ServicioEntregas {
    * mapa: solo si se encuentra con su número de puerta. null = no se usa.
    */
   ubicarDireccionDeEnlace(direccion: string): Promise<{ lat: number; lng: number } | null>;
+  /** Donde esta el lugar de Google (place_id) de un enlace sin coordenadas; null si no se puede saber. */
+  ubicarLugarDeEnlace(placeId: string): Promise<{ lat: number; lng: number } | null>;
+  /** Donde esta el lugar con nombre de un enlace (?q=<nombre>&ftid=); null si no se puede saber. */
+  ubicarLugarConNombre(texto: string): Promise<{ lat: number; lng: number } | null>;
   /**
    * El primer mensaje que le pide la ubicacion a un cliente con entrega (la
    * plantilla «solicitudUbicacion» con los datos del envio de GSG). null =
@@ -2409,20 +2406,9 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     return (await repo.vivasPorTelefono(phone).catch(() => [] as Entrega[])).filter((x) => !x.envioRetenidoAt && x.ubicacionEstado === 'pendiente');
   }
 
-  async function revisarPin(contact: Pick<Contact, 'id' | 'phone' | 'name'>, ubicacion: { lat: number; lng: number; mapsUrl?: string | null; fuente?: string | null }): Promise<RespuestaEntregas> {
-    // El pin nativo fijo se registra directamente. La ubicación en vivo
-    // tiene otro tipo de entrada y nunca llega a este camino.
-    if (ubicacion.fuente === 'pin de whatsapp') return { atendida: false };
-    if (ubicacion.fuente?.startsWith('enlace de mapa')) {
-      const pendientes = await esperandoUbicacionDe(contact.phone);
-      if (pendientes.length && Number.isFinite(ubicacion.lat) && Number.isFinite(ubicacion.lng)) {
-        for (const e of pendientes) await repo.actualizar(e.id, { pinPropuestoLat: ubicacion.lat, pinPropuestoLng: ubicacion.lng, pinPropuestoAt: ahora(), pinPropuestoFuente: ubicacion.fuente, pinPropuestoDudas: 0 });
-        const e = (await repo.entrega(pendientes[0]!.id)) ?? pendientes[0]!;
-        return { atendida: true, entrega: e, resultado: 'mapa_por_confirmar', responder: `Esta es la ubicación de tu enlace: ${enlaceMapa(ubicacion.lat, ubicacion.lng)}\n¿Sí es donde recibirás el pedido? Responde SÍ o NO, o comparte tu ubicación actual por WhatsApp.` };
-      }
-    }
-    return { atendida: false };
-  }
+  // El pin de WhatsApp y el enlace de mapa se registran directo, sin preguntar
+  // «¿es ahí?» (pedido del dueño, 13/11: el enlace ya no pide confirmación).
+  // Solo la dirección escrita ubicada en el mapa espera el SÍ (alDireccionEscrita).
 
   const confirmacionesPinEnCurso = new Map<string, Promise<RespuestaPinLejos | null>>();
   async function responderPinLejos(phone: string, clase: 'si' | 'no' | 'otra', texto: string, como: string, boton?: string, citaId?: string | null): Promise<RespuestaPinLejos | null> {
@@ -2529,6 +2515,18 @@ export async function crearServicioEntregas(deps: DepsEntregas): Promise<Servici
     const lugar = await deps.geocodificador.buscar(direccion, distritoEnDireccion(direccion)).catch(() => null);
     // Solo con la puerta: «la calle» o «el distrito» mandaría al motorizado a otro sitio.
     return lugar && lugar.precision === 'alta' ? { lat: lugar.lat, lng: lugar.lng } : null;
+  }
+
+  async function ubicarLugarDeEnlace(placeId: string): Promise<{ lat: number; lng: number } | null> {
+    if (!deps.geocodificador?.lugar || !ajustes.buscarDireccionEnMapa) return null;
+    const lugar = await deps.geocodificador.lugar(placeId).catch(() => null);
+    return lugar ? { lat: lugar.lat, lng: lugar.lng } : null;
+  }
+
+  async function ubicarLugarConNombre(texto: string): Promise<{ lat: number; lng: number } | null> {
+    if (!deps.geocodificador?.lugarPorNombre || !ajustes.buscarDireccionEnMapa) return null;
+    const lugar = await deps.geocodificador.lugarPorNombre(texto).catch(() => null);
+    return lugar ? { lat: lugar.lat, lng: lugar.lng } : null;
   }
 
   async function alDireccionEscrita(contact: Pick<Contact, 'id' | 'phone' | 'name'>, texto: string, como: string): Promise<RespuestaDireccionEscrita | null> {
@@ -5579,13 +5577,14 @@ ${lista}
     async vincularPropuesta(e, wamid) {
       if (e.pinPropuestoAt && e.pinPropuestoLat != null && e.pinPropuestoLng != null) await evento(e, 'nota', 'mensaje de propuesta vinculado para validar respuestas citadas', { wamid, propuestaAt: e.pinPropuestoAt.toISOString(), lat: e.pinPropuestoLat, lng: e.pinPropuestoLng });
     },
-    revisarPin,
     async pinLejosPendiente(phone) {
       return (await esperandoUbicacionDe(phone)).some((x) => Boolean(x.pinPropuestoAt) && x.pinPropuestoLat != null);
     },
     responderPinLejos,
     alDireccionEscrita,
     ubicarDireccionDeEnlace,
+    ubicarLugarDeEnlace,
+    ubicarLugarConNombre,
     alTexto,
     alAdjuntoDeMotorizado: async () => ({ atendida: false }),
     nombreNegocio: () => deps.nombreNegocio(),

@@ -7,12 +7,16 @@
  * camara o el texto suelto. Es el orden de GSG (gmaps_coords.php, 26/10) y de
  * la app Android (CoordinatesExtractorImpl.kt):
  *
- *   1 !3d!4d (pin del lugar, el ultimo)   7 ?coordinate=        (Apple iOS 18+)
- *   2 ?query=  (boton Compartir)          8 ?to=ll.             (Waze)
- *   3 ?q= / ?q=loc:                       9 ?center=            (embeds)
- *   4 ?destination=                      10 geo:                (Android)
- *   5 ?daddr=  (Apple, Maps clasico)     11 /lat,lng en /maps/dir/, /maps/search/ o /maps/place/ (el ultimo)
+ *   1 ?destination=  (el destino escrito)  7 ?coordinate=        (Apple iOS 18+)
+ *   2 ?daddr=  (Apple, Maps clasico)     8 ?to=ll.             (Waze)
+ *   3 !3d!4d (pin del lugar, el ultimo)  9 ?center=            (embeds)
+ *   4 ?query=  (boton Compartir)        10 geo:                (Android)
+ *   5 ?q= / ?q=loc:                      11 /lat,lng en /maps/dir/ (el destino), /maps/search/ o /maps/place/
  *   6 ?ll=     (Apple, Waze)             12 @lat,lng            (centro de la camara: ultimo recurso)
+ *
+ * El destino escrito (`destination=`, `daddr=`) va antes que `!3d!4d`, como en
+ * GSG (mapsLink.js de Kevin, 07/09): en un enlace de «como llegar» los `!3d!4d`
+ * del `data=` pueden ser de otra parada, y el destino es lo que el cliente eligio.
  *
  * Solo se leen enlaces de Google Maps, Apple Maps y Waze y el `geo:` de Android que
  * tambien lee GSG (31/10): ni OpenStreetMap, ni grados-minutos-segundos, ni Plus
@@ -117,12 +121,22 @@ function parseGeoUri(target: ParseTarget): RawCandidate[] {
  * los enlaces cortos. Sin esa condicion, cualquier `/12.34,-56.78/` del path
  * pasaria por destino. Va antes del `@`: en un /maps/dir/ el `@` es el
  * centro del recorrido, a kilometros del cliente. Gana el ultimo par.
+ *
+ * En `/maps/dir/` solo cuenta el ULTIMO tramo (el destino), y solo si la ruta
+ * tiene origen y destino: con un tramo solo no se sabe si es el origen, y un
+ * destino escrito como direccion no deja tomar el origen en su lugar (GSG).
  */
 function parsePathCoords(target: ParseTarget): RawCandidate[] {
   const candidatos: Array<[string, string]> = [];
   for (const t of textos(target)) {
     const ruta = t.split(/[?#]/)[0] ?? '';
     if (!/\/maps\/(dir|search|place)\//i.test(ruta)) continue;
+    const dir = /\/maps\/dir\/(.*)$/i.exec(ruta);
+    if (dir) {
+      const destino = destinoDeRuta(dir[1]!);
+      if (destino) candidatos.push(destino);
+      continue;
+    }
     for (const m of ruta.matchAll(new RegExp(String.raw`/(${NUM})\s*,\+?\s*(${NUM})(?=/|$)`, 'g'))) candidatos.push([m[1]!, m[2]!]);
   }
   const vistos = new Set<string>();
@@ -130,6 +144,20 @@ function parsePathCoords(target: ParseTarget): RawCandidate[] {
     .reverse()
     .filter(([a, b]) => (vistos.has(`${a},${b}`) ? false : (vistos.add(`${a},${b}`), true)))
     .map(([latRaw, lngRaw]) => ({ latRaw, lngRaw, source: 'path_coords', confidence: 'high' }));
+}
+
+/**
+ * El destino de `/maps/dir/<origen>/<parada>/.../<destino>/@.../data=...`: el
+ * ultimo tramo, sin contar la camara (`@`), `data=` ni `am=`. El origen puede
+ * ir vacio (`/dir//<destino>`: «desde donde estoy»). Con menos de dos tramos,
+ * o si el destino no es `lat,lng`, no hay destino que leer del path.
+ */
+export function destinoDeRuta(resto: string): [string, string] | null {
+  const tramos = resto.split('/').filter((t) => !/^(@|data=|am=)/i.test(t));
+  while (tramos.length && tramos[tramos.length - 1] === '') tramos.pop();
+  if (tramos.length < 2) return null;
+  const m = new RegExp(String.raw`^(${NUM})\s*,\+?\s*(${NUM})$`).exec(tramos[tramos.length - 1]!.trim());
+  return m ? [m[1]!, m[2]!] : null;
 }
 
 /**
@@ -156,12 +184,12 @@ export function safeDecode(value: string): string {
 
 /** Orden de prioridad. Cambiarlo cambia la politica del extractor (ver la cabecera). */
 export const PARSERS: Array<(t: ParseTarget) => RawCandidate[]> = [
-  parseData3d4d, //                                   1
+  deQuery('destination'), //                          1
+  deQuery('daddr'), //                                2
+  parseData3d4d, //                                   3
   parseEmbed,
-  deQuery('query'), //                                2
-  deQuery('q', { loc: true }), //                     3
-  deQuery('destination'), //                          4
-  deQuery('daddr'), //                                5
+  deQuery('query'), //                                4
+  deQuery('q', { loc: true }), //                     5
   deQuery('address'),
   deQuery('ll', { source: 'll_param' }), //           6
   deQuery('sll', { source: 'll_param' }),
