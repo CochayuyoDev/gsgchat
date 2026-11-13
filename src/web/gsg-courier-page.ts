@@ -310,12 +310,12 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
       </section>
       <section class="courier-card courier-wide" id="avisos-gsg" data-na="avisos">
         <div class="courier-cab"><div><h2>Avisos a GSG (webhooks)</h2><p class="muted">Lo que GSGchat le avisa a GSG al momento, sin que GSG tenga que preguntar. Marca qué avisos recibe cada dirección: el cambio vale al instante y GSG no tiene que cambiar nada.</p></div><button class="btn sm" type="button" id="avisos-refrescar">Actualizar</button></div>
-        <div class="courier-status av-clave"><b>mensaje.estado</b> es el aviso del estado real de cada mensaje (le llegó, lo leyó o no le llegó, con el porqué). Sin él, GSG solo ve el estado nuevo al recargar la conversación.</div>
+        <div class="courier-status av-clave"><b>mensaje.estado</b> es el aviso del estado real de cada mensaje (le llegó o lo leyó; lo que WhatsApp rechaza no se le manda a GSG). Sin él, GSG solo ve el estado nuevo al recargar la conversación.</div>
         <div id="avisos-lista"></div>
         <p id="avisos-aviso" class="courier-status" role="status" aria-live="polite" hidden></p>
       </section>
       <section class="courier-card courier-wide" id="rutas-webhook" data-na="rutas">
-        <div class="courier-cab"><div><h2>Webhook de estados de rutas</h2><p class="muted">El sistema de rutas de GSG avisa aquí cuando una ruta cambia de estado. El código de ruta es el <b>tracking del pedido</b>. Si pasa a <b>inactiva o finalizada</b>, el chat de ese cliente se cierra: no sale ningún mensaje (ni automático ni escrito a mano) y no se gasta. Si vuelve a estar <b>en ruta, activa</b> o cualquier otro estado, se abren solos y lo pendiente sigue.</p></div><button class="btn sm" type="button" id="rw-refrescar">Actualizar</button></div>
+        <div class="courier-cab"><div><h2>Webhook de estados de rutas</h2><p class="muted">El sistema de rutas de GSG avisa aquí cuando una ruta cambia de estado. El código de ruta es el <b>tracking del pedido</b>. GSG manda cuatro estados: con <b>INACTIVO</b> el chat de ese cliente se cierra: no sale ningún mensaje (ni automático ni escrito a mano) y no se gasta. <b>RECHAZADO, ENTREGADO y CANCELADO</b> no cierran el chat: sigue la regla de 24 horas. Si llega <b>cualquier otro estado</b> (por ejemplo EN RUTA, cuando un operador corrige una ruta), la ruta volvió a estar activa: si el chat estaba cerrado se abre solo y lo pendiente sigue.</p></div><button class="btn sm" type="button" id="rw-refrescar">Actualizar</button></div>
         <h3>1. Conexión</h3>
         <label for="rw-url">Dirección (POST)</label>
         <div class="rw-fila"><input id="rw-url" readonly><button class="btn" type="button" id="rw-copiar-url">Copiar</button></div>
@@ -326,12 +326,12 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         <h3>2. Qué manda GSG</h3>
         <pre class="api-json">{
   "ruta": "GSG123456",
-  "estado": "INACTIVA",
+  "estado": "INACTIVO",
   "fecha": "2026-11-12T15:30:00-05:00"
 }</pre>
         <div class="courier-scroll"><table><thead><tr><th>Campo</th><th>Obligatorio</th><th>Qué es</th></tr></thead><tbody>
           <tr><td><code>ruta</code></td><td>Sí</td><td>El código de ruta: es el <b>tracking</b> del pedido, el mismo que GSG manda en la API 1 (por ejemplo <code>GSG123456</code>). Se cierra o abre el chat de ese pedido. También se acepta <code>idRuta</code>, <code>codigoRuta</code> o <code>rutaId</code>.</td></tr>
-          <tr><td><code>estado</code></td><td>Sí</td><td>El estado nuevo, tal cual lo llama GSG. Cierran el chat: inactiva, finalizada, cerrada, terminada, cancelada, anulada, completada, suspendida (con o sin tildes, mayúsculas o «_»). Cualquier otro (en ruta, activa…) lo abre.</td></tr>
+          <tr><td><code>estado</code></td><td>Sí</td><td>El estado nuevo: <b>INACTIVO</b> cierra el chat; <b>RECHAZADO</b>, <b>ENTREGADO</b> y <b>CANCELADO</b> no lo cierran (regla de 24 horas). Cualquier otro estado (EN RUTA…) quiere decir que la ruta volvió a estar activa y abre el chat si estaba cerrado. Da igual mayúsculas, tildes o «_».</td></tr>
           <tr><td><code>fecha</code></td><td>No (recomendado)</td><td>Cuándo cambió, en ISO 8601. Un aviso más viejo que el último aplicado a esa ruta se ignora: los avisos pueden llegar desordenados.</td></tr>
         </tbody></table></div>
         <small>Se acepta un aviso o una lista: <code>[ {…}, {…} ]</code> (hasta 200).</small>
@@ -343,7 +343,7 @@ export function gsgCourierPage(opts: { nombreNegocio: string; disponible: boolea
         </tbody></table></div>
         <h3>3. Probar</h3>
         <p class="muted">Simula un aviso de GSG. <b>Cierra o abre los chats de verdad</b> y queda en la bitácora marcado como prueba.</p>
-        <div class="rw-prueba"><div><label for="rw-p-ruta">Código de ruta (tracking del pedido)</label><input id="rw-p-ruta" maxlength="120" placeholder="GSG123456"></div><div><label for="rw-p-estado">Estado</label><select id="rw-p-estado"><option>INACTIVA</option><option>FINALIZADA</option><option>EN RUTA</option><option>ACTIVA</option></select></div></div>
+        <div class="rw-prueba"><div><label for="rw-p-ruta">Código de ruta (tracking del pedido)</label><input id="rw-p-ruta" maxlength="120" placeholder="GSG123456"></div><div><label for="rw-p-estado">Estado</label><select id="rw-p-estado"><option>INACTIVO</option><option>RECHAZADO</option><option>ENTREGADO</option><option>CANCELADO</option><option>EN RUTA</option></select></div></div>
         <div class="courier-actions"><button class="btn primario" type="button" id="rw-probar">Probar aviso</button></div>
         <p id="rw-aviso" class="courier-status" role="status" aria-live="polite" hidden></p>
         <h3>4. Rutas y chats cerrados</h3>

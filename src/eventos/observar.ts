@@ -19,7 +19,6 @@ import { archivoDeMensaje, type ArchivoDeMensaje } from '../api/v1/archivos-gsg.
 import { payloadExterno } from '../util/payload-externo.js';
 import { errorDeEnvio } from '../whatsapp/errores-envio.js';
 import { entregaDelMensaje } from '../whatsapp/estado-entrega.js';
-import { notaNoLlegoParaGsg } from '../chat/nota-no-llego.js';
 import type { Message } from '../db/messages.js';
 
 const iso = (d?: Date | null) => (d ?? new Date()).toISOString();
@@ -143,8 +142,6 @@ export function observarRepos(repos: Repos, bus: Bus, archivos?: { publicBase: s
         llegoAWhatsapp: entrega?.llegoAWhatsapp ?? null,
         ...(entrega ? { entrega: { estado: entrega.estado, descripcion: entrega.descripcion } } : {}),
         ...(porQue ? { error: porQue } : {}),
-        // No llego: la nota del chat «Mensaje no llegó al cliente», empujada (la misma del historial).
-        ...(entrega?.llegoAWhatsapp === false ? { nota: notaNoLlegoParaGsg(new Date(), timezone) } : {}),
       });
     },
   };

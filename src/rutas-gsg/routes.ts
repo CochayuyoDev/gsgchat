@@ -12,7 +12,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Repos } from '../db/repos.js';
 import {
-  ESTADOS_QUE_CIERRAN, eventoParaPantalla, generarSecretoRutas, huellaSecreto, leerAvisos, secretoValido,
+  ESTADOS_FINALES, ESTADOS_GSG, ESTADOS_QUE_CIERRAN, eventoParaPantalla, generarSecretoRutas, huellaSecreto, leerAvisos, secretoValido,
   type ServicioRutasGsg,
 } from './servicio.js';
 
@@ -71,6 +71,8 @@ export async function registerRutasGsgRoutes(app: FastifyInstance, deps: DepsRut
       header: HEADER_SECRETO_RUTAS,
       secreto: secreto ? { configurado: true, ultimos: secreto.ultimos, creadoAt: secreto.creadoAt } : { configurado: false },
       estadosQueCierran: ESTADOS_QUE_CIERRAN,
+      estadosFinales: ESTADOS_FINALES,
+      estadosGsg: ESTADOS_GSG,
       rutas: rutas.map((r) => ({ ...r, rutaTexto: r.ruta })),
       eventos: eventos.map(eventoParaPantalla),
     };

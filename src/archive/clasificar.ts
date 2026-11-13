@@ -163,7 +163,11 @@ export function nombreDeEtiqueta(e: string, catalogo?: Catalogo): string {
 /**
  * Las notas que pone el SISTEMA, no la IA: no estan en el catalogo que la IA
  * usa para clasificar (no puede ponerlas por su cuenta), pero viajan a GSG
- * igual que las suyas, en la nota del historial. Ver src/chat/nota-no-llego.ts.
+ * igual que las suyas, en la nota del historial.
+ *
+ * `mensaje_no_llego` (12/11) ya NO se pone: GSG pidio que lo que no sale por
+ * WhatsApp no aparezca en GSG. Queda aqui solo para nombrar las notas viejas
+ * en el panel; el historial de GSG no la muestra (ETIQUETA_NO_LLEGO_RETIRADA).
  */
 export const ETIQUETAS_DEL_SISTEMA: Record<string, { nombre: string; descripcion: string }> = {
   mensaje_no_llego: {
@@ -171,6 +175,9 @@ export const ETIQUETAS_DEL_SISTEMA: Record<string, { nombre: string; descripcion
     descripcion: 'Mensaje no llegó al cliente, por favor comunícate con tu número personal por mensaje o llamada de saldo.',
   },
 };
+
+/** La nota «Mensaje no llegó al cliente», retirada el 12/11 (ver arriba). */
+export const ETIQUETA_NO_LLEGO_RETIRADA = 'mensaje_no_llego';
 
 /** Sin tildes y en minusculas. */
 const llano = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
