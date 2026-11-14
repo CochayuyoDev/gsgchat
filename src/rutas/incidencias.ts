@@ -17,14 +17,18 @@ export type CodigoIncidencia =
   | 'numero_invalido'
   | 'numero_fijo'
   | 'sin_whatsapp'
+  | 'numero_inaccesible'
   | 'numero_equivocado'
   | 'sin_respuesta'
   | 'respondio_sin_ubicacion'
   | 'ubicacion_fuera_de_zona'
   | 'rechaza_contacto'
+  | 'pide_baja'
+  | 'pide_borrar_datos'
   | 'ya_en_curso'
   | 'envio_bloqueado'
   | 'error_envio'
+  | 'no_se_le_escribio'
   | 'incidencia_manual';
 
 export interface Incidencia {
@@ -89,6 +93,17 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     reintentable: false,
     reportable: true,
   },
+  // Pedido del dueño (12/11): si el numero no es accesible se le escribe al
+  // segundo numero del pedido (telefono2); si tampoco lo es, es esto.
+  numero_inaccesible: {
+    codigo: 'numero_inaccesible',
+    titulo: 'Número inaccesible',
+    explicacion: 'Ni el número principal ni el segundo número del cliente son accesibles (sin WhatsApp o no válidos).',
+    queHacer: 'Corregir los teléfonos del cliente en GSG y volver a mandar el pedido, o llamarlo.',
+    requiereHumano: true,
+    reintentable: false,
+    reportable: true,
+  },
   numero_equivocado: {
     codigo: 'numero_equivocado',
     titulo: 'No es la persona',
@@ -143,6 +158,26 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     reintentable: false,
     reportable: true,
   },
+  // Lo pidio el cliente por WhatsApp y lo atiende una persona (regla del dueño,
+  // 09/11): el sistema no lo da de baja ni borra nada solo. Ver src/privacidad.
+  pide_baja: {
+    codigo: 'pide_baja',
+    titulo: 'Pidió la baja',
+    explicacion: 'El cliente escribió que no quiere recibir más mensajes. El bot se paró en su chat y no se le insiste.',
+    queHacer: 'Darlo de baja desde su chat (Chats → «Dar de baja») y coordinar la entrega por teléfono.',
+    requiereHumano: true,
+    reintentable: false,
+    reportable: true,
+  },
+  pide_borrar_datos: {
+    codigo: 'pide_borrar_datos',
+    titulo: 'Pidió borrar sus datos',
+    explicacion: 'El cliente pidió que se eliminen sus datos. El bot se paró en su chat y no se le insiste.',
+    queHacer: 'Cuando su pedido termine, eliminar sus datos desde su chat (Chats → «Eliminar datos del cliente»).',
+    requiereHumano: true,
+    reintentable: false,
+    reportable: true,
+  },
   envio_bloqueado: {
     codigo: 'envio_bloqueado',
     titulo: 'El sistema no dejó enviar',
@@ -158,6 +193,19 @@ export const INCIDENCIAS: Record<CodigoIncidencia, Incidencia> = {
     explicacion: 'El envío salió hacia WhatsApp y volvió con error.',
     queHacer: 'Se reintenta solo. Si insiste, mirar el detalle: suele ser la plantilla o el número.',
     requiereHumano: false,
+    reintentable: true,
+    reportable: true,
+  },
+  // El caso del 11/11: el pedido salió como «no contestó» y en su chat no
+  // había ningún mensaje. Antes de decir «no contestó» se mira que lo contado
+  // como intento esté de verdad en el chat del cliente y que WhatsApp no lo
+  // rechazara (ver `revisarEnviosContados` en motor.ts); si no hay ninguno, es esto.
+  no_se_le_escribio: {
+    codigo: 'no_se_le_escribio',
+    titulo: 'No se le llegó a escribir',
+    explicacion: 'El sistema contó mensajes a este cliente, pero ninguno está en su chat o WhatsApp no los entregó: el cliente no recibió nada, así que no es que no conteste.',
+    queHacer: 'Mirar el detalle (dice qué pasó con cada mensaje), reintentar el mensaje del pedido o llamar al cliente.',
+    requiereHumano: true,
     reintentable: true,
     reportable: true,
   },

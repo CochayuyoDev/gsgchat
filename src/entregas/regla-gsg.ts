@@ -34,6 +34,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Sender, SendJob, SendOutcome } from '../outbound/sender.js';
 import { esEtiquetaDeClasificador } from '../ia/consulta-pedido.js';
+import { esComandoCambioUbicacion, type ResultadoComandoCambio } from './comando-cambio-ubicacion.js';
 
 export interface PuertaReglaGsg {
   modoGsg(): boolean;
@@ -41,6 +42,16 @@ export interface PuertaReglaGsg {
   clienteEnSilencio(phone: string): Promise<boolean>;
   esMotorizado(phone: string): Promise<boolean>;
   atendidoPorPersona?(phone: string, quien?: string): Promise<number>;
+  procederCambioUbicacion?(phone: string, quien: string): Promise<ResultadoComandoCambio>;
+}
+
+/** Quién escribió el comando, para el historial del pedido. */
+function quienEscribe(job: SendJob): string {
+  if (job.emisor?.tipo === 'gsg') {
+    const rol = job.emisor.rol ? `, ${job.emisor.rol}` : '';
+    return `${job.autorNombre?.trim() || `el usuario ${job.emisor.usuarioId}`} (chat de GSG${rol})`;
+  }
+  return `${job.autorNombre?.trim() || 'una persona'} (chat del panel)`;
 }
 
 export interface OpcionesReglaGsg {
@@ -56,6 +67,15 @@ export function conReglaGsg(sender: Sender, opts: OpcionesReglaGsg): Sender {
     ...sender,
     async send(job: SendJob): Promise<SendOutcome> {
       const e = opts.entregas();
+      // «proceder cambio de ubicación» (pedido del dueño, 08/11): escrito por
+      // una persona en el chat del panel o en el de GSG, no se le manda al
+      // cliente: el sistema toma su última ubicación. Lo del cliente nunca
+      // pasa por aquí (entra por el webhook), así que él no puede dispararlo.
+      if (e?.procederCambioUbicacion && job.atiendePersona === true && job.kind === 'freeform' && esComandoCambioUbicacion(job.text)) {
+        const r = await e.procederCambioUbicacion(job.phone, quienEscribe(job));
+        opts.log?.('comando «proceder cambio de ubicación»', { phone: job.phone, resultado: r.resultado });
+        return { ok: true, wamid: `comando:${randomUUID()}`, deliveryId: -1, comando: { nombre: 'cambio_ubicacion', ...r } };
+      }
       if (e && aMano(job) && !(await e.esMotorizado(job.phone).catch(() => false))) {
         // Una persona le escribe al cliente desde el panel: queda atendido.
         const r = await sender.send(job);

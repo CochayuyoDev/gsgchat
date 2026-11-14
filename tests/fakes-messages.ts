@@ -1,29 +1,73 @@
 /** Doble en memoria del repositorio de mensajes. */
 
 import type { Contact } from '../src/db/repos.js';
-import type { Conversation, Message, MessagesRepo, NewMessage } from '../src/db/messages.js';
+import { EstadosAdelantados, type Conversation, type Message, type MessagesRepo, type NewMessage } from '../src/db/messages.js';
+import type { CambioDeLinea, LineasContactoRepo, MotivoCambioLinea } from '../src/db/lineas-contacto.js';
 
 let seq = 1;
 
 export interface FakeMessages extends MessagesRepo {
   _all: Message[];
+  _lineasContacto: LineasContactoRepo;
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Volver a guardar un mensaje no le baja el estado (igual que el `on duplicate key` del repo de verdad). */
+function sinRetroceder(actual: string | null, nuevo: string): string {
+  if (!actual) return nuevo;
+  if (nuevo === 'failed') return 'failed';
+  if (actual === 'failed') return actual;
+  const rango = (s: string) => ({ read: 3, delivered: 2, sent: 1 } as Record<string, number>)[s] ?? 0;
+  return rango(nuevo) > rango(actual) ? nuevo : actual;
+}
 
 export function createFakeMessages(
   contacts: () => Array<Contact & { chatReadAt?: Date | null }>,
 ): FakeMessages {
   const all: Message[] = [];
+  const adelantados = new EstadosAdelantados();
+  const asignadas = new Map<string, { linea: string; desde: Date }>();
+  const cambiosDeLinea: CambioDeLinea[] = [];
+  const moverLinea = (contactId: string, desde: string | null, a: string, motivo: MotivoCambioLinea, at: Date) => {
+    asignadas.set(contactId, { linea: a, desde: at });
+    cambiosDeLinea.unshift({ id: cambiosDeLinea.length + 1, contactId, telefono: contacts().find((c) => c.id === contactId)?.phone ?? '', nombre: null, desdeLineaId: desde, desdeEtiqueta: desde, aLineaId: a, aEtiqueta: a, motivo, createdAt: at });
+  };
+  const lineasContacto: LineasContactoRepo = {
+    async fijarSiNoTiene(contactId, lineaId, at) {
+      if (!asignadas.has(contactId)) moverLinea(contactId, null, lineaId, 'primer_contacto', at);
+      return asignadas.get(contactId)!.linea;
+    },
+    async cambiar(contactId, desde, a, motivo, at) {
+      const actual = asignadas.get(contactId)?.linea ?? null;
+      if (actual === null || actual === desde) moverLinea(contactId, desde, a, motivo, at);
+      return asignadas.get(contactId)!.linea;
+    },
+    async carga(desde) {
+      const porLinea = new Map<string, { lineaId: string; clientes: number; nuevos: number }>();
+      for (const [contactId, a] of asignadas) {
+        if (contacts().find((c) => c.id === contactId)?.tipo === 'grupo') continue;
+        const fila = porLinea.get(a.linea) ?? { lineaId: a.linea, clientes: 0, nuevos: 0 };
+        fila.clientes++;
+        if (a.desde >= desde) fila.nuevos++;
+        porLinea.set(a.linea, fila);
+      }
+      return [...porLinea.values()];
+    },
+    async cambios(opciones = {}) {
+      return cambiosDeLinea.filter((c) => c.desdeLineaId !== null && (!opciones.contactId || c.contactId === opciones.contactId)).slice(0, opciones.limite ?? 20);
+    },
+  };
   const receipts = new Map<string, { expiresAt: Date; estado: 'procesando' | 'aceptado' | 'incierto' }>();
   const controls = new Map<string, { expiresAt: Date; estado: 'procesando' | 'aceptado' | 'fallido' | 'incierto'; wamid: string | null }>();
   const visible = (m: Message, desde?: Date | null) => !desde || (m.createdAt >= desde && !m.payload?.historial && m.payload?.autorNombre !== 'Teléfono');
   const visibleScope = (m: Message, scope?: { afterId: string; retenidosDesde: Date }) => !scope || (BigInt(m.id) > BigInt(scope.afterId) && Boolean(m.storedAt && m.storedAt > scope.retenidosDesde) && visible(m));
-  const iniciadoScope = (contactId: string, scope?: { afterId: string; retenidosDesde: Date }) => !scope || all.some(m => m.contactId === contactId && m.direction === 'out' && Boolean(m.wamid) && !['failed', 'blocked_by_gate'].includes(m.status ?? '') && visibleScope(m, scope));
+  const iniciadoScope = (contactId: string, scope?: { afterId: string; retenidosDesde: Date }) => !scope || all.some(m => m.contactId === contactId && m.direction === 'out' && Boolean(m.wamid) && m.status !== 'blocked_by_gate' && visibleScope(m, scope));
   const inicio = (contactId: string, desde: Date) => all.filter(m => m.contactId === contactId && m.direction === 'out' && m.wamid && visible(m, desde)).sort((a,b) => a.createdAt.getTime() - b.createdAt.getTime())[0]?.createdAt ?? null;
 
   const repo: FakeMessages = {
     _all: all,
+    _lineasContacto: lineasContacto,
 
     async reservarEntrada(provider, wamid, recibidoAt, expiresAt) {
       const key = `${provider}:${wamid}`;
@@ -123,7 +167,8 @@ export function createFakeMessages(
       if (message.wamid) {
         const existing = all.find((m) => m.wamid === message.wamid);
         if (existing) {
-          if (message.status) existing.status = message.status;
+          // Igual que el repo de verdad: el estado no retrocede y un «failed» se queda.
+          if (message.status) existing.status = sinRetroceder(existing.status, message.status);
           return existing.id;
         }
       }
@@ -139,14 +184,39 @@ export function createFakeMessages(
         deliveryId: message.deliveryId ?? null,
         createdAt: message.createdAt ?? new Date(),
         storedAt: new Date(),
+        lineaId: message.lineaId ?? null,
+        lineaEtiqueta: message.lineaEtiqueta ?? null,
+        lineaNumero: message.lineaNumero ?? null,
       };
       all.push(row);
+      // El acuse que llego antes que la fila (ver EstadosAdelantados en el repo de verdad).
+      if (row.direction === 'out' && row.wamid) {
+        const pendiente = adelantados.tomar(row.wamid);
+        if (pendiente) await repo.setStatusByWamid(row.wamid, pendiente.status, pendiente.error);
+      }
+      // Igual que seguirLineaDelMensaje: un mensaje anterior a la asignacion no mueve nada.
+      if (message.lineaId && !message.conservarLinea) {
+        const actual = asignadas.get(message.contactId);
+        if (actual?.linea !== message.lineaId && (!actual || row.createdAt.getTime() >= actual.desde.getTime())) {
+          moverLinea(message.contactId, actual?.linea ?? null, message.lineaId, message.direction === 'in' ? 'cliente_escribio' : 'persona', row.createdAt);
+        }
+      }
       return row.id;
     },
 
-    async setStatusByWamid(wamid, status) {
+    async lineaDeLaConversacion(contactId) {
+      const asignada = asignadas.get(contactId);
+      if (asignada) return asignada.linea;
+      const ultimo = all.filter((m) => m.contactId === contactId && m.lineaId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)[0];
+      return ultimo?.lineaId ?? null;
+    },
+
+    async setStatusByWamid(wamid, status, error) {
       const row = all.find((m) => m.wamid === wamid);
-      if (!row) return;
+      if (!row) {
+        adelantados.guardar(wamid, status, error);
+        return;
+      }
       const rango = (s: unknown) => ({ read: 3, delivered: 2, sent: 1 })[String(s)] ?? 0;
       if (status === 'failed' || rango(status) > rango(row.status)) row.status = status;
     },
@@ -180,6 +250,9 @@ export function createFakeMessages(
                   body: last.body,
                   status: last.status,
                   createdAt: last.createdAt,
+                  lineaId: last.lineaId ?? null,
+                  lineaEtiqueta: last.lineaEtiqueta ?? null,
+                  lineaNumero: last.lineaNumero ?? null,
                 }
               : null,
             unread: mine.filter(
@@ -210,6 +283,12 @@ export function createFakeMessages(
     async referenciaVisiblePorWamid(wamid, retenidosDesde) {
       const m = all.find(x => x.wamid === wamid && x.storedAt && x.storedAt > retenidosDesde && visible(x));
       return m ? { contactId: m.contactId, id: String(m.id) } : null;
+    },
+    async mediaReferenciada() {
+      return all.flatMap(m => {
+        const media = (m.payload as { media?: { id?: unknown; mimeType?: unknown } } | null)?.media;
+        return media && typeof media.id === 'string' ? [{ id: media.id, kind: m.kind, mimeType: typeof media.mimeType === 'string' ? media.mimeType : null }] : [];
+      });
     },
     async limpiarAntes(desde) {
       const ids = new Set(all.filter(m => !m.storedAt || m.storedAt <= desde).slice(0,1000).map(m => m.id));

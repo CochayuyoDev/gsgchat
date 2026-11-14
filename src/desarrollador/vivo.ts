@@ -58,7 +58,7 @@ const puntoAlAzar = (pedido?: { distrito?: string | null; direccion?: string | n
 
 export const escribirSchema = z.object({
   telefono: z.string().trim().min(6).max(20),
-  tipo: z.enum(['texto', 'pin', 'enlace', 'foto', 'audio', 'boton']).default('texto'),
+  tipo: z.enum(['texto', 'pin', 'enlace', 'foto', 'audio', 'video', 'boton']).default('texto'),
   texto: z.string().max(2000).optional(),
   lat: z.coerce.number().min(-90).max(90).optional(),
   lng: z.coerce.number().min(-180).max(180).optional(),
@@ -237,6 +237,8 @@ export const registerVivo: RegistrarSeccion = async (app, deps) => {
       entrada = { phone: telefono, text: `${b.texto?.trim() || 'Esta es mi ubicación'} https://www.google.com/maps?q=${lat},${lng}` };
     } else if (b.tipo === 'foto') {
       entrada = { phone: telefono, adjunto: 'image' };
+    } else if (b.tipo === 'video') {
+      entrada = { phone: telefono, adjunto: 'video' };
     } else if (b.tipo === 'audio') {
       entrada = { phone: telefono, adjunto: 'audio', transcripcion: b.texto?.trim() || undefined };
     } else if (b.tipo === 'boton') {

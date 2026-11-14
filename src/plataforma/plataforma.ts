@@ -34,6 +34,7 @@ import { borrarBase, rellenarBanco, type OpcionesBanco } from '../db/bases.js';
 import { explicarErrorDeBase } from '../runtime.js';
 import { RUBROS } from '../web/login-page.js';
 import { crearDirectorio, type Directorio, type TiendaRegistrada } from './directorio.js';
+import { crearLibroReclamaciones, type LibroReclamaciones } from './reclamos.js';
 import { entornoDeTienda, lugarDeTienda, pareceSlug, slugDe } from './entorno.js';
 import { armarTienda, type BaseDeTienda, type OpcionesTienda, type TiendaViva } from './tienda.js';
 import { enTienda } from './contexto.js';
@@ -95,6 +96,8 @@ export interface ResultadoEntrada {
 
 export interface Plataforma {
   directorio: Directorio;
+  /** El Libro de Reclamaciones (en la base del directorio). */
+  reclamos?: LibroReclamaciones;
   arrancar(): Promise<void>;
   /** La tienda viva por slug (la carga si hace falta). null si no existe o esta suspendida. */
   tiendaPorSlug(slug: string): Promise<TiendaViva | null>;
@@ -167,6 +170,12 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
   const poolDirectorio = createPool(o.base.url, nombres.directorio);
   const cerrarDirectorio = () => poolDirectorio.end();
   const directorio = await crearDirectorio(poolDirectorio);
+  // El Libro de Reclamaciones vive en la misma base del directorio. Si su
+  // tabla no se pudiera crear, la plataforma arranca igual (sin el libro).
+  const reclamos = await crearLibroReclamaciones(poolDirectorio).catch((error) => {
+    log(`no se pudo preparar el Libro de Reclamaciones: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  });
 
   const vivas = new Map<string, Promise<TiendaViva>>();
 
@@ -405,6 +414,7 @@ export async function crearPlataforma(opciones: OpcionesPlataforma): Promise<Pla
 
   return {
     directorio,
+    reclamos,
     arrancar: async () => {
       // La base de reserva se prepara mientras tanto (si ya la hay, no hace nada).
       rellenar();

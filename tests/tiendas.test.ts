@@ -135,7 +135,8 @@ beforeEach(async () => {
 });
 
 describe('el superadministrador controla las tiendas', () => {
-  it('da de alta una tienda con su plan, la tienda se conecta con el token y toma el plan; suspenderla la para; el token rotado la deja fuera', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('da de alta una tienda con su plan, la tienda se conecta con el token y toma el plan; suspenderla la para; el token rotado la deja fuera', async () => {
     const sup = await superDe(maestro);
     // Un admin del maestro no ve Tiendas.
     await maestro.app.inject({ method: 'POST', url: '/admin/usuarios', headers: sup, payload: { usuario: 'dueno', nombre: 'Dueño', clave: 'dueno-2026-wa', rol: 'admin' } });
@@ -212,7 +213,8 @@ describe('el superadministrador controla las tiendas', () => {
     expect(lista.tiendas).toEqual([]);
   });
 
-  it('el semaforo: verde al dia y en linea, ambar por vencer o sin conectar, rojo vencida', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('el semaforo: verde al dia y en linea, ambar por vencer o sin conectar, rojo vencida', async () => {
     const sup = await superDe(maestro);
     const a = (await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda A', membresia: { plan: 'pro', vencimiento: '2026-09-22T23:59:59' } } })).json();
     const b = (await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda B', membresia: { plan: 'prueba', vencimiento: '2026-09-10T23:59:59' } } })).json();
@@ -237,7 +239,8 @@ describe('el superadministrador controla las tiendas', () => {
 const CAPTURA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 describe('el panel del dueño: salud, avisos, historial, cobro por captura', () => {
-  it('la tienda manda su parte de salud con cada consulta y el maestro lo enseña en palabras', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('la tienda manda su parte de salud con cada consulta y el maestro lo enseña en palabras', async () => {
     const sup = await superDe(maestro);
     const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Zapatería Lima', contacto: 'Rosa · 987 654 321', membresia: { plan: 'basico', vencimiento: '2026-10-18T23:59:59' } } });
     const { tienda: t, token } = alta.json();
@@ -277,7 +280,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     void t;
   });
 
-  it('avisos de vencimiento: a 7 días se manda uno solo a la tienda y al dueño, no dos; los textos se editan y se previsualizan', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('avisos de vencimiento: a 7 días se manda uno solo a la tienda y al dueño, no dos; los textos se editan y se previsualizan', async () => {
     const sup = await superDe(maestro);
     // Vence el 24/09 (fin del dia en Lima): desde el 18/09 son 7 dias contados como los cuenta la membresia.
     await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda Siete', contacto: 'Rosa · 987 654 321', membresia: { plan: 'basico', vencimiento: '2026-09-24', contacto: 'Escríbenos al 900 000 000' } } });
@@ -323,7 +327,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     expect((await maestro.app.inject({ method: 'GET', url: '/admin/tiendas/avisos', headers: adm })).statusCode).toBe(403);
   });
 
-  it('el historial de la tienda lista el alta, el pago apuntado y la suspensión; y se le escribe por WhatsApp desde la fila', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('el historial de la tienda lista el alta, el pago apuntado y la suspensión; y se le escribe por WhatsApp desde la fila', async () => {
     const sup = await superDe(maestro);
     const alta = (await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda Historial', contacto: 'Rosa · 987 654 321', membresia: { plan: 'basico', vencimiento: '2026-10-18' } } })).json();
     const id = alta.tienda.id as string;
@@ -355,7 +360,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     expect(otro.statusCode).toBe(404);
   });
 
-  it('cómo me pagan + captura: el dueño configura Yape/Plin, la tienda lo ve en /pagar, manda su captura, el dueño la ve y un clic apunta el pago; rechazo con motivo', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('cómo me pagan + captura: el dueño configura Yape/Plin, la tienda lo ve en /pagar, manda su captura, el dueño la ve y un clic apunta el pago; rechazo con motivo', async () => {
     const sup = await superDe(maestro);
     const alta = (await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Zapatería Lima', membresia: { plan: 'basico', vencimiento: '2026-10-18T23:59:59' } } })).json();
     const { tienda: t, token } = alta;
@@ -423,7 +429,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     expect(sinM.statusCode).toBe(400);
   });
 
-  it('las páginas /tiendas, /mapa y /pagar responden con sesión, redirigen sin ella, sus scripts compilan y el mapa no lleva clave de Google', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('las páginas /tiendas, /mapa y /pagar responden con sesión, redirigen sin ella, sus scripts compilan y el mapa no lleva clave de Google', async () => {
     const vm = await import('node:vm');
     const sup = await superDe(maestro);
     for (const url of ['/tiendas', '/mapa', '/pagar']) {
@@ -450,7 +457,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     expect(pagarHtml).toContain('Ya pagué: mandar mi captura');
   });
 
-  it('/tiendas y /pagar dicen el estado de la membresía con las mismas palabras, y una suspendida no se lee como vencida', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('/tiendas y /pagar dicen el estado de la membresía con las mismas palabras, y una suspendida no se lee como vencida', async () => {
     const vm = await import('node:vm');
     const sup = await superDe(maestro);
 
@@ -515,7 +523,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     expect(p.dinero!('S/', 1234.5)).toBe('S/ 1,234.50');
   });
 
-  it('acceso de soporte: la tienda lo concede desde /pagar, el maestro ve el enlace, el dueño entra como administrador y al quitarlo el enlace deja de valer', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('acceso de soporte: la tienda lo concede desde /pagar, el maestro ve el enlace, el dueño entra como administrador y al quitarlo el enlace deja de valer', async () => {
     const sup = await superDe(maestro);
     const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Zapatería Lima', contacto: 'Rosa · 987 654 321', membresia: { plan: 'basico', vencimiento: '2026-10-18T23:59:59' } } });
     const { token } = alta.json();
@@ -560,7 +569,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     expect((await tienda.app.inject({ method: 'GET', url: '/admin/membresia/soporte', headers: supTienda })).json().soporte).toBeNull();
   });
 
-  it('recibo de pago: al apuntar un pago la tienda recibe por WhatsApp su recibo (editable, con vista previa) y se puede apagar', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('recibo de pago: al apuntar un pago la tienda recibe por WhatsApp su recibo (editable, con vista previa) y se puede apagar', async () => {
     const sup = await superDe(maestro);
     const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda Recibo', contacto: 'Rosa · 987 654 322', membresia: { plan: 'basico', vencimiento: '2026-10-18T23:59:59', precioMes: 49 } } });
     const { tienda: t } = alta.json();
@@ -584,7 +594,8 @@ describe('el panel del dueño: salud, avisos, historial, cobro por captura', () 
     await maestro.app.inject({ method: 'POST', url: '/admin/tiendas/avisos', headers: sup, payload: { reciboActivo: true } });
   });
 
-  it('latido: una tienda que lleva más de una hora sin preguntar por su plan en horario de trabajo se avisa al dueño una vez al día', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): administración de tiendas.
+  it.skip('latido: una tienda que lleva más de una hora sin preguntar por su plan en horario de trabajo se avisa al dueño una vez al día', async () => {
     const sup = await superDe(maestro);
     const alta = await maestro.app.inject({ method: 'POST', url: '/admin/tiendas', headers: sup, payload: { nombre: 'Tienda Callada', membresia: { plan: 'basico', vencimiento: '2026-12-18T23:59:59' } } });
     const { token } = alta.json();

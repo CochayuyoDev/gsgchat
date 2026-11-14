@@ -128,8 +128,8 @@ describe('guardar una conversacion deja lo que hace falta para encontrarla', () 
     expect(a.cerradoPor).toBe('Ali (ali)');
     expect(a.pedido).toBe('P-1001');
     expect(a.resumen).toMatch(/Ana Quispe escribió 1 mensaje/);
-    expect(a.etiquetas).toContain('reclamo');
-    expect(a.etiquetas).toContain('motorizado');
+    // Una sola etiqueta, la de lo ultimo que pidio.
+    expect(a.etiquetas).toEqual(['reclamo']);
     // Del primer mensaje del cliente (minuto 1) a la respuesta de la persona (minuto 2): 60 s.
     expect(a.primeraRespuestaSeg).toBe(60);
     expect(a.adjuntos).toEqual([]);
@@ -142,28 +142,30 @@ describe('guardar una conversacion deja lo que hace falta para encontrarla', () 
     expect((await repos.archives.list({ reason: 'inactividad', limit: 10, offset: 0 })).length).toBe(0);
   });
 
-  it('con la IA, el resumen y las etiquetas salen del modelo (JSON estricto, leido a la defensiva)', async () => {
+  it('con la IA, el resumen y la etiqueta salen del modelo (JSON estricto, leido a la defensiva)', async () => {
     const c = await conversacion('51987000002', 'Luis', [['in', 'quiero cancelar'], ['out', 'Listo.']]);
-    const deps: ArchiveDeps = { repos, dir, ia: () => iaFalsa('Claro: {"resumen":"El cliente canceló su pedido.","etiquetas":["cancelacion","otra_que_no_existe"],"pendiente":"nada"} y ya') };
+    const deps: ArchiveDeps = { repos, dir, ia: () => iaFalsa('Claro: {"resumen":"El cliente canceló su pedido.","pendiente":"nada","etiqueta":"cancelar_entrega"} y ya') };
     const salida = await archivarConversacion(deps, c.id, 'manual');
     const a = (await resumirRespaldo(deps, salida.archive!.id, { forzar: true }))!;
     expect(a.resumen).toBe('El cliente canceló su pedido. Pendiente: nada');
-    expect(a.etiquetas).toEqual(['cancelacion']);
-    // Si la IA contesta basura, quedan las reglas.
+    expect(a.etiquetas).toEqual(['cancelar_entrega']);
+    // Si la IA contesta basura, quedan las reglas (una sola etiqueta del catalogo).
     const b = (await resumirRespaldo({ ...deps, ia: () => iaFalsa('no sé') }, salida.archive!.id, { forzar: true }))!;
     expect(b.resumen).toMatch(/Luis escribió/);
-    expect(b.etiquetas).toContain('cancelacion');
+    expect(b.etiquetas).toEqual(['cancelar_entrega']);
     // Y si falla, tambien.
     const cc = (await resumirRespaldo({ ...deps, ia: () => ({ completar: async () => { throw new Error('caída'); } }) }, salida.archive!.id, { forzar: true }))!;
     expect(cc.resumen).toMatch(/Luis escribió/);
+    expect(cc.etiquetas).toEqual(['cancelar_entrega']);
   });
 
-  it('las reglas entienden lo basico: sin respuesta, cambio, pago, venta', () => {
+  it('las reglas ponen una sola etiqueta del catalogo: sin respuesta es otro, y lo ultimo manda', () => {
     const m = (direction: 'in' | 'out', body: string): Message => ({ id: 1, contactId: 'c', direction, wamid: null, kind: 'text', body, payload: null, status: null, deliveryId: null, createdAt: new Date() }) as unknown as Message;
-    expect(resumirConReglas([m('out', 'Hola')], 'Ana').etiquetas).toEqual(['sin_respuesta']);
-    expect(resumirConReglas([m('in', 'mejor mañana a otra dirección')], 'Ana').etiquetas).toContain('cambio');
-    expect(resumirConReglas([m('in', 'ya pagué por Yape')], 'Ana').etiquetas).toContain('pago');
-    expect(resumirConReglas([m('in', 'quiero comprar dos, cuánto cuesta')], 'Ana').etiquetas).toContain('venta');
+    expect(resumirConReglas([m('out', 'Hola')], 'Ana').etiquetas).toEqual(['otro']);
+    expect(resumirConReglas([m('in', 'mejor mañana a otra dirección')], 'Ana').etiquetas).toEqual(['cambiar_ubicacion']);
+    expect(resumirConReglas([m('in', 'tengo billete de 100, ¿tienen vuelto?')], 'Ana').etiquetas).toEqual(['problema_de_pago']);
+    // Una venta no es una necesidad del reparto.
+    expect(resumirConReglas([m('in', 'quiero comprar dos, cuánto cuesta')], 'Ana').etiquetas).toEqual(['otro']);
     expect(resumirConReglas([m('in', 'jajaja')], null).etiquetas).toEqual(['otro']);
   });
 
@@ -510,7 +512,8 @@ describe('las rutas de la pantalla', () => {
     return { app, fakes, dirRutas, auth: { 'x-api-key': CLAVE_API_PRUEBA } };
   }
 
-  it('cerrar de golpe las de los pedidos terminados hoy, listar con filtros, notas, exportar, papelera', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('cerrar de golpe las de los pedidos terminados hoy, listar con filtros, notas, exportar, papelera', async () => {
     const { app, fakes, dirRutas, auth } = await servidor();
     try {
       const ana = await fakes.contacts.upsertFromInbound('51987000005', 'Ana');
@@ -584,7 +587,8 @@ describe('las rutas de la pantalla', () => {
     }
   });
 
-  it('el adjunto se sirve con su tipo; el enlace de evidencia se abre sin sesion, sin el telefono entero y con la foto; roto o caducado, no', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('el adjunto se sirve con su tipo; el enlace de evidencia se abre sin sesion, sin el telefono entero y con la foto; roto o caducado, no', async () => {
     const { app, fakes, dirRutas, auth } = await servidor();
     try {
       await writeFile(path.join(mediaDir, 'dddddddddddddddddddddddd.jpg'), JPEG);
@@ -649,7 +653,8 @@ describe('las rutas de la pantalla', () => {
     }
   });
 
-  it('ensenar a la IA: con entrenamiento, los pares entran pendientes; sin el, 409 en cristiano', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('ensenar a la IA: con entrenamiento, los pares entran pendientes; sin el, 409 en cristiano', async () => {
     const ensenado: Array<{ filas: Array<{ pregunta: string | null; respuesta: string }>; opts: { origen: string; origenDetalle?: string | null; estado?: string } }> = [];
     const entrenamiento = {
       async ensenarVarias(filas: Array<{ pregunta: string | null; respuesta: string }>, opts: { origen: string; origenDetalle?: string | null; estado?: string }) {
@@ -704,7 +709,8 @@ describe('las rutas de la pantalla', () => {
     }
   });
 
-  it('borrar todo lo de un cliente exige BORRAR; importar un chat del telefono lo deja en la lista', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conversaciones guardadas (/admin/archives).
+  it.skip('borrar todo lo de un cliente exige BORRAR; importar un chat del telefono lo deja en la lista', async () => {
     const { app, fakes, dirRutas, auth } = await servidor();
     try {
       const carla = await fakes.contacts.upsertFromInbound('51987000009', 'Carla');

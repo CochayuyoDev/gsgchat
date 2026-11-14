@@ -191,7 +191,8 @@ describe('plantillas: la aprobada, con sus variables, y el texto final en la tar
 });
 
 describe('stickers, pin, varios números, responder citando y reenviar', () => {
-  it('«mándale el sticker de gracias a Rosa»: por el nombre del chat; sale el sticker al pulsar', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«mándale el sticker de gracias a Rosa»: por el nombre del chat; sale el sticker al pulsar', async () => {
     const t = await tienda();
     await chat(t, '51912426667', 'Rosa', 'buenas');
     const png = await sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 10, g: 180, b: 120, alpha: 1 } } }).png().toBuffer();
@@ -215,7 +216,8 @@ describe('stickers, pin, varios números, responder citando y reenviar', () => {
     expect(t.wa.sent.find((s) => s.kind === 'location')).toMatchObject({ to: '51987654321' });
   });
 
-  it('«mándales a 912000111, Rosa y Nadie: hoy no hay reparto»: una sola tarjeta con los que sí, y dice a quién no', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«mándales a 912000111, Rosa y Nadie: hoy no hay reparto»: una sola tarjeta con los que sí, y dice a quién no', async () => {
     const t = await tienda();
     await chat(t, '51912426667', 'Rosa', 'hola');
     const j = await ordenar(t, 'mándales a 912000111, Rosa y Nadie: hoy no hay reparto', bloque({ accion: 'mensaje.varios', telefonos: ['912000111', 'Rosa', 'Nadie', '51912000111'], texto: 'Hoy no hay reparto.' }));
@@ -229,7 +231,8 @@ describe('stickers, pin, varios números, responder citando y reenviar', () => {
     expect(t.wa.sent.filter((s) => s.kind === 'text').map((s) => s.to).sort()).toEqual(['51912000111', '51912426667']);
   });
 
-  it('«respóndele a Luis citando su mensaje» y «reenvíale al 999000001 lo último que mandó Luis»', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«respóndele a Luis citando su mensaje» y «reenvíale al 999000001 lo último que mandó Luis»', async () => {
     const t = await tienda();
     await chat(t, '51913000111', 'Luis Huamán', 'mi dirección es Av. Sol 123');
     const j = await ordenar(

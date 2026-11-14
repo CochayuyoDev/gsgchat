@@ -18,17 +18,23 @@ import type { ServicioIA } from '../ia/servicio.js';
 import type { ServicioEnvioAutomatico } from '../envio-automatico/servicio.js';
 import type { ServicioVoz } from '../voz/servicio.js';
 import type { ServicioEntregas } from '../entregas/servicio.js';
+import { esComandoCambioUbicacion, type ResultadoComandoCambio } from '../entregas/comando-cambio-ubicacion.js';
 import type { Repos } from '../db/repos.js';
 import type { Sender } from '../outbound/sender.js';
 import type { SettingsService } from '../settings/service.js';
-import type { WhatsAppClient } from '../whatsapp/client.js';
+import { createWhatsAppClient, type WhatsAppClient } from '../whatsapp/client.js';
+import { tipoDeProveedor } from '../whatsapp/modo-lineas.js';
 import { createSeenCache, processChange, type WebhookDeps } from '../whatsapp/webhook.js';
 import type { StokyClient } from '../stoky/client.js';
-import { leerMedia, mediaDirectory } from '../whatsapp/local/media.js';
+import { mediaDirectory } from '../whatsapp/local/media.js';
+import { servirMedia } from '../whatsapp/local/servir.js';
 import { readInbound } from '../handlers/inbound.js';
 import type { PuertoGsg } from '../rutas/gsg.js';
 import { defaultAuthDir, hayVinculacion, sesionLocalPorDefecto, toJid, type SesionLocal } from '../whatsapp/local/session.js';
 import { perteneceAlChatActual } from '../whatsapp/alcance-chat.js';
+import { registerLineasRoutes } from './lineas-routes.js';
+import { registerLineasLimitesRoutes } from './lineas-limites-routes.js';
+import { crearSaludDeLineas } from '../whatsapp/salud-lineas.js';
 
 /** El progreso del trabajo de traer todo el historial (uno a la vez). */
 interface ProgresoHistorial {
@@ -42,6 +48,23 @@ interface ProgresoHistorial {
   sinReferencia: number;
   detalle: string;
 }
+/**
+ * «proceder cambio de ubicación» escrito desde el WhatsApp conectado (lo que
+ * se manda desde el teléfono, nunca lo que entra del cliente). Nunca rompe el
+ * guardado del mensaje.
+ */
+export async function comandoDesdeTelefono(entregas: Pick<ServicioEntregas, 'procederCambioUbicacion'>, phone: string, texto: string, quien: string): Promise<ResultadoComandoCambio | null> {
+  if (!esComandoCambioUbicacion(texto)) return null;
+  try {
+    const r = await entregas.procederCambioUbicacion(phone, quien);
+    console.log(`[comando] «proceder cambio de ubicación» desde el teléfono (${phone}): ${r.resultado}`);
+    return r;
+  } catch (error) {
+    console.error('[comando] fallo el cambio de ubicación pedido desde el teléfono:', error);
+    return null;
+  }
+}
+
 /** Tope por chat: 40 lotes de 50 = 2000 mensajes por vuelta. */
 const LOTES_POR_CHAT = 40;
 
@@ -129,6 +152,11 @@ export interface LocalRoutesDeps {
    * una instalacion con una sola tienda (.wa-auth y .wa-media).
    */
   sesion?: SesionLocal;
+  /** Las lineas de la tienda: para anotar por cual llego cada entrante. */
+  geocodificador?: import('../entregas/geocodificar.js').Geocodificador;
+  lineas?: import('../whatsapp/lineas.js').ServicioLineas;
+  repartoLineas?: import('../whatsapp/reparto-lineas.js').RepartoDeLineas;
+  registroClientes?: import('../whatsapp/registro.js').RegistroClientes;
   authDir?: string;
   mediaDir?: string;
   /** Como se apuntan las lineas de esta sesion (con el nombre de la tienda delante). */
@@ -190,7 +218,7 @@ export async function registerLocalRoutes(
 
   // Los entrantes van por el mismo sitio que los de Meta y los de WAHA: aqui
   // no hay webhook que firmar, pero si la misma deduplicacion por id.
-  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg, seen: createSeenCache() };
+  const webhookDeps: WebhookDeps = { repos, config, sender, wa, settings, catalogo, salud, ajustes: deps.ajustes, stickers: deps.stickers, ia: deps.ia, lista: deps.lista, voz: deps.voz, entregas: deps.entregas, gsg: deps.gsg, seen: createSeenCache(), lineas: deps.lineas };
 
   async function arrancar() {
     if (!hayVinculacion(authDir)) await settings.iniciarVistaChat?.();
@@ -255,6 +283,11 @@ export async function registerLocalRoutes(
           if (!mensaje.grupo && !mensaje.historial && deps.entregas) {
             await deps.entregas.atendidoPorPersona(contacto.phone, 'una persona desde el teléfono').catch(() => 0);
           }
+          // «proceder cambio de ubicación» escrito desde el teléfono: el cliente ya
+          // lo ve (salió del teléfono), pero el sistema toma su última ubicación.
+          if (!mensaje.grupo && !mensaje.historial && deps.entregas && leido.kind === 'text') {
+            await comandoDesdeTelefono(deps.entregas, contacto.phone, String(leido.body ?? ''), 'una persona desde el teléfono (línea principal)');
+          }
           // Pruebas con el MISMO número conectado registrado como motorizado
           // (pedido del dueño, 25/09): los pedidos le llegan al chat «Tú» y lo
           // que conteste ahí (a mano, desde el teléfono) cuenta como respuesta
@@ -268,6 +301,102 @@ export async function registerLocalRoutes(
         }
       },
     });
+  }
+
+  // ------------------------------------------- lineas secundarias (hasta 8)
+  // Cada una con su sesion y su carpeta: lo que entra por ellas pasa por el mismo
+  // processChange que lo de la principal, marcado con su id de linea.
+  if (deps.lineas && deps.registroClientes) {
+    const lineas = deps.lineas;
+    const registro = deps.registroClientes;
+
+    async function arrancarLinea(id: string) {
+      const t = await registro.transporte(id);
+      if (!t?.sesion || !t.authDir) throw new Error('esa linea no tiene sesion local');
+      const etiqueta = t.linea.etiqueta;
+      const marca = `${prefijo}[${etiqueta}]`;
+      const estado = await t.sesion.startLocal({
+        authDir: t.authDir,
+        mediaDir,
+        importarHistorial: false,
+        soloTextoUbicacion: true,
+        aceptarEntrante: (from, timestamp) => perteneceAlChatActual(repos, settings, { from, timestamp }),
+        log: (mensaje) => console.log(`${marca} ${mensaje}`),
+        onChange: async (value) => {
+          try {
+            await processChange('messages', {
+              ...value,
+              lineaId: id,
+              ...(value.messages ? { messages: value.messages.map((message) => ({ ...message, provider: message.provider ?? 'local' })) } : {}),
+            }, webhookDeps);
+          } catch (error) {
+            console.error(`${marca} fallo procesando un entrante:`, error);
+          }
+        },
+        // Lo que se manda desde el telefono de ESA linea queda en el hilo como saliente, con su rotulo.
+        onPropio: async ({ mensaje, status }) => {
+          if (settings.vistaChatDesde?.() || mensaje.grupo) return;
+          try {
+            const actual = (await lineas.obtener(id)) ?? t.linea;
+            const contacto = await repos.contacts.upsertFromInbound(mensaje.from);
+            const leido = readInbound(mensaje);
+            await repos.messages.add({
+              contactId: contacto.id,
+              direction: 'out',
+              wamid: mensaje.id,
+              kind: leido.kind,
+              body: leido.body,
+              payload: payloadDeMensajePropio(leido.payload, Boolean(mensaje.historial)),
+              status,
+              createdAt: new Date(Number(mensaje.timestamp) * 1000 || Date.now()),
+              lineaId: id,
+              lineaEtiqueta: actual.etiqueta,
+              lineaNumero: actual.telefono || t.sesion!.getLocalState().phone || null,
+            });
+            if (!mensaje.historial && deps.entregas && leido.kind === 'text') {
+              await comandoDesdeTelefono(deps.entregas, contacto.phone, String(leido.body ?? ''), `una persona desde el teléfono (línea ${actual.etiqueta})`);
+            }
+          } catch (error) {
+            console.error(`${marca} fallo guardando un mensaje propio:`, error);
+          }
+        },
+      });
+      await registro.sincronizar().catch(() => undefined);
+      return estado;
+    }
+
+    // Al arrancar, cada linea secundaria con vinculacion guardada se reabre sola, una por una.
+    if (deps.autoConectar) {
+      app.addHook('onReady', async () => {
+        for (const linea of await lineas.listar()) {
+          if (linea.principal || !linea.habilitada || linea.proveedor !== 'local') continue;
+          const t = await registro.transporte(linea.id);
+          if (!t?.authDir || !hayVinculacion(t.authDir)) continue;
+          console.log(`${prefijo} reconectando la linea «${linea.etiqueta}»...`);
+          void arrancarLinea(linea.id).catch((error) => console.error(`${prefijo} no se pudo reconectar «${linea.etiqueta}»:`, error));
+        }
+      });
+    }
+
+    await registerLineasRoutes(app, {
+      lineas,
+      registro,
+      arrancarLinea,
+      reparto: deps.repartoLineas,
+      tipoDe: (linea) => tipoDeProveedor(linea.principal ? providerOf(settings.current()) : linea.proveedor),
+      // Se pregunta a Meta por el numero: si contesta, el token y el id valen.
+      probarApi: async (cred) => {
+        const info = await createWhatsAppClient({ ...cred, graphVersion: config.GRAPH_API_VERSION }).getPhoneNumber();
+        return { numero: info.displayPhoneNumber.replace(/\D+/g, ''), nombre: info.verifiedName };
+      },
+      // «Suscribir webhooks» de Meta: sin esto no llega nada de lo que escribe el cliente.
+      suscribirApi: async (cred) => {
+        const r = await createWhatsAppClient({ ...cred, graphVersion: config.GRAPH_API_VERSION }).subscribeApp();
+        if (!r.success) throw new Error('Meta no confirmó la suscripción');
+      },
+      webhookUrl: () => `${config.PUBLIC_BASE_URL.replace(/\/+$/, '')}/webhooks/whatsapp`,
+    });
+    await registerLineasLimitesRoutes(app, { lineas, uso: repos.usoLineas, salud: crearSaludDeLineas({ lineas, registro }) });
   }
 
   /**
@@ -487,15 +616,9 @@ export async function registerLocalRoutes(
    */
   app.get('/admin/local/media/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const datos = await leerMedia(mediaDir, id);
-    if (!datos) return reply.code(404).send({ error: 'ese adjunto no existe' });
-
-    return reply
-      .type(tipoMime(id))
-      // El contenido de un id nunca cambia -sale del wamid-, asi que se puede
-      // cachear para siempre y no volver a pedirlo en cada scroll del chat.
-      .header('cache-control', 'private, max-age=31536000, immutable')
-      .send(datos);
+    // El contenido de un id nunca cambia -sale del wamid-, asi que se puede
+    // cachear para siempre y no volver a pedirlo en cada scroll del chat.
+    return servirMedia(request, reply, mediaDir, id, { 'content-type': tipoMime(id), 'cache-control': 'private, max-age=31536000, immutable' });
   });
 
   /** Desvincula y borra las credenciales: obliga a escanear otra vez. */

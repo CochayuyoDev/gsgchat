@@ -1,4 +1,7 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import type { WebhooksRepo } from '../webhooks/repo.js';
+import { DESCRIPCION_EVENTOS, NOMBRES_EVENTOS, esNombreEvento } from '../eventos/bus.js';
 import { leerCuerpo } from '../api/v1/entregas-gsg.js';
 import { revisarTelefono } from '../rutas/telefono.js';
 import { gsgCourierPage } from './gsg-courier-page.js';
@@ -8,7 +11,36 @@ export async function registerGsgCourierRoutes(app: FastifyInstance, opts: {
   nombreNegocio: () => string;
   disponible: boolean;
   demo?: boolean;
+  /** Los webhooks que avisan a GSG: en «Nuestra API» se eligen sus eventos. */
+  webhooks?: WebhooksRepo;
 }): Promise<void> {
+  const esAdmin = (request: FastifyRequest) => Boolean(request.usuario && !request.usuario.porToken && request.usuario.rol === 'admin');
+
+  // «Avisos a GSG (webhooks)»: la lista con sus eventos y el catálogo para marcarlos.
+  app.get('/admin/webhooks-gsg', async (request, reply) => {
+    if (!esAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador ve los avisos a GSG.' });
+    if (!opts.webhooks) return reply.code(404).send({ error: 'Los avisos por webhook no están disponibles en este servidor.' });
+    return {
+      webhooks: await opts.webhooks.listar(),
+      eventos: NOMBRES_EVENTOS.map((nombre) => ({ nombre, descripcion: DESCRIPCION_EVENTOS[nombre] })),
+    };
+  });
+
+  // Cambia los eventos de un webhook. Vale al instante: GSG no tiene que cambiar nada.
+  app.post<{ Params: { id: string } }>('/admin/webhooks-gsg/:id/eventos', async (request, reply) => {
+    if (!esAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia los avisos a GSG.' });
+    if (!opts.webhooks) return reply.code(404).send({ error: 'Los avisos por webhook no están disponibles en este servidor.' });
+    const leido = z.object({ eventos: z.array(z.string()).max(50) }).safeParse(request.body ?? {});
+    if (!leido.success) return reply.code(400).send({ error: 'Manda la lista de eventos marcados.' });
+    const eventos = [...new Set(leido.data.eventos)];
+    const desconocidos = eventos.filter((e) => e !== '*' && !esNombreEvento(e));
+    if (desconocidos.length) return reply.code(400).send({ error: `Estos eventos no existen: ${desconocidos.join(', ')}.` });
+    if (!eventos.length) return reply.code(400).send({ error: 'Marca al menos un evento: sin ninguno, a GSG no le llegaría nada. Si quieres pararlo, apágalo.' });
+    const webhook = await opts.webhooks.actualizar(request.params.id, { eventos });
+    if (!webhook) return reply.code(404).send({ error: 'Ese webhook ya no existe.' });
+    return { ok: true, webhook };
+  });
+
   // Nuestra API: el endpoint de GSGchat para GSG (direccion, claves, validar, recepciones).
   app.get('/api-gsgchat', async (request, reply) => {
     if (!request.usuario || request.usuario.porToken || request.usuario.rol !== 'admin') {

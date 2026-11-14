@@ -24,7 +24,7 @@ describe('números reportados en MySQL', () => {
   it('una vez por tracking + error, con su pedido guardado; corregido y reabierto', async () => {
     const n = { error: 'telefono_invalido' as const, dia: '2026-10-10', tracking: 'SQL-1', referencia: 'SQL-1', telefono: '12', pedido: { tracking: 'SQL-1', telefono: '12', cliente: 'Ana' } };
     const primero = await reportarNumero({ repos }, n);
-    expect(primero).toMatchObject({ clave: 'SQL-1', error: 'telefono_invalido', estado: 'pendiente', telefono: '12', dia: '2026-10-10', veces: 1 });
+    expect(primero).toMatchObject({ clave: 'SQL-1', error: 'numero_corto', estado: 'pendiente', telefono: '12', dia: '2026-10-10', veces: 1 });
     expect(primero!.pedido).toEqual({ tracking: 'SQL-1', telefono: '12', cliente: 'Ana' });
     expect(await reportarNumero({ repos }, n)).toBeNull();
     // Otro error del mismo tracking es otro reporte.

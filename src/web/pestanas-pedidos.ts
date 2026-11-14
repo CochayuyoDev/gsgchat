@@ -1,7 +1,7 @@
 /**
  * Las pestañas de «Pedidos GSG»: una sola entrada del menú para los pedidos
- * del día, la solicitud de ubicación (el antiguo «Automatización GSG») y sus
- * ajustes. Cada pestaña sigue siendo su propia página (/hoy y
+ * del día, el embudo de chats (los chats por etiqueta), la solicitud de
+ * ubicación (el antiguo «Automatización GSG») y sus ajustes. Cada pestaña sigue siendo su propia página (/hoy y
  * /automatizacion-gsg): solo cambia cómo se llega a ellas.
  *
  * La solicitud de ubicación y los ajustes son de administradores, como antes:
@@ -17,6 +17,7 @@ export const PESTANAS_PEDIDOS_CSS = `
 export function pestanasPedidosHtml(): string {
   return `<nav class="pp-pestanas s-pestanas" aria-label="Pedidos GSG">
   <a href="/hoy" data-pp="pedidos">Pedidos</a>
+  <a href="/embudo-chats" data-pp="embudo">Embudo de chats</a>
   <a href="/automatizacion-gsg" data-pp="solicitud" data-pp-admin hidden>Solicitud de ubicación</a>
   <a href="/automatizacion-gsg#ajustes" data-pp="ajustes" data-pp-admin hidden>Ajustes de chat</a>
 </nav>`;
@@ -25,7 +26,10 @@ export function pestanasPedidosHtml(): string {
 export const PESTANAS_PEDIDOS_JS = String.raw`
 (function () {
   function pestanaActual() {
-    if (location.pathname === '/automatizacion-gsg') return location.hash === '#ajustes' ? 'ajustes' : 'solicitud';
+    /* En la plataforma la ruta lleva delante /tienda/<slug>: se mira el final. */
+    var ruta = location.pathname.replace(/\/+$/, '');
+    if (/\/automatizacion-gsg$/.test(ruta)) return location.hash === '#ajustes' ? 'ajustes' : 'solicitud';
+    if (/\/embudo-chats$/.test(ruta)) return 'embudo';
     return 'pedidos';
   }
   window.marcarPestanaPedidos = function () {

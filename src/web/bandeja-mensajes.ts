@@ -33,7 +33,7 @@ export const mensajeDeErrorHttp = new Function(`${MENSAJE_ERROR_HTTP_JS}\nreturn
 export const BANDEJA_MENSAJES_CSS = `
   .bandeja-mensajes { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra); padding: 14px 18px; margin-top: var(--esp-3); }
   /* Solo llama la atencion cuando hay mensajes por reintentar. */
-  .bandeja-mensajes:has(.caso) { border-color: var(--ambar); box-shadow: inset 3px 0 0 var(--ambar), var(--sombra); }
+  .bandeja-mensajes:has(.caso) { border-color: var(--ambar); background: color-mix(in srgb, var(--ambar-suave) 40%, var(--superficie)); box-shadow: var(--sombra); }
   .bandeja-mensajes .nada { color: var(--texto-suave); font-size: 13.5px; padding: 4px 0 2px; }
   .bandeja-mensajes h3 { margin: 0 0 4px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
   .bandeja-mensajes .insignia { display: inline-block; min-width: 22px; padding: 1px 8px; border-radius: 999px; background: var(--rojo); color: #fff; font-size: 12px; text-align: center; }

@@ -11,9 +11,69 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { createWriteStream, mkdirSync } from 'node:fs';
+import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { Transform, type Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
+
+/** Cuantas descargas de adjuntos corren a la vez; las demas esperan turno. */
+export const DESCARGAS_SIMULTANEAS = 3;
+
+/** Cola con cupo: como mucho `limite` tareas a la vez, el resto espera en orden. */
+export function crearCupo(limite: number) {
+  let activas = 0;
+  const cola: Array<() => void> = [];
+  return async function conCupo<T>(tarea: () => Promise<T>): Promise<T> {
+    if (activas >= limite) await new Promise<void>((seguir) => cola.push(seguir));
+    activas++;
+    try {
+      return await tarea();
+    } finally {
+      activas--;
+      cola.shift()?.();
+    }
+  };
+}
+
+/** El cupo compartido por todas las descargas de adjuntos (QR y Meta). */
+export const conCupoDeDescarga = crearCupo(DESCARGAS_SIMULTANEAS);
+
+/**
+ * Pasa un flujo al disco sin tenerlo entero en memoria, del tamaño que sea.
+ * Escribe a un fichero temporal y lo renombra al terminar: nunca queda un
+ * fichero a medias con el nombre final. Si el flujo se queda mudo 60 s o falla,
+ * se borra lo escrito.
+ */
+export async function guardarFlujo(flujo: Readable | NodeJS.ReadableStream, destino: string): Promise<number> {
+  const temporal = `${destino}.${process.pid}.tmp`;
+  let total = 0;
+  const controlador = new AbortController();
+  let reloj: ReturnType<typeof setTimeout> | undefined;
+  const vigilar = () => {
+    if (reloj) clearTimeout(reloj);
+    reloj = setTimeout(() => controlador.abort(), 60_000);
+  };
+  const contador = new Transform({
+    transform(trozo: Buffer, _codificacion, listo) {
+      total += trozo.length;
+      vigilar();
+      listo(null, trozo);
+    },
+  });
+  vigilar();
+  try {
+    await pipeline(flujo as Readable, contador, createWriteStream(temporal), { signal: controlador.signal });
+    await rename(temporal, destino);
+    return total;
+  } catch (error) {
+    await unlink(temporal).catch(() => undefined);
+    throw error;
+  } finally {
+    if (reloj) clearTimeout(reloj);
+  }
+}
+
 
 /** Los tipos de mensaje de WhatsApp que traen un fichero adjunto. */
 const CON_FICHERO: Record<string, MediaKind> = {
@@ -142,7 +202,7 @@ export function idDeMedia(wamid: string, extension: string): string {
 export interface GuardarMediaDeps {
   dir: string;
   /** Baja el fichero. Se inyecta para poder probar sin red. */
-  descargar: (mensaje: unknown) => Promise<Buffer>;
+  descargar: (mensaje: unknown) => Promise<Buffer | Readable>;
 }
 
 /**
@@ -174,8 +234,14 @@ export async function guardarMedia(
   const mimeType = detalle.mimetype ?? 'application/octet-stream';
   const id = idDeMedia(wamid, extensionDe(mimeType, kind));
 
-  const datos = await deps.descargar(mensaje);
-  await writeFile(path.join(deps.dir, id), datos);
+  const bytes = await conCupoDeDescarga(async () => {
+    const datos = await deps.descargar(mensaje);
+    if (Buffer.isBuffer(datos)) {
+      await writeFile(path.join(deps.dir, id), datos);
+      return datos.length;
+    }
+    return guardarFlujo(datos, path.join(deps.dir, id));
+  });
 
   return {
     id,
@@ -185,9 +251,56 @@ export async function guardarMedia(
     seconds: detalle.seconds,
     voice: detalle.ptt,
     caption: detalle.caption,
-    bytes: datos.length,
+    bytes,
     ...(verUnaVez ? { verUnaVez: true } : {}),
   };
+}
+
+const NOMBRE_VALIDO = /^[0-9a-f]{24}\.[a-z0-9]{1,5}$/;
+
+/** Abre un fichero ya guardado como flujo, sin leerlo entero. Null si no existe. */
+export async function abrirMedia(dir: string, id: string, rango?: { inicio: number; fin: number }): Promise<{ flujo: Readable; bytes: number } | null> {
+  if (!NOMBRE_VALIDO.test(id)) return null;
+  const ruta = path.join(dir, id);
+  const info = await stat(ruta).catch(() => null);
+  if (!info?.isFile()) return null;
+  const { createReadStream } = await import('node:fs');
+  return { flujo: createReadStream(ruta, rango ? { start: rango.inicio, end: rango.fin } : undefined), bytes: info.size };
+}
+
+/**
+ * El `Range: bytes=a-b` de una peticion, para servir solo ese trozo. Sin el, el
+ * navegador no puede saltar a otro punto de un audio o un video ni saber cuanto
+ * dura una nota de voz. null = sin rango (se manda entero); 'invalido' = 416.
+ */
+export function rangoDe(cabecera: string | undefined, total: number): { inicio: number; fin: number } | 'invalido' | null {
+  if (!cabecera) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(cabecera.trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  let inicio: number, fin: number;
+  if (m[1] === '') {
+    const ultimos = Number(m[2]);
+    inicio = Math.max(0, total - ultimos);
+    fin = total - 1;
+  } else {
+    inicio = Number(m[1]);
+    fin = m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1);
+  }
+  if (!Number.isFinite(inicio) || inicio >= total || inicio > fin) return 'invalido';
+  return { inicio, fin };
+}
+
+/** Cuanto pesa un fichero guardado, o null si no esta. */
+export async function tamanoMedia(dir: string, id: string): Promise<number | null> {
+  if (!NOMBRE_VALIDO.test(id)) return null;
+  const info = await stat(path.join(dir, id)).catch(() => null);
+  return info?.isFile() ? info.size : null;
+}
+
+/** Borra un fichero guardado. Devuelve si existia. */
+export async function borrarMedia(dir: string, id: string): Promise<boolean> {
+  if (!NOMBRE_VALIDO.test(id)) return false;
+  return unlink(path.join(dir, id)).then(() => true, () => false);
 }
 
 /** Lee un fichero ya guardado. `id` viene de la URL, asi que se acota. */

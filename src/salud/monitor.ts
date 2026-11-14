@@ -364,6 +364,7 @@ export function crearMonitor(deps: MonitorDeps): Monitor {
       limiteTier: politica.perfil === 'cloud' ? (estado.limite24h ?? limiteDelTier(estado.tier)) : null,
       nuevosContactosHoy: nuevos,
       esContactoNuevo: !contact.primerEnvioAt,
+        enviosTanda: marcapasos.enviosTanda(momento),
     };
   }
 

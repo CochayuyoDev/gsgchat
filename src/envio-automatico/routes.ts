@@ -103,8 +103,9 @@ export async function registerEnvioAutomaticoRoutes(app: FastifyInstance, deps: 
     const actualizada = await repos.rutas.actualizarSolicitud(solicitud.id, {
       estado: 'derivado',
       requiereHumano: true,
-      incidencia: solicitud.incidencia ?? (solicitud.primeraRespuestaAt ? 'respondio_sin_ubicacion' : 'sin_respuesta'),
-      incidenciaDetalle: `quitado de la lista de envío automático por ${quien}`,
+      // Sin ningún mensaje enviado no es «no contestó»: no se le llegó a escribir.
+      incidencia: solicitud.incidencia ?? (solicitud.primeraRespuestaAt ? 'respondio_sin_ubicacion' : solicitud.intentos > 0 ? 'sin_respuesta' : 'no_se_le_escribio'),
+      incidenciaDetalle: `quitado de la lista de envío automático por ${quien}${!solicitud.primeraRespuestaAt && solicitud.intentos === 0 ? ' antes de escribirle' : ''}`,
       proximoIntentoAt: null,
     });
     await repos.rutas.registrarEvento(solicitud.id, 'derivacion', `quitado de la lista de envío automático por ${quien}: pasa a una persona`);

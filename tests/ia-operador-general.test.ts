@@ -77,7 +77,8 @@ describe('el catalogo', () => {
 // ------------------------------------------------------------------ el mapa
 
 describe('panel.mapa', () => {
-  it('sin filtro da las secciones; con seccion o palabra, sus rutas con la forma del body', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('sin filtro da las secciones; con seccion o palabra, sus rutas con la forma del body', async () => {
     const { ctx, llamadas } = ctxFalso();
     const todo = await mapa.ejecutar({}, ctx);
     expect(todo.ok).toBe(true);
@@ -188,7 +189,8 @@ const TRAMPAS = [
 ];
 
 describe('la lista negra: nunca, ni consultar ni hacer', () => {
-  it('las trampas no pasan de revisarUrl', () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('las trampas no pasan de revisarUrl', () => {
     for (const t of TRAMPAS) expect(revisarUrl(t), t).toHaveProperty('motivo');
     for (const p of LISTA_NEGRA) expect(revisarUrl(p), p).toHaveProperty('motivo');
   });
@@ -223,7 +225,8 @@ describe('la lista negra: nunca, ni consultar ni hacer', () => {
 // ------------------------------------------------------ rol, modo y el mapa
 
 describe('lo que no esta en el mapa, el metodo, el rol y «Solo lo de GSG»', () => {
-  it('una ruta que no esta en el mapa: «no» con las parecidas', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('una ruta que no esta en el mapa: «no» con las parecidas', async () => {
     const { ctx, llamadas } = ctxFalso();
     const prep = await prepararAccion(hacer, params(hacer, { metodo: 'POST', ruta: '/admin/motorizado/7', datos: { placa: 'X' } }), ctx);
     expect(prep).toMatchObject({ tipo: 'no', resumen: expect.stringContaining('no está en el mapa') });
@@ -231,7 +234,8 @@ describe('lo que no esta en el mapa, el metodo, el rol y «Solo lo de GSG»', ()
     expect(llamadas).toEqual([]);
   });
 
-  it('el metodo equivocado se dice con los que valen', () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('el metodo equivocado se dice con los que valen', () => {
     const r = resolverRuta('PUT', '/admin/motorizados/7', { esAdmin: true });
     expect(r).toMatchObject({ motivo: expect.stringContaining('POST') });
     expect(resolverRuta('POST', '/admin/entregas/numeros', { esAdmin: true })).toHaveProperty('motivo');
@@ -239,7 +243,8 @@ describe('lo que no esta en el mapa, el metodo, el rol y «Solo lo de GSG»', ()
     expect(resolverRuta('GET', '/admin/entregas/12', { esAdmin: true })).toMatchObject({ entrada: { ruta: '/admin/entregas/:id' }, params: { id: '12' } });
   });
 
-  it('lo de administrador no se prepara ni se hace para un operador', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('lo de administrador no se prepara ni se hace para un operador', async () => {
     const { ctx, llamadas } = ctxFalso({ esAdmin: false });
     const p = params(hacer, { metodo: 'POST', ruta: '/admin/ajustes', datos: { nombreNegocio: 'X' } });
     expect(await prepararAccion(hacer, p, ctx)).toMatchObject({ tipo: 'no', resumen: expect.stringContaining('administrador') });
@@ -257,7 +262,8 @@ describe('lo que no esta en el mapa, el metodo, el rol y «Solo lo de GSG»', ()
     expect(llamadas).toEqual([]);
   });
 
-  it('faltan datos obligatorios: se dice cuales y la forma', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('faltan datos obligatorios: se dice cuales y la forma', async () => {
     const { ctx } = ctxFalso();
     const prep = await prepararAccion(hacer, params(hacer, { metodo: 'POST', ruta: '/admin/motorizados', datos: { nombre: 'Zoe' } }), ctx);
     expect(prep).toMatchObject({ tipo: 'no', resumen: expect.stringContaining('telefono') });
@@ -269,7 +275,8 @@ describe('lo que no esta en el mapa, el metodo, el rol y «Solo lo de GSG»', ()
 describe('panel.hacer: tarjeta en palabras, preparar solo lee', () => {
   const motos = { status: 200, json: { motorizados: [{ id: 7, nombre: 'Carlos Rojas', phone: '51999000001', placa: 'OLD-1', estado: 'activo' }] } };
 
-  it('la tarjeta dice que hace, a quien, antes y despues; preparar solo hace GET', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('la tarjeta dice que hace, a quien, antes y despues; preparar solo hace GET', async () => {
     const { ctx, llamadas } = ctxFalso({ respuestas: { 'GET /admin/motorizados': motos } });
     // Sin metodo y con dos posibles (POST y DELETE): se pregunta.
     expect(await prepararAccion(hacer, params(hacer, { ruta: '/admin/motorizados/7', datos: { placa: 'X' } }), ctx)).toMatchObject({ tipo: 'no', resumen: expect.stringContaining('POST o DELETE') });
@@ -291,7 +298,8 @@ describe('panel.hacer: tarjeta en palabras, preparar solo lee', () => {
     expect(llamadas.at(-1)).toEqual({ method: 'POST', url: '/admin/motorizados/7', body: { placa: 'ABC-123', estado: 'descanso' } });
   });
 
-  it('un DELETE avisa claro y va sin body; si el id no existe, «no»', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('un DELETE avisa claro y va sin body; si el id no existe, «no»', async () => {
     const { ctx, llamadas } = ctxFalso({ respuestas: { 'GET /admin/motorizados': motos } });
     const prep = (await prepararAccion(hacer, params(hacer, { metodo: 'DELETE', ruta: '/admin/motorizados/7' }), ctx)) as Json;
     expect(prep.tipo).toBe('listo');
@@ -306,7 +314,8 @@ describe('panel.hacer: tarjeta en palabras, preparar solo lee', () => {
     expect((await prepararAccion(hacer, params(hacer, { metodo: 'DELETE', ruta: '/admin/motorizados/7', datos: { x: 1 } }), ctx)).tipo).toBe('no');
   });
 
-  it('un error de la ruta se devuelve en palabras', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('un error de la ruta se devuelve en palabras', async () => {
     const { ctx } = ctxFalso({ respuestas: { 'POST /admin/motorizados/7': { status: 404, json: { error: 'Ese motorizado no existe.' } } } });
     const e = await hacer.ejecutar(params(hacer, { metodo: 'POST', ruta: '/admin/motorizados/7', datos: { placa: 'X' } }), ctx);
     expect(e).toMatchObject({ ok: false, resumen: 'Ese motorizado no existe.' });
@@ -316,7 +325,8 @@ describe('panel.hacer: tarjeta en palabras, preparar solo lee', () => {
 // --------------------------------------------------- lo que se devuelve
 
 describe('panel.consultar: sin secretos y recortado', () => {
-  it('quita campos de credenciales a cualquier profundidad y recorta', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('quita campos de credenciales a cualquier profundidad y recorta', async () => {
     const grande = {
       token: 'EAAxxx',
       estado: { accessToken: 'x', apiKey: 'y', tieneToken: true, nombre: 'ok', hijos: [{ password: 'p', clientSecret: 's', pin: '123456', clave: 'e:12', otra: 'x'.repeat(900) }] },
@@ -387,7 +397,8 @@ async function ordenar(t: EscenarioEntregas & { h: Record<string, string> }, tex
 }
 
 describe('de punta a punta: nada cambia hasta «Hacerlo»', () => {
-  it('«agrega al motorizado Zoe»: mapa -> tarjeta -> Hacerlo -> dado de alta por la misma ruta', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('«agrega al motorizado Zoe»: mapa -> tarjeta -> Hacerlo -> dado de alta por la misma ruta', async () => {
     const t = await tienda();
     const j = await ordenar(
       t,

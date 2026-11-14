@@ -41,7 +41,8 @@ describe('pin fuera de Lima y Callao: se registra con un extra que cobra el moto
   });
   afterAll(() => e?.cerrar());
 
-  it('Huaral: se registra y al cliente se le avisa del extra; al motorizado no se le dice nada de eso', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('Huaral: se registra y al cliente se le avisa del extra; al motorizado no se le dice nada de eso', async () => {
     await e.contesta('987420001', { pin: HUARAL });
     const x1 = await e.entrega('X-1');
     expect(x1?.ubicacionEstado).toBe('recibida');

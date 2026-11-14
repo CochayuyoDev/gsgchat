@@ -20,6 +20,7 @@
  * turno, cosa de segundos.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { OutboundQueue } from './queue.js';
 import type { SendJob, Sender } from './sender.js';
 
@@ -80,11 +81,14 @@ export function createMemoryOutboundQueue(opts: MemoryQueueOptions): MemoryOutbo
 
       if (outcome.ok) return;
 
+      // El reintento sale por la linea del primer intento, no por la que toque despues.
+      const job = outcome.whatsappNumberId && (!entrada.job.whatsappNumberId || entrada.job.lineaDelSistema) ? { ...entrada.job, whatsappNumberId: outcome.whatsappNumberId, lineaDelSistema: true } : entrada.job;
+
       // Bloqueo con espera (cupo diario, calidad en amarillo): se reprograma.
       // Bloqueo en firme (baja, sin opt-in): se descarta, insistir suma bloqueos.
       if (outcome.blocked) {
         if (outcome.retryAfterMs) {
-          meter({ ...entrada, readyAt: Date.now() + outcome.retryAfterMs });
+          meter({ ...entrada, job, readyAt: Date.now() + outcome.retryAfterMs });
         }
         return;
       }
@@ -92,7 +96,7 @@ export function createMemoryOutboundQueue(opts: MemoryQueueOptions): MemoryOutbo
       if (outcome.retryable && entrada.intentos + 1 < maxAttempts) {
         // Espera creciente, igual que el backoff exponencial de la otra cola.
         const espera = 5_000 * 2 ** entrada.intentos;
-        meter({ ...entrada, intentos: entrada.intentos + 1, readyAt: Date.now() + espera });
+        meter({ ...entrada, job, intentos: entrada.intentos + 1, readyAt: Date.now() + espera });
       }
     } catch (error) {
       opts.onError?.(error, entrada.job);
@@ -108,7 +112,7 @@ export function createMemoryOutboundQueue(opts: MemoryQueueOptions): MemoryOutbo
   return {
     async enqueue(job, options) {
       meter({
-        job,
+        job: job.claveEnvio ? job : { ...job, claveEnvio: randomUUID() },
         readyAt: Date.now() + (options?.delayMs ?? 0),
         jobId: options?.jobId,
         intentos: 0,
@@ -117,7 +121,7 @@ export function createMemoryOutboundQueue(opts: MemoryQueueOptions): MemoryOutbo
 
     async enqueueMany(jobs) {
       const now = Date.now();
-      for (const job of jobs) meter({ job, readyAt: now, intentos: 0 });
+      for (const job of jobs) meter({ job: job.claveEnvio ? job : { ...job, claveEnvio: randomUUID() }, readyAt: now, intentos: 0 });
       return jobs.length;
     },
 

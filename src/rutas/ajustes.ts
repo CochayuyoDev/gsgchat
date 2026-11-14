@@ -52,6 +52,19 @@ export interface AjustesRutas {
    */
   plantillas: Record<PasoUbicacion, string[]>;
   /**
+   * La plantilla de Meta de CADA recordatorio, en orden: la posición 0 es el
+   * recordatorio 1, la 1 el recordatorio 2... Si hay más recordatorios que
+   * plantillas, se repite la última. Vacío = como antes (`plantillas`).
+   * El primer mensaje no va aquí: su plantilla es la de Pedidos GSG.
+   */
+  plantillasSeguimientos?: string[];
+  /**
+   * Qué dato del pedido va en cada {{n}} de una plantilla (1 nombre, 2 producto,
+   * 3 empresa, 4 código, 5 método de pago, 6 monto, 7 dirección, 8 horario).
+   * Sin entrada, van en ese orden: {{1}} nombre, {{2}} producto...
+   */
+  datosPlantillas?: Record<string, number[]>;
+  /**
    * Redacciones para cuando se escribe libre (cliente no oficial o dentro de
    * la ventana), una por linea. Admiten {nombre}, {negocio}, {tienda} y {pedido}.
    * Vacio = las tres de siempre de cada paso.
@@ -83,6 +96,8 @@ export const ajustesSchema = z.object({
   horaInicio: z.coerce.number().int().min(0).max(23),
   horaFin: z.coerce.number().int().min(1).max(24),
   plantillas: z.object({ solicitud: listaDeNombres, recordatorio: listaDeNombres, insistencia: listaDeNombres }),
+  plantillasSeguimientos: z.array(z.string().trim().min(1).max(120)).max(99),
+  datosPlantillas: z.record(z.string().trim().min(1).max(120), z.array(z.coerce.number().int().min(1).max(8)).max(10)),
   textos: z.object({ solicitud: listaDeTextos, recordatorio: listaDeTextos, insistencia: listaDeTextos }),
   textosAdicionales: textosAdicionalesSchema,
   textosSeguimientos: z.array(z.object({ recordatorio: listaDeTextos, insistencia: listaDeTextos })).max(99),

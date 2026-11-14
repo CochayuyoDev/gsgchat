@@ -62,6 +62,17 @@ const CSS = `
   .burbuja .meta .check.leido { color: #53bdeb; }
   .burbuja .meta .check.fallo { color: var(--bad); }
   .burbuja .tipo { color: var(--muted); font-style: italic; }
+  .burbuja .foto { display: block; max-width: 100%; max-height: 260px; border-radius: 8px; cursor: zoom-in; background: rgba(0,0,0,.06); }
+  .burbuja video { display: block; max-width: 100%; max-height: 300px; border-radius: 8px; background: #000; }
+  .burbuja audio { display: block; width: 240px; max-width: 100%; }
+  .burbuja .pie { margin-top: 4px; }
+  .burbuja .estado { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .burbuja.fallo-envio .estado { color: var(--bad); }
+  .burbuja .reintentar { margin-left: 6px; padding: 1px 8px; font-size: 12px; }
+  .burbuja.enviando { opacity: .75; }
+  #visor { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 50; cursor: zoom-out; }
+  #visor.visible { display: flex; }
+  #visor img { max-width: 94vw; max-height: 94vh; object-fit: contain; }
   .dia { align-self: center; background: var(--header); color: var(--muted); font-size: 12px; padding: 3px 10px; border-radius: 8px; margin: 8px 0; }
   .escribir { background: var(--header); border-top: 1px solid var(--line); padding: 8px 10px; }
   .escribir .fila { display: flex; gap: 8px; align-items: flex-end; }
@@ -115,7 +126,7 @@ async function api(path, options) {
   var res = await fetch(path, {
     method: options.method || 'GET',
     cache: 'no-store',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+    headers: Object.assign({ 'content-type': 'application/json', authorization: 'Bearer ' + token }, options.headers || {}),
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   if (res.status === 401) { tokenCaducado(); throw new Error('La sesión del chat caducó.'); }
@@ -169,23 +180,148 @@ async function abrir(tel, silencioso) {
   }
 }
 
+// El hilo se concilia, no se vuelve a escribir: cada burbuja es un elemento con
+// una clave estable (el id de la fila). Un sondeo que no cambia nada no toca el
+// DOM, y una foto, un video o un audio que ya esta en pantalla se queda tal cual
+// (no se recarga, no pierde el punto de reproduccion). Solo cambian el estado
+// (los checks) y lo que de verdad es nuevo.
+var burbujas = {};          // clave -> elemento
+var firmas = {};            // clave -> lo que se pinto, para saber si cambio
+var hiloPintado = null;     // telefono del hilo que esta en pantalla
+var pendientes = [];        // lo que se esta enviando (o fallo) desde esta pantalla
+
+function claveDe(m) { return 'm' + m.id; }
+
+function firmaMedia(a) { return a ? (a.tipo + '|' + a.mimeType + '|' + (a.bytes || '')) : ''; }
+
+function firmaDe(m) {
+  return [m.texto || '', m.tipo, m.estado || '', firmaMedia(m.archivo)].join('|');
+}
+
+function mediaDe(a, m) {
+  var caja = document.createElement('div');
+  caja.className = 'media';
+  if (a.tipo === 'imagen' || a.tipo === 'sticker') {
+    var img = document.createElement('img');
+    img.className = 'foto'; img.alt = m.texto || 'foto'; img.loading = 'lazy'; img.src = a.url;
+    img.onclick = function () { $('visor-img').src = img.src; $('visor').classList.add('visible'); };
+    caja.appendChild(img);
+  } else if (a.tipo === 'video') {
+    var v = document.createElement('video');
+    v.controls = true; v.preload = 'metadata'; v.playsInline = true; v.src = a.url;
+    caja.appendChild(v);
+  } else if (a.tipo === 'audio') {
+    var au = document.createElement('audio');
+    au.controls = true; au.preload = 'none'; au.src = a.url;
+    caja.appendChild(au);
+  } else {
+    var l = document.createElement('a');
+    l.href = a.url; l.target = '_blank'; l.rel = 'noopener'; l.textContent = '📄 ' + (a.nombre || 'documento');
+    caja.appendChild(l);
+  }
+  return caja;
+}
+
+function checkDe(s) {
+  return s === 'failed' ? '✕' : s === 'read' || s === 'delivered' ? '✓✓' : '✓';
+}
+
+// Solo se llama cuando la burbuja es nueva o cambio algo que se ve.
+function contenidoDe(el, m) {
+  var a = m.archivo;
+  var cuerpo = el.querySelector('.cuerpo');
+  if (!cuerpo) {
+    cuerpo = document.createElement('div'); cuerpo.className = 'cuerpo';
+    var meta = document.createElement('div'); meta.className = 'meta';
+    el.appendChild(cuerpo); el.appendChild(meta);
+  }
+  // El elemento multimedia solo se rehace si el archivo es otro; el enlace firmado se ignora a proposito.
+  if (el.getAttribute('data-media') !== firmaMedia(a)) {
+    var viejo = el.querySelector('.media');
+    if (viejo) viejo.remove();
+    if (a) el.insertBefore(mediaDe(a, m), cuerpo);
+    el.setAttribute('data-media', firmaMedia(a));
+  }
+  var texto = m.texto || '';
+  cuerpo.className = 'cuerpo' + (a ? ' pie' : '');
+  if (texto) { cuerpo.textContent = texto; cuerpo.style.display = ''; }
+  else if (!a) { cuerpo.innerHTML = '<span class="tipo">' + esc(tipoLegible(m.tipo)) + '</span>'; cuerpo.style.display = ''; }
+  else cuerpo.style.display = 'none';
+  var check = '';
+  if (m.direccion === 'saliente') {
+    var s = m.estado;
+    check = '<span class="check' + (s === 'read' ? ' leido' : s === 'failed' ? ' fallo' : '') + '">' + checkDe(s) + '</span>';
+  }
+  el.querySelector('.meta').innerHTML = esc(hora(m.fecha)) + check;
+}
+
+function pendienteEl(p) {
+  var el = burbujas[p.clave];
+  if (!el) {
+    el = document.createElement('div');
+    el.setAttribute('data-clave', p.clave);
+    burbujas[p.clave] = el;
+  }
+  el.className = 'burbuja mia ' + (p.error ? 'fallo-envio' : 'enviando');
+  var html = '<div class="cuerpo">' + esc(p.etiqueta) + '</div><div class="estado">' + (p.error ? esc(p.error) + ' <button class="ghost reintentar">Reintentar</button>' : 'Enviando…') + '</div>';
+  if (el._html !== html) {
+    el._html = html; el.innerHTML = html;
+    var b = el.querySelector('.reintentar');
+    if (b) b.onclick = function () { reintentar(p); };
+  }
+  return el;
+}
+
 function pintarHilo() {
   var c = hilo.contacto;
-  $('quien').innerHTML = '<b>' + esc(c.nombre || c.telefono) + '</b><small>' + esc(c.telefono) + (hilo.ventanaAbierta ? ' · ventana abierta' : '') + '</small>';
-  var html = '', ultimoDia = null;
+  var quien = '<b>' + esc(c.nombre || c.telefono) + '</b><small>' + esc(c.telefono) + (hilo.ventanaAbierta ? ' · ventana abierta' : '') + '</small>';
+  if ($('quien')._html !== quien) { $('quien')._html = quien; $('quien').innerHTML = quien; }
+  var caja = $('mensajes');
+  var cambioHilo = hiloPintado !== c.telefono;
+  if (cambioHilo) { caja.innerHTML = ''; burbujas = {}; firmas = {}; pendientes = []; hiloPintado = c.telefono; }
+  // Si quien lee esta al final, el hilo sigue al ultimo mensaje; si subio a ver algo, no se le mueve.
+  var pegado = cambioHilo || caja.scrollHeight - caja.scrollTop - caja.clientHeight < 80;
+
+  // Lo que se estaba enviando desaparece cuando el mensaje ya viene del servidor.
+  var enServidor = {};
+  hilo.mensajes.forEach(function (m) { if (m.mensajeId) enServidor[m.mensajeId] = true; });
+  pendientes = pendientes.filter(function (p) { return !(p.listo && (!p.mensajeId || enServidor[p.mensajeId])); });
+
+  var deseados = [], vistas = {}, ultimoDia = null;
   hilo.mensajes.forEach(function (m) {
     var d = dia(m.fecha);
-    if (d !== ultimoDia) { html += '<div class="dia">' + esc(d) + '</div>'; ultimoDia = d; }
-    var cuerpo = m.texto ? esc(m.texto) : '<span class="tipo">' + esc(tipoLegible(m.tipo)) + '</span>';
-    var check = '';
-    if (m.direccion === 'saliente') {
-      var s = m.estado;
-      check = '<span class="check' + (s === 'read' ? ' leido' : s === 'failed' ? ' fallo' : '') + '">' + (s === 'failed' ? '✕' : s === 'read' || s === 'delivered' ? '✓✓' : '✓') + '</span>';
+    if (d !== ultimoDia) {
+      var kd = 'd:' + d;
+      if (!burbujas[kd]) { var sep = document.createElement('div'); sep.className = 'dia'; sep.textContent = d; burbujas[kd] = sep; }
+      deseados.push(burbujas[kd]); vistas[kd] = true; ultimoDia = d;
     }
-    html += '<div class="burbuja' + (m.direccion === 'saliente' ? ' mia' : '') + '" data-id="' + esc(m.mensajeId || m.id) + '">' + cuerpo + '<div class="meta">' + esc(hora(m.fecha)) + check + '</div></div>';
+    var k = claveDe(m), el = burbujas[k];
+    if (!el) { el = document.createElement('div'); el.setAttribute('data-clave', k); burbujas[k] = el; }
+    var f = firmaDe(m);
+    if (firmas[k] !== f) {
+      el.className = 'burbuja' + (m.direccion === 'saliente' ? ' mia' : '');
+      if (m.mensajeId) el.setAttribute('data-id', m.mensajeId);
+      contenidoDe(el, m);
+      firmas[k] = f;
+    }
+    deseados.push(el); vistas[k] = true;
   });
-  $('mensajes').innerHTML = html || '<div class="vacio">Todavía no hay mensajes con este contacto.</div>';
-  $('mensajes').scrollTop = $('mensajes').scrollHeight;
+  pendientes.forEach(function (p) { deseados.push(pendienteEl(p)); vistas[p.clave] = true; });
+
+  var vacio = caja.querySelector('.vacio');
+  if (!deseados.length) {
+    if (!vacio) caja.innerHTML = '<div class="vacio">Todavía no hay mensajes con este contacto.</div>';
+  } else if (vacio) vacio.remove();
+
+  Object.keys(burbujas).forEach(function (k) { if (!vistas[k]) { burbujas[k].remove(); delete burbujas[k]; delete firmas[k]; } });
+  // Solo se mueve lo que no esta en su sitio: reinsertar un video que suena lo reiniciaria.
+  var ref = caja.firstChild;
+  deseados.forEach(function (el) {
+    if (el === ref) { ref = ref.nextSibling; return; }
+    caja.insertBefore(el, ref);
+  });
+
+  if (pegado) caja.scrollTop = caja.scrollHeight;
   pintarEscribir();
 }
 
@@ -220,15 +356,41 @@ $('sel-plantilla').onchange = function () {
   $('vista').textContent = p.cuerpo || '';
 };
 
+function etiquetaDe(cuerpo) {
+  return cuerpo.texto || (cuerpo.plantilla ? 'Plantilla ' + cuerpo.plantilla.nombre : cuerpo.pedirUbicacion ? 'Pedir ubicación' : cuerpo.media ? 'Archivo' : 'Mensaje');
+}
+
+function claveUnica() {
+  return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+}
+
+// Cada envio lleva su Idempotency-Key y la conserva en los reintentos: si la
+// primera llamada si salio pero la respuesta se perdio, reintentar no lo manda otra vez.
+// Si el servidor contesto que no salio, el reintento lleva una clave nueva (la anterior repetiria esa respuesta).
+async function intentar(p) {
+  p.error = null; p.listo = false;
+  if (hilo && hiloPintado === p.telefono) pintarHilo();
+  try {
+    var r = await api('/api/v1/mensajes', { method: 'POST', headers: { 'idempotency-key': p.idem }, body: Object.assign({ telefono: p.telefono }, p.cuerpo) });
+    if (r.ok) { p.listo = true; p.mensajeId = r.mensajeId || null; avisar('wa:mensaje', { telefono: p.telefono, direccion: 'saliente', mensajeId: r.mensajeId }); }
+    else { p.error = r.motivo || r.error || 'No salió'; p.idem = 'i' + claveUnica(); }
+  } catch (error) {
+    p.error = error.message;
+    // Sin respuesta (se cayo la red) el envio pudo salir: misma clave. Con una respuesta de error, no salio: clave nueva.
+    if (error.name !== 'TypeError') p.idem = 'i' + claveUnica();
+  }
+  if (p.telefono === actual) { await abrir(actual, true); }
+  cargarLista();
+}
+
+function reintentar(p) { intentar(p); }
+
 async function enviar(cuerpo) {
   if (!actual) return;
-  try {
-    var r = await api('/api/v1/mensajes', { method: 'POST', body: Object.assign({ telefono: actual }, cuerpo) });
-    if (r.ok) { avisar('wa:mensaje', { telefono: actual, direccion: 'saliente', mensajeId: r.mensajeId }); $('texto').value = ''; }
-    else mostrarError(r.motivo || r.error || 'No salió');
-    await abrir(actual, true);
-    cargarLista();
-  } catch (error) { mostrarError(error.message); }
+  var p = { clave: 'p' + claveUnica(), idem: 'i' + claveUnica(), telefono: actual, cuerpo: cuerpo, etiqueta: etiquetaDe(cuerpo), error: null, listo: false, mensajeId: null };
+  pendientes.push(p);
+  if (cuerpo.texto) $('texto').value = '';
+  await intentar(p);
 }
 
 function mostrarError(texto) {
@@ -250,6 +412,7 @@ $('enviar').onclick = function () {
 $('texto').onkeydown = function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('enviar').click(); } };
 $('pedir').onclick = function () { enviar({ pedirUbicacion: true }); };
 $('volver').onclick = function () { app.classList.remove('en-hilo'); };
+$('visor').onclick = function () { $('visor').classList.remove('visible'); $('visor-img').removeAttribute('src'); };
 $('buscar').oninput = function () { clearTimeout($('buscar')._t); $('buscar')._t = setTimeout(cargarLista, 250); };
 
 // --- en vivo ---
@@ -327,6 +490,7 @@ avisar('wa:listo');
     </div>
   </section>
 </div>
+<div id="visor"><img id="visor-img" alt="foto ampliada"></div>
 <div id="velo" class="velo"><div class="caja"><b>La sesión del chat caducó o no llegó.</b><br><small>La web que muestra este chat tiene que entregar un token nuevo.</small></div></div>
 <script>${script}</script>
 </body>

@@ -170,6 +170,46 @@ export function openApi(baseUrl: string): Json {
       },
 
 
+      '/rutas/estado': {
+        post: {
+          tags: ['rutas'],
+          summary: 'Webhook de estados de rutas: GSG avisa que una ruta cambió de estado (INACTIVO cierra el chat; RECHAZADO, ENTREGADO y CANCELADO no)',
+          description: [
+            'Sin clave de API: la llave es el header `x-webhook-secret` (se genera en Nuestra API → Webhook de rutas; se ve una vez).',
+            'GSG manda cuatro estados. INACTIVO: el chat del pedido con ese código de ruta (su tracking, el mismo de la API 1)',
+            'se cierra: no sale ningún mensaje a ese cliente, ni automático ni escrito a mano. RECHAZADO, ENTREGADO y CANCELADO:',
+            'no cierran el chat; sigue la regla de 24 horas. Cualquier otro estado (p. ej. EN RUTA, cuando un operador corrige',
+            'una ruta que estaba en uno de los cuatro) quiere decir que la ruta volvió a estar activa: si el chat estaba cerrado, se abre.',
+            'La ruta se identifica solo por su código (el tracking). Un aviso más viejo que el último aplicado a esa ruta se ignora.',
+            'Se contesta 202 al momento y se procesa detrás; acepta un aviso o una lista (hasta 200).',
+            'En la plataforma, la dirección lleva el nombre de la tienda: `/tienda/<tienda>/api/v1/rutas/estado`.',
+          ].join(' '),
+          parameters: [{ name: 'x-webhook-secret', in: 'header', required: true, schema: { type: 'string' } }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['ruta', 'estado'],
+                  properties: {
+                    ruta: { type: 'string', maxLength: 120, example: 'GSG123456', description: 'El código de ruta: el tracking del pedido (alias: idRuta, codigoRuta, rutaId)' },
+                    estado: { type: 'string', maxLength: 60, example: 'INACTIVO', description: 'INACTIVO (cierra el chat), RECHAZADO, ENTREGADO o CANCELADO (no lo cierran: regla de 24 h). Cualquier otro estado (p. ej. EN RUTA) = la ruta volvió a estar activa: abre el chat si estaba cerrado.' },
+                    fecha: { type: 'string', format: 'date-time', example: '2026-11-12T15:30:00-05:00', description: 'Cuándo cambió (opcional; por defecto, al recibirlo)' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            202: json({ type: 'object', properties: { ok: { type: 'boolean' }, recibidos: { type: 'integer' }, eventos: { type: 'array', items: { type: 'integer' } }, detalle: { type: 'string' } } }),
+            400: error('El aviso no se entiende (VALIDACION): `detalles` dice el campo'),
+            401: error('Falta x-webhook-secret o no es el vigente (SECRETO_INVALIDO)'),
+            503: error('Todavía no se generó el secreto (SIN_CONFIGURAR)'),
+          },
+        },
+      },
+
       '/estado': {
         get: {
           tags: ['estado'],
@@ -217,6 +257,7 @@ export function openApi(baseUrl: string): Json {
         get: {
           tags: ['conversaciones'],
           summary: 'El hilo con un contacto, y si se le puede escribir ahora',
+          description: 'Cada mensaje con foto, video o audio trae `archivo` (url firmada, tipo, mimeType, segundos): el enlace no cambia durante el dia, asi que un <img>, <video> o <audio> no se vuelve a cargar en cada consulta.',
           ...permiso('conversaciones:leer'),
           parameters: [
             { name: 'telefono', in: 'path', required: true, schema: { type: 'string' }, description: 'con codigo de pais, sin +' },
@@ -227,16 +268,17 @@ export function openApi(baseUrl: string): Json {
         },
       },
 
-      '/chat': {
+      '/historial': {
         get: {
           tags: ['conversaciones'],
           summary: 'API 3 (GET): el historial de mensajes de un tracking',
           description: [
             'GSG pide el historial cuando el motorizado abre el chat de un tracking, y GSGchat responde en esa misma llamada con los mensajes del WhatsApp vinculado a ese tracking.',
             'GSG manda SOLO el tracking: el telefono ya lo dio en `POST /entregas` y esta guardado en el pedido (si GSG lo corrigio despues, vale el corregido). Si un cliente tiene varios trackings, comparten chat (`tracking` los lista, el pedido por el que se pregunto primero). El tracking no distingue mayusculas.',
-            'La respuesta trae `tracking` (lista), `contacto` {id, telefono, nombre} y los mensajes (id de WhatsApp, tipo, texto, transcripcion, anuncio, datos, fecha, direccion, autor, emisor, estado y `cursor`, que es lo que se manda en `antesDe`).',
+            'Trae tambien `nota`: la nota automatica del chat, es decir la etiqueta que la IA (o una persona, `origen: manual`) le puso a ese WhatsApp con «Etiquetar chats con IA» (codigo y nombre del catalogo del negocio, el dia y cuando se puso); null si aun no tiene. Es la ultima: si se vuelve a etiquetar, cambia.',
+            'La respuesta trae `tracking` (lista), `contacto` {id, telefono, nombre} y los mensajes (id de WhatsApp, tipo, texto, anuncio, datos, `archivo` (el enlace para ver la foto o el video y escuchar el audio, si lo lleva; los audios no traen transcripcion), fecha, direccion, autor, emisor, estado y `cursor`, que es lo que se manda en `antesDe`).',
             'Esta llamada solo lee el chat. Para escribirle al cliente desde GSG, `POST /chat`.',
-            'Los mismos handlers responden tambien en `GET /messages?chat_id=` y `POST /send-message` (con `chat_id` en lugar de `tracking`): `chat_id` es el tracking. Los webhooks `mensaje.recibido` y `mensaje.enviado` traen `chatId` y `trackings` para saber a que chat van.',
+            'Los mismos handlers responden tambien en `GET /messages?chat_id=` y `POST /send-message` (con `chat_id` en lugar de `tracking`): `chat_id` es el tracking. Los webhooks `mensaje.recibido` y `mensaje.enviado` traen `chatId` y `trackings` para saber a que chat van, y `mensaje.archivo` cuando el mensaje lleva una foto, un video, un audio o un documento: el mismo `archivo` del historial (`url` firmada que abre el fichero sin clave, `tipo`, `mimeType`, `bytes`, `caducaEn`); sin archivo, null. Las fotos, videos y audios que llegan por Meta se guardan en cuanto llegan, asi que no se pierden aunque Meta los borre.',
           ].join(' '),
           ...permiso('conversaciones:leer'),
           parameters: [
@@ -250,6 +292,31 @@ export function openApi(baseUrl: string): Json {
               properties: {
                 tracking: { type: 'array', items: { type: 'string' }, description: 'Los trackings de ese WhatsApp: primero el pedido por el que se pregunto, luego los demas en curso' },
                 contacto: { type: 'object', properties: { id: { type: 'string' }, telefono: { type: 'string' }, nombre: { type: 'string', nullable: true } } },
+                nota: {
+                  type: 'object',
+                  nullable: true,
+                  description: 'La nota automatica del chat (la ultima etiqueta puesta); null si aun no tiene',
+                  properties: {
+                    codigo: { type: 'string', description: 'Codigo del catalogo de etiquetas (p. ej. reagendar_entrega, sin_novedad, otro)' },
+                    nombre: { type: 'string', description: 'Como se ve (p. ej. «Reagendar entrega»)' },
+                    descripcion: { type: 'string', nullable: true, description: 'Que significa, segun el catalogo del negocio' },
+                    dia: { type: 'string', format: 'date', description: 'El dia de la conversacion etiquetada (AAAA-MM-DD, hora de Lima)' },
+                    origen: { type: 'string', enum: ['ia', 'manual', 'reglas'] },
+                    actualizadaEn: { type: 'string', format: 'date-time' },
+                  },
+                },
+                linea: {
+                  type: 'object',
+                  nullable: true,
+                  description: 'La linea de WhatsApp de este chat (por la que salio el pedido): lo que se escriba con POST /api/v1/chat sale por ella; si esta caida, por otra conectada',
+                  properties: {
+                    id: { type: 'string' },
+                    etiqueta: { type: 'string' },
+                    numero: { type: 'string', nullable: true },
+                    conectada: { type: 'boolean', nullable: true },
+                    asignada: { type: 'boolean', description: 'false = el cliente aun no tiene linea: se usa la principal' },
+                  },
+                },
                 mensajes: {
                   type: 'array',
                   items: {
@@ -260,7 +327,6 @@ export function openApi(baseUrl: string): Json {
                       direccion: { type: 'string', enum: ['entrante', 'saliente'] },
                       tipo: { type: 'string' },
                       texto: { type: 'string', nullable: true },
-                      transcripcion: { type: 'string', nullable: true },
                       anuncio: { type: 'object', nullable: true },
                       datos: { type: 'object', nullable: true },
                       fecha: { type: 'string', format: 'date-time' },
@@ -268,7 +334,52 @@ export function openApi(baseUrl: string): Json {
                       autorNombre: { type: 'string', nullable: true },
                       emisor: { type: 'object', nullable: true, description: 'Si lo escribio un usuario de GSG (POST /chat): { tipo, usuarioId, rol, tracking, idExterno }' },
                       voz: { type: 'boolean' },
-                      estado: { type: 'string', nullable: true },
+                      archivo: {
+                        type: 'object',
+                        nullable: true,
+                        description: 'Si el mensaje lleva una foto, un video, un audio o un documento. `url` abre el fichero tal cual, sin clave (va firmada): se puede poner directo en un <img>, <video> o <audio>. Caduca a los 7 dias (410): al volver a pedir el historial llegan enlaces nuevos. Los documentos que no son PDF se descargan en vez de abrirse.',
+                        properties: {
+                          url: { type: 'string', example: 'https://gsgchat.midominio.com/tienda/gsg/archivos/eyJjIjoi....firma' },
+                          tipo: { type: 'string', enum: ['imagen', 'video', 'audio', 'documento', 'sticker'] },
+                          mimeType: { type: 'string', example: 'image/jpeg' },
+                          nombre: { type: 'string', nullable: true, description: 'El nombre del documento' },
+                          segundos: { type: 'integer', nullable: true, description: 'Lo que dura un audio o un video' },
+                          bytes: { type: 'integer', nullable: true },
+                          voz: { type: 'boolean', description: 'Un audio grabado como nota de voz' },
+                          verUnaVez: { type: 'boolean', description: 'Llego como «ver una vez»: aqui queda' },
+                          caducaEn: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                      estado: { type: 'string', nullable: true, description: 'Salientes: sent, delivered, read o failed (el dato crudo de WhatsApp). Para saber si le llegó al cliente, usar `llegoAWhatsapp`.' },
+                      llegoAWhatsapp: {
+                        type: 'boolean',
+                        nullable: true,
+                        description: '¿Llegó al WhatsApp del cliente? true = sí (entregado o leído); null = todavía no se sabe (WhatsApp no confirmó) o es un mensaje del cliente. En este historial nunca viene false: lo que no salió por WhatsApp (rechazado o frenado) no sale en GSG; si WhatsApp rechaza un mensaje minutos después, deja de aparecer aquí.',
+                      },
+                      entrega: {
+                        type: 'object',
+                        nullable: true,
+                        description: 'Solo en salientes: el estado de entrega en palabras, para enseñarlo tal cual.',
+                        properties: {
+                          llegoAWhatsapp: { type: 'boolean', nullable: true },
+                          estado: { type: 'string', enum: ['sin_confirmar', 'enviado', 'entregado', 'leido', 'no_entregado'], description: 'sin_confirmar: salió, sin confirmación de WhatsApp. enviado: WhatsApp lo tiene, el teléfono del cliente aún no confirma (un check). entregado / leido: le llegó. no_entregado: no le llegó.' },
+                          descripcion: { type: 'string' },
+                          minutosSinConfirmar: { type: 'integer', nullable: true, description: 'Solo en sin_confirmar y enviado: minutos que lleva así. Con 30 o más, la descripción avisa de que algo va mal.' },
+                        },
+                      },
+                      error: {
+                        type: 'object',
+                        nullable: true,
+                        description: 'Solo en salientes que no llegaron (`llegoAWhatsapp: false`): por qué no le llegó al cliente.',
+                        properties: {
+                          codigo: { type: 'string', description: 'Código de Meta (131047, 131049...) o del bloqueo interno (window_closed, opt_out...)' },
+                          tipo: { type: 'string', enum: ['meta', 'interno'] },
+                          titulo: { type: 'string', nullable: true, description: 'Texto original de Meta, en inglés' },
+                          motivo: { type: 'string' },
+                          queHacer: { type: 'string' },
+                          reintentar: { type: 'string', enum: ['no', 'esperar', 'si'] },
+                        },
+                      },
                     },
                   },
                 },
@@ -279,6 +390,9 @@ export function openApi(baseUrl: string): Json {
             404: error('No hay ningun pedido con ese tracking, o ese pedido todavia no tiene chat'),
           },
         },
+      },
+
+      '/chat': {
         post: {
           tags: ['conversaciones'],
           summary: 'API 4 (POST): recibir un mensaje que escribe un usuario de GSG',
@@ -290,10 +404,22 @@ export function openApi(baseUrl: string): Json {
           ...permiso('mensajes:enviar'),
           requestBody: { required: true, content: { 'application/json': { schema: {
             type: 'object',
-            required: ['tracking', 'texto', 'idExterno', 'usuario'],
+            required: ['tracking', 'idExterno', 'usuario'],
+            description: 'Hace falta `texto`, `media` o los dos.',
             properties: {
               tracking: { type: 'string', description: 'El tracking del pedido, el mismo que GSG mando en POST /entregas' },
-              texto: { type: 'string', maxLength: 4000, description: 'Lo que se le escribe al cliente' },
+              texto: { type: 'string', maxLength: 4000, description: 'Lo que se le escribe al cliente. Con `media` es el pie de la foto, el video o el documento (un audio no lleva texto)' },
+              media: {
+                type: 'object',
+                description: 'Una foto, un video, un audio o un documento (hasta 16 MB). Va por `url` (GSGchat lo baja) o por `base64` (el fichero dentro del JSON); una de las dos. GSGchat comprueba que es lo que dice ser y lo manda por WhatsApp.',
+                properties: {
+                  url: { type: 'string', description: 'Direccion http(s) de donde se baja el fichero' },
+                  base64: { type: 'string', description: 'El fichero mismo en base64, con o sin el prefijo `data:image/jpeg;base64,`. Para quien no tiene una direccion publica. Ya decodificado, hasta 16 MB' },
+                  tipo: { type: 'string', enum: ['imagen', 'video', 'audio', 'documento'], description: 'Sin el, se deduce del fichero. Fotos: jpeg, png, webp. Videos: mp4, 3gp. Audios: ogg, mp3, m4a, aac, amr' },
+                  nombre: { type: 'string', maxLength: 200, description: 'El nombre con el que se ensena un documento' },
+                  voz: { type: 'boolean', description: 'Un audio como nota de voz' },
+                },
+              },
               idExterno: { type: 'string', maxLength: 191, description: 'El id que GSG le puso a este mensaje: evita duplicados en los reintentos' },
               usuario: {
                 type: 'object',
@@ -309,7 +435,7 @@ export function openApi(baseUrl: string): Json {
           responses: {
             200: json(ref('EnvioOk'), 'Salio por WhatsApp (o ya habia salido: `duplicado: true`)'),
             202: json(ref('EnvioBloqueado'), 'Una guarda lo freno; el motivo dice cual (p. ej. la ventana de 24 h esta cerrada)'),
-            400: error('Falta el tracking, el texto, el idExterno o el usuario'),
+            400: error('Falta el tracking, el idExterno, el usuario o el texto/media; o el fichero de media no se pudo bajar, pesa mas de 16 MB o no es del tipo que dice'),
             404: error('No hay ningun pedido con ese tracking'),
             409: error('El idExterno ya se uso con otro tracking, o ese mensaje se esta enviando ahora mismo'),
             502: json(ref('EnvioError'), 'El proveedor de WhatsApp lo rechazo'),
@@ -320,15 +446,15 @@ export function openApi(baseUrl: string): Json {
       '/messages': {
         get: {
           tags: ['conversaciones'],
-          summary: 'El historial de un chat (alias de GET /chat: `chat_id` es el tracking)',
-          description: 'Igual que `GET /chat?tracking=`, con `chat_id` en lugar de `tracking`. La respuesta es la misma. El `chatId` de los webhooks `mensaje.recibido` y `mensaje.enviado` es el valor que va aqui.',
+          summary: 'El historial de un chat (alias de GET /historial: `chat_id` es el tracking)',
+          description: 'Igual que `GET /historial?tracking=`, con `chat_id` en lugar de `tracking`. La respuesta es la misma. El `chatId` de los webhooks `mensaje.recibido` y `mensaje.enviado` es el valor que va aqui.',
           ...permiso('conversaciones:leer'),
           parameters: [
             { name: 'chat_id', in: 'query', required: true, schema: { type: 'string' }, description: 'El tracking del pedido (el `chatId` del webhook)' },
             { name: 'limite', in: 'query', schema: { type: 'integer', default: 60, maximum: 200 }, description: 'Cuantos mensajes devolver' },
             { name: 'antesDe', in: 'query', schema: { type: 'integer' }, description: 'El `cursor` del mensaje mas antiguo ya recibido' },
           ],
-          responses: { 200: json({ type: 'object' }, 'Igual que GET /chat'), 400: error('Falta chat_id, o limite fuera de 1 a 200'), 404: error('No hay ningun pedido con ese tracking, o todavia no tiene chat') },
+          responses: { 200: json({ type: 'object' }, 'Igual que GET /historial'), 400: error('Falta chat_id, o limite fuera de 1 a 200'), 404: error('No hay ningun pedido con ese tracking, o todavia no tiene chat') },
         },
       },
       '/send-message': {
@@ -443,7 +569,7 @@ export function openApi(baseUrl: string): Json {
           tags: ['entregas'],
           summary: 'GSG empuja: uno o varios pedidos de hoy (sin esperar a que se le pregunte)',
           description: [
-            'Obligatorios en cada pedido (lo que GSG manda siempre): `tracking`, `cliente`, `telefono`, `empresa`, `metodoPago` y `montoCobrar`. Opcionales: `distrito`, `direccion`, `fecRuta`, `telefono2`, `producto` y `cantBultos`. Si falta uno, 400 con `detalles` campo por campo y no se guarda ninguno de la llamada. Con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
+            'Obligatorios en cada pedido (lo que GSG manda siempre): `tracking`, `cliente`, `telefono`, `empresa`, `metodoPago` y `montoCobrar`. Opcionales: `distrito`, `direccion`, `fecRuta`, `telefono2`, `producto` y `cantBultos`. Cada pedido se valida por su cuenta: si falta uno o un dato no vale (p. ej. `producto` de mas de 200 caracteres), ese pedido no se guarda y vuelve en `rechazados` campo por campo, y los demas de la llamada se guardan (201). Si ninguno vale, 400 con `detalles`. Con `lat`/`lng` ya no se le pide la ubicacion al cliente.',
             'La clave decide la tienda: 401 sin clave, con una que no existe o revocada; 403 si es valida pero sin `entregas:gestionar`; 404 si se usa la ruta con nombre de tienda; 409 si la clave esta en dos tiendas.',
             'Cada pedido creado vuelve con su `id` (el de este sistema, leido de la base tras guardarlo; el de GSG va en `idExterno`) y su `mensaje` (el primer mensaje al cliente: retenido, encolado, enviado, reintentando, fallido o incierto). Si el pedido se guardo pero su mensaje no salio, la respuesta sigue siendo 201 y lo cuenta en `avisosMensaje`.',
             '`faltaUbicacion` (por defecto true) y `faltaConfirmar` (por defecto true) dicen que le falta a cada uno; `urgente` lo pone primero hacia el motorizado.',
@@ -679,7 +805,7 @@ export function openApi(baseUrl: string): Json {
             fecRuta: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
             horarioEntrega: { type: 'object', nullable: true, required: ['desde', 'hasta'], description: 'Ventana aproximada de GSG. Sin fechas, desde precede a hasta. Para cruzar medianoche se requieren fechaDesde, fechaHasta y zonaHoraria.', properties: { desde: { type: 'string', example: '22:00' }, hasta: { type: 'string', example: '02:00' }, fechaDesde: { type: 'string', format: 'date', example: '2026-10-07' }, fechaHasta: { type: 'string', format: 'date', example: '2026-10-08' }, zonaHoraria: { type: 'string', example: 'America/Lima' } } },
             observacionCliente: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
-            detalleProducto: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
+            detalleProducto: { oneOf: [{ type: 'string' }, { type: 'number' }], nullable: true, description: 'Sin límite de largo' },
             telefono2: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
             tamano: { oneOf: [{ type: 'string', maxLength: 200 }, { type: 'number' }], nullable: true },
             cantBultos: { oneOf: [{ type: 'integer', minimum: 0 }, { type: 'string', pattern: '^[0-9]+$' }], nullable: true },
@@ -694,13 +820,21 @@ export function openApi(baseUrl: string): Json {
             codigoTracking: { type: 'string', description: 'Alias de tracking; se usa como referencia si se omite referencia' },
             driver: { oneOf: [{ type: 'string' }, { type: 'object', properties: { nombre: { type: 'string' }, telefono: { type: 'string' } } }] },
             montoCobrar: { oneOf: [{ type: 'number' }, { type: 'string' }], description: 'Alias de monto' },
-            producto: { type: 'string', nullable: true, description: 'Lo que se entrega (sale en el primer mensaje): "Zapatillas talla 40"' },
+            producto: { type: 'string', nullable: true, description: 'Lo que se entrega (sale en el primer mensaje): "Zapatillas talla 40". Sin límite de largo: se guarda entero; en la plantilla de WhatsApp va acortado a 300 caracteres.' },
             empresa: { type: 'object', nullable: true, description: 'La tienda que vende: {codigo: "516", nombre: "Zapatería Lima"}. Tambien se acepta empresaCodigo/empresaNombre o tiendaCodigo/tiendaNombre sueltos', properties: { codigo: { type: 'string', nullable: true }, nombre: { type: 'string', nullable: true } } },
             tracking: { type: 'string', nullable: true, description: 'El codigo de seguimiento de GSG: "GSG-A-102345"' },
             nroPedido: { type: 'string', nullable: true, description: 'El numero de pedido de la tienda: "#1042"' },
             metodoPago: { type: 'string', nullable: true, description: '"YAPE", "Efectivo", "Pagado"...' },
             monto: { oneOf: [{ type: 'number' }, { type: 'string' }], nullable: true, description: 'Lo que el motorizado cobra: 85 o "85.00" (un numero sale con 2 decimales)' },
-            remitente: { type: 'string', nullable: true, description: 'Quien firma el envío ("Juan Quispe"). El primer mensaje al cliente dice "Somos GSG Courier"' },          },
+            remitente: { type: 'string', nullable: true, description: 'Quien firma el envío ("Juan Quispe"). El primer mensaje al cliente dice "Somos GSG Courier"' },
+            motorizado: {
+              nullable: true,
+              description: 'Opcional. El motorizado que GSG asignó: {"nombre": "Juan Pérez", "telefono": "999555111"} (o solo el nombre). Con su teléfono, ese motorizado puede escribir «proceder cambio de ubicación» a la línea de GSGchat y se registra la última ubicación que mandó el cliente, aunque haya pasado la hora límite. No se le escribe nada al motorizado por venir aquí.',
+              oneOf: [{ type: 'object', properties: { nombre: { type: 'string', nullable: true }, telefono: { type: 'string', nullable: true } } }, { type: 'string' }],
+            },
+            telefonoMotorizado: { type: 'string', nullable: true, description: 'Lo mismo que motorizado.telefono, suelto.' },
+            firstMessage: { type: 'string', nullable: true, maxLength: 1024, description: 'El texto exacto del PRIMER mensaje que se le manda al cliente por WhatsApp. Si viene, sale tal cual en lugar del texto editable de GSGchat (con el mismo botón de ubicación o de SÍ/NO); si no viene, va el de siempre. Solo cambia ese primer mensaje: los recordatorios y el resto del flujo no cambian. Con la API oficial de Meta fuera de la ventana de 24 h se manda la plantilla aprobada, no este texto.' },
+          },
         },
         NumeroReportado: {
           type: 'object',
@@ -710,7 +844,7 @@ export function openApi(baseUrl: string): Json {
             tracking: { type: 'string', nullable: true },
             referencia: { type: 'string', nullable: true },
             telefono: { type: 'string', nullable: true, description: 'Tal como llego de GSG' },
-            error: { type: 'string', enum: ['telefono_invalido', 'numero_corto', 'numero_largo', 'numero_fijo', 'sin_whatsapp', 'envio_fallido', 'tracking_falta', 'tracking_invalido', 'tracking_duplicado', 'tracking_de_otro_pedido', 'telefono_de_motorizado', 'no_soy_yo'] },
+            error: { type: 'string', enum: ['telefono_invalido', 'numero_corto', 'numero_largo', 'numero_fijo', 'sin_whatsapp', 'numero_inaccesible', 'envio_fallido', 'tracking_falta', 'tracking_invalido', 'tracking_duplicado', 'tracking_de_otro_pedido', 'telefono_de_motorizado', 'no_soy_yo'] },
             titulo: { type: 'string' },
             mensaje: { type: 'string', description: 'Que paso y que hacer, en castellano' },
             detalle: { type: 'string', nullable: true },
@@ -839,7 +973,9 @@ export function openApi(baseUrl: string): Json {
           properties: {
             proveedor: { type: 'string', enum: ['cloud', 'local', 'waha'] },
             configurado: { type: 'boolean' },
-            conectado: { type: 'boolean' },
+            conectado: { type: 'boolean', description: 'true si queda AL MENOS una línea de WhatsApp conectada: con la principal caída, cada chat sale por la línea de su cliente (o por otra viva)' },
+            principalConectada: { type: 'boolean', description: 'si la línea principal está conectada' },
+            lineas: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, etiqueta: { type: 'string' }, numero: { type: 'string' }, principal: { type: 'boolean' }, conectada: { type: 'boolean' } } } },
             numero: { type: 'object', properties: { calidad: { type: 'string' }, nivel: { type: 'string', enum: ['verde', 'amarillo', 'naranja', 'rojo'] }, pausado: { type: 'boolean' }, motivoPausa: { type: 'string', nullable: true }, tier: { type: 'string', nullable: true } } },
             cupoDiario: { type: 'integer' },
             enviadosHoy: { type: 'integer' },
@@ -862,7 +998,7 @@ export function openApi(baseUrl: string): Json {
             media: {
               type: 'object',
               required: ['url'],
-              description: 'Una foto, un video, un audio o un documento: se baja de `url` (hasta 16 MB) y se manda',
+              description: 'Una foto, un video, un audio o un documento: se baja de `url` (hasta 16 MB) y se manda. Se mira el contenido, no la cabecera: fotos jpeg, png o webp; videos mp4 o 3gp; audios ogg, mp3, m4a, aac o amr; otro formato o un `tipo` que no es el del fichero da 400. Para no mandarlo dos veces al reintentar, manda `Idempotency-Key`. El fichero queda guardado y el hilo lo devuelve en `archivo.url`.',
               properties: {
                 url: { type: 'string', example: 'https://mitienda.com/fotos/zapato.png' },
                 tipo: { type: 'string', enum: ['imagen', 'video', 'audio', 'documento'], description: 'sin el, se deduce del tipo del fichero' },
@@ -880,9 +1016,11 @@ export function openApi(baseUrl: string): Json {
           type: 'object',
           properties: {
             ok: { type: 'boolean', enum: [true] },
-            estado: { type: 'string', enum: ['enviado'] },
+            estado: { type: 'string', enum: ['enviado'], description: 'El proveedor lo ACEPTÓ. No quiere decir que le llegó al cliente: eso lo dice `llegoAWhatsapp`.' },
             mensajeId: { type: 'string' },
             entregaId: { type: 'integer' },
+            llegoAWhatsapp: { type: 'boolean', nullable: true, description: 'Al enviar siempre null: todavía no se sabe. La confirmación llega después con el webhook `mensaje.estado` y en el historial.' },
+            entrega: { type: 'object', description: 'El estado de entrega en palabras (estado: sin_confirmar).', properties: { estado: { type: 'string' }, descripcion: { type: 'string' } } },
             voz: { type: 'object', nullable: true, description: 'solo si se pidio `voz: true`', properties: { pedida: { type: 'boolean' }, enviada: { type: 'boolean' }, motivo: { type: 'string', nullable: true } } },
           },
         },
@@ -895,9 +1033,21 @@ export function openApi(baseUrl: string): Json {
             motivo: { type: 'string' },
             reintentarEnMs: { type: 'integer', nullable: true, description: 'si viene, vale la pena volver a intentar entonces' },
             entregaId: { type: 'integer' },
+            llegoAWhatsapp: { type: 'boolean', enum: [false], description: 'No salió: no le llegó.' },
+            entrega: { type: 'object', description: 'estado: no_entregado, con `error` (codigo, motivo, queHacer, reintentar).', properties: { estado: { type: 'string' }, descripcion: { type: 'string' }, error: { type: 'object' } } },
           },
         },
-        EnvioError: { type: 'object', properties: { ok: { type: 'boolean', enum: [false] }, estado: { type: 'string', enum: ['error'] }, error: { type: 'string' }, reintentable: { type: 'boolean' } } },
+        EnvioError: {
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean', enum: [false] },
+            estado: { type: 'string', enum: ['error'] },
+            error: { type: 'string' },
+            reintentable: { type: 'boolean' },
+            llegoAWhatsapp: { type: 'boolean', nullable: true, description: 'false = WhatsApp lo rechazó; null = no se sabe si salió (sin respuesta del proveedor): revisar el historial antes de reenviarlo.' },
+            entrega: { type: 'object', properties: { estado: { type: 'string' }, descripcion: { type: 'string' }, error: { type: 'object', nullable: true } } },
+          },
+        },
         Contacto: {
           type: 'object',
           properties: {
@@ -942,7 +1092,10 @@ export function openApi(baseUrl: string): Json {
             anuncio: { type: 'object', nullable: true, description: 'solo entrantes que vienen de un anuncio de Facebook/Instagram (click to WhatsApp)', properties: { id: { type: 'string', nullable: true }, titulo: { type: 'string', nullable: true }, texto: { type: 'string', nullable: true }, url: { type: 'string', nullable: true }, imagen: { type: 'string', nullable: true }, clid: { type: 'string', nullable: true, description: 'el id del clic (ctwa_clid)' }, origen: { type: 'string', nullable: true, description: 'ad, post...' } } },
             voz: { type: 'boolean', description: 'salio o llego como nota de voz generada' },
             datos: { type: 'object', nullable: true },
-            estado: { type: 'string', nullable: true, description: 'sent, delivered, read, failed' },
+            estado: { type: 'string', nullable: true, description: 'sent, delivered, read, failed (dato crudo). Si le llegó al cliente: `llegoAWhatsapp`.' },
+            llegoAWhatsapp: { type: 'boolean', nullable: true, description: 'true = le llegó (entregado o leído); false = no le llegó (ver `error`); null = sin confirmar todavía, o mensaje del cliente.' },
+            entrega: { type: 'object', nullable: true, description: 'solo salientes: estado de entrega en palabras', properties: { estado: { type: 'string', enum: ['sin_confirmar', 'enviado', 'entregado', 'leido', 'no_entregado'] }, descripcion: { type: 'string' }, minutosSinConfirmar: { type: 'integer', nullable: true } } },
+            error: { type: 'object', nullable: true, description: 'solo si no le llegó: codigo, tipo, titulo, motivo, queHacer, reintentar' },
             fecha: { type: 'string', format: 'date-time' },
           },
         },

@@ -34,9 +34,26 @@ function normalizeQuality(value: string | undefined): TemplateQuality {
   return 'UNKNOWN';
 }
 
-export async function syncTemplates(wa: WhatsAppClient, repos: Repos): Promise<Template[]> {
+/** El motivo con que queda una plantilla del catálogo que la cuenta de Meta no tiene. */
+export const NO_ESTA_EN_META = 'no está en tu cuenta de Meta: créala y apruébala allí para usarla por WhatsApp API';
+
+/**
+ * `marcarAusentes`: solo cuando `wa` es de verdad Meta (la principal de API o
+ * una línea de API). Las del catálogo del sistema que la cuenta no tiene (con
+ * ese nombre e idioma) dejan de contar como aprobadas: antes el motor las
+ * creía aprobadas, las mandaba por la API y Meta las rechazaba (#132001, 10/11).
+ * Las propias (creadas desde el panel) no se tocan.
+ */
+export async function syncTemplates(wa: WhatsAppClient, repos: Repos, opciones: { marcarAusentes?: boolean } = {}): Promise<Template[]> {
   const remote = await wa.listTemplates();
   const synced: Template[] = [];
+  if (opciones.marcarAusentes) {
+    const enMeta = new Set(remote.map((t) => `${t.name}|${t.language}`));
+    for (const local of await repos.templates.list()) {
+      if (local.propia || enMeta.has(`${local.name}|${local.language}`) || local.status === 'DISABLED') continue;
+      await repos.templates.setStatus(local.name, local.language, 'DISABLED', NO_ESTA_EN_META);
+    }
+  }
 
   for (const item of remote) {
     const body = item.components?.find((c) => c.type?.toUpperCase() === 'BODY')?.text ?? '';

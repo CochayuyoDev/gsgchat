@@ -282,7 +282,7 @@ export async function enviarLoQueToca(deps: DepsNucleo, persona: PersonaProceso,
     return { accion: 'envio', dePrueba };
   }
   if (salida.blocked) {
-    if (salida.code === 'sin_conexion' || salida.code === 'rhythm' || salida.code === 'daily_cap' || salida.code === 'contact_spacing' || salida.code === 'contact_daily_cap' || salida.code === 'number_paused') {
+    if (salida.code === 'sin_conexion' || salida.code === 'sin_lineas_disponibles' || salida.code === 'limite_diario' || salida.code === 'rhythm' || salida.code === 'daily_cap' || salida.code === 'contact_spacing' || salida.code === 'contact_daily_cap' || salida.code === 'number_paused') {
       const espera = salida.retryAfterMs ?? 5 * 60_000;
       await repo.actualizarPersona(persona.id, { proximoAt: new Date(ahora.getTime() + espera), ultimo: `esperando su turno: ${salida.reason}` });
       return { accion: 'frenado', motivo: salida.reason, retryAfterMs: espera };

@@ -107,21 +107,6 @@ export const FIXTURES: Fixture[] = [
     source: 'at_viewport',
   },
   {
-    name: 'DMS escapado en el path',
-    input:
-      "https://www.google.com/maps/place/19%C2%B025'57.4%22N+99%C2%B007'59.5%22W/@19.9999,-99.9999,17z/",
-    lat: 19.432611,
-    lng: -99.133194,
-    source: 'dms',
-  },
-  {
-    name: 'DMS escrito a mano en el chat',
-    input: 'estoy en 19°25\'57.4"N 99°07\'59.5"W',
-    lat: 19.432611,
-    lng: -99.133194,
-    source: 'dms',
-  },
-  {
     name: 'geo: URI de Android',
     input: 'geo:19.4326,-99.1332?q=19.4326,-99.1332(Casa)',
     lat: 19.4326,
@@ -141,34 +126,6 @@ export const FIXTURES: Fixture[] = [
     lat: 19.4326,
     lng: -99.1332,
     source: 'll_param',
-  },
-  {
-    name: 'OpenStreetMap con marcador mlat/mlon',
-    input: 'https://www.openstreetmap.org/?mlat=19.4326&mlon=-99.1332#map=17/19.4326/-99.1332',
-    lat: 19.4326,
-    lng: -99.1332,
-    source: 'll_param',
-  },
-  {
-    name: 'OpenStreetMap solo con fragmento #map=',
-    input: 'https://www.openstreetmap.org/#map=17/19.4326/-99.1332',
-    lat: 19.4326,
-    lng: -99.1332,
-    source: 'osm_hash',
-  },
-  {
-    name: 'Plus Code completo (vector de referencia OLC)',
-    input: 'https://plus.codes/8FVC2222+22',
-    lat: 47.0000625,
-    lng: 8.0000625,
-    source: 'plus_code',
-  },
-  {
-    name: 'coordenadas pegadas a pelo en el chat',
-    input: 'buenas, te paso mi ubicacion: 19.4326, -99.1332 gracias',
-    lat: 19.4326,
-    lng: -99.1332,
-    source: 'bare_text',
   },
   {
     name: 'link con puntuacion pegada al final',

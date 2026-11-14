@@ -4,6 +4,13 @@ import { crearPuertoHttp } from '../src/rutas/gsg.js';
 import { datosEnvioDeCrudo, fusionarDatosEnvio } from '../src/entregas/datos-envio.js';
 import { crearEscenarioEntregas } from './escenario-entregas.js';
 import { ubicacionYaRegistrada } from '../src/entregas/ubicacion-unica.js';
+import { FUENTE_DIRECCION_ESCRITA } from '../src/entregas/servicio.js';
+/** Una ubicación propuesta que espera el SÍ del cliente, como la deja una dirección escrita ubicada en el mapa. */
+async function proponer(e: Awaited<ReturnType<typeof crearEscenarioEntregas>>, phone: string, lat: number, lng: number): Promise<void> {
+  for (const x of (await e.repos.entregas.vivasPorTelefono(phone)).filter((x) => x.ubicacionEstado === 'pendiente'))
+    await e.repos.entregas.actualizar(x.id, { pinPropuestoLat: lat, pinPropuestoLng: lng, pinPropuestoAt: e.ahora(), pinPropuestoFuente: FUENTE_DIRECCION_ESCRITA, pinPropuestoDudas: 0 });
+}
+
 const ahora = new Date('2026-10-07T17:00:00Z');
 const posicion = { lat: -12.12, lng: -77.03, actualizadaAt: ahora.toISOString() };
 
@@ -75,10 +82,10 @@ describe('cierre de pendientes', () => {
     try {
       const c=await e.repos.contacts.upsertFromInbound('51987777666','Rosa');
       await e.entregas.crearAMano({referencia:'CITA',telefono:c.phone,faltaUbicacion:true,faltaConfirmacion:false},'prueba');
-      await e.entregas.revisarPin(c,{lat:-12.12,lng:-77.03,fuente:'enlace de mapa'});
+      await proponer(e,c.phone,-12.12,-77.03);
       await e.entregas.vincularPropuesta((await e.entrega('CITA'))!,'viejo');
       e.avanzarSegundos(1);
-      await e.entregas.revisarPin(c,{lat:-12.13,lng:-77.04,fuente:'enlace de mapa'});
+      await proponer(e,c.phone,-12.13,-77.04);
       await e.entregas.vincularPropuesta((await e.entrega('CITA'))!,'vigente');
       expect((await e.entregas.responderPinLejos(c.phone,'si','sí','reglas',undefined,'viejo'))?.tipo).toBe('repregunta');
       expect((await e.entregas.responderPinLejos(c.phone,'si','sí','reglas'))?.tipo).toBe('repregunta');

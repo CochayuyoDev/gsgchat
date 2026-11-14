@@ -47,7 +47,7 @@ const CSS = `
   .buscador input { flex: 1; min-width: 220px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: var(--radio-sm); background: var(--superficie); color: inherit; font: inherit; }
   .buscador input:focus { border-color: var(--primario); outline: 2px solid var(--primario-suave); outline-offset: 0; }
   .indice { display: grid; gap: var(--esp-3); grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-top: var(--esp-3); }
-  .indice h3 { margin: 0 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--texto-suave); }
+  .indice h3 { margin: 0 0 4px; font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--texto-suave); }
   .indice ul { list-style: none; padding: 0; margin: 0; }
   .indice li { margin: 0; }
   .indice a { display: block; padding: 5px 0; font-size: 13.5px; text-decoration: none; }
@@ -67,7 +67,7 @@ const CSS = `
   .modulo .s-ico { flex: none; color: var(--primario); margin-top: 2px; }
   .modulo b { display: block; font-size: 14px; }
   .modulo span { color: var(--texto-suave); font-size: 13px; line-height: 1.4; }
-  .grupo { text-transform: uppercase; letter-spacing: .08em; font-size: 11.5px; color: var(--texto-suave); font-weight: 700; margin: 18px 0 2px; }
+  .grupo { text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--texto-suave); font-weight: 700; margin: 18px 0 2px; }
 
   /* --- cuadriculas de dos columnas (atajos, semaforo, diagnostico) --- */
   .cuadros { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-top: 8px; }
@@ -193,7 +193,7 @@ ${tablaCampos(CAMPOS_FLUJO)}
   { clave: 'empezar', titulo: 'Puesta en marcha', cuerpo: `<ol><li>Conecta el número en <a href="/setup">Conexión WhatsApp</a>.</li>
 <li>Crea la API Key para GSG en <a href="/api-gsgchat#t-claves">Nuestra API</a> y pon la de GSG en <a href="/conexion-gsg">Conexión con GSG</a>.</li>
 <li>Revisa el horario y los mensajes en <a href="/automatizacion-gsg#ajustes">Pedidos GSG → Ajustes de chat</a>.</li>
-<li>Comprueba en el <a href="/panel#inicio">Dashboard</a> que WhatsApp, la API y GSG salen conectados.</li></ol>` },
+<li>Comprueba en el <a href="/panel#inicio">Inicio</a> que WhatsApp, la API y GSG salen conectados.</li></ol>` },
   { clave: 'hoy', titulo: 'Pedidos y ubicación', cuerpo: '<p>Se solicita ubicación hasta tres veces por cliente. Un pin o enlace válido se registra y se devuelve a GSG con tracking, latitud y longitud. Los errores y pedidos sin respuesta quedan visibles para atención humana. Se puede corregir o reintentar desde <a href="/hoy">Pedidos GSG</a>.</p>' },
   { clave: 'automatizacion-gsg', titulo: 'Solicitud de ubicación y ajustes de chat', cuerpo: `<p>En <a href="/automatizacion-gsg">Pedidos GSG → Solicitud de ubicación</a> se ve a quién se le está pidiendo la ubicación y en qué punto va cada uno.</p>
 <p>En <a href="/automatizacion-gsg#ajustes">Ajustes de chat</a> se configura:</p>

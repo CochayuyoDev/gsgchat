@@ -6,7 +6,10 @@
  * justo el problema que este proyecto intenta evitar.
  */
 
+import { Readable } from 'node:stream';
 import type { TemplateComponent } from './types.js';
+import { guardarFlujo } from './local/media.js';
+import { audioParaMeta } from './audio-meta.js';
 
 export interface SendResult {
   wamid: string;
@@ -190,6 +193,16 @@ export interface WhatsAppClient {
    * primero a Meta y lo manda por id; WAHA lo manda en base64.
    */
   sendMedia?(to: string, media: MediaSaliente): Promise<SendResult>;
+  /**
+   * Baja un archivo que llegó por la API oficial de Meta, que en el mensaje
+   * solo trae su id. Los demás proveedores ya lo guardan al recibirlo.
+   */
+  downloadMedia?(mediaId: string): Promise<{ datos: Buffer; mimeType: string }>;
+  /**
+   * Lo mismo, pero directo al disco y por trozos: no entra entero en memoria,
+   * sea cual sea su tamaño. Es lo que usa el servidor.
+   */
+  downloadMediaToFile?(mediaId: string, destino: string): Promise<{ mimeType: string; bytes: number }>;
   sendButtons(
     to: string,
     body: string,
@@ -314,7 +327,8 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     businessAccountId,
     graphVersion = 'v25.0',
     fetchImpl = fetch,
-    baseUrl = 'https://graph.facebook.com',
+    // WHATSAPP_GRAPH_URL solo para probar contra un Meta falso en la propia maquina.
+    baseUrl = process.env.WHATSAPP_GRAPH_URL?.trim().replace(/\/+$/, '') || 'https://graph.facebook.com',
     timeoutMs = TIMEOUT_PROVEEDOR_MS,
   } = opts;
 
@@ -436,6 +450,13 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
     },
 
     async sendMedia(to, media) {
+      if (media.kind === 'audio') {
+        try {
+          media = { ...media, ...(await audioParaMeta(media)) };
+        } catch (error) {
+          throw new WhatsAppApiError(error instanceof Error ? error.message : 'no se pudo preparar el audio', 400, undefined, undefined, false);
+        }
+      }
       const id = await upload(media);
       const cuerpo: Record<string, unknown> = { id };
       if (media.caption && media.kind !== 'audio') cuerpo.caption = media.caption;
@@ -458,6 +479,37 @@ export function createWhatsAppClient(opts: WhatsAppClientOptions): WhatsAppClien
           },
         },
       });
+    },
+
+    async downloadMedia(mediaId) {
+      // Dos pasos: Meta da una URL temporal y esa URL pide el mismo token.
+      const info = await call<{ url?: string; mime_type?: string }>(`${baseUrl}/${graphVersion}/${encodeURIComponent(mediaId)}`, { method: 'GET' });
+      if (!info.url) throw new WhatsAppApiError('Meta no devolvió la dirección del archivo', 502, undefined, undefined, true);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs * 4);
+      try {
+        const response = await fetchImpl(info.url, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal });
+        if (!response.ok) throw new WhatsAppApiError(`no se pudo bajar el archivo (HTTP ${response.status})`, response.status, undefined, undefined, response.status >= 500);
+        return { datos: Buffer.from(await response.arrayBuffer()), mimeType: info.mime_type ?? response.headers.get('content-type') ?? 'application/octet-stream' };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+
+    async downloadMediaToFile(mediaId, destino) {
+      const info = await call<{ url?: string; mime_type?: string }>(`${baseUrl}/${graphVersion}/${encodeURIComponent(mediaId)}`, { method: 'GET' });
+      if (!info.url) throw new WhatsAppApiError('Meta no devolvió la dirección del archivo', 502, undefined, undefined, true);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs * 4);
+      try {
+        const response = await fetchImpl(info.url, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal });
+        if (!response.ok) throw new WhatsAppApiError(`no se pudo bajar el archivo (HTTP ${response.status})`, response.status, undefined, undefined, response.status >= 500);
+        if (!response.body) throw new WhatsAppApiError('Meta no mandó el archivo', 502, undefined, undefined, true);
+        const bytes = await guardarFlujo(Readable.fromWeb(response.body as never), destino);
+        return { mimeType: info.mime_type ?? response.headers.get('content-type') ?? 'application/octet-stream', bytes };
+      } finally {
+        clearTimeout(timer);
+      }
     },
 
     sendTemplate(to, name, language, components) {

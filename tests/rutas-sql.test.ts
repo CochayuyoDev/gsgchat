@@ -165,7 +165,8 @@ describe('lotes y solicitudes', () => {
       proximoIntentoAt: despues, requiereHumano: s === humano,
     });
     expect(await repos.rutas.liberarFrenosCuenta()).toBe(1);
-    expect((await repos.rutas.solicitud(salud!.id))!.proximoIntentoAt!.getTime()).toBeLessThanOrEqual(Date.now());
+    // La hora la pone la base y el reloj de la prueba es el de Node: pueden diferir unos milisegundos.
+    expect((await repos.rutas.solicitud(salud!.id))!.proximoIntentoAt!.getTime()).toBeLessThanOrEqual(Date.now() + 2000);
     expect((await repos.rutas.solicitud(desconectado!.id))!.proximoIntentoAt!.getTime()).toBe(despues.getTime());
     expect((await repos.rutas.solicitud(humano!.id))!.requiereHumano).toBe(true);
   });

@@ -223,9 +223,22 @@ export function esEventoDePrueba(payload: unknown): boolean {
   return /"(telefono|phone|to|from|wa_id)":"(?:\+?51)?000[01]\d{5}"/.test(texto) || /"referencia":"PRUEBA-/.test(texto);
 }
 
+/**
+ * Si un evento cuenta un mensaje que NO salio por WhatsApp (rechazado o
+ * frenado). Regla de GSG (12/11): si no sale en WhatsApp, no sale en GSG; ni
+ * `mensaje.estado` con `llegoAWhatsapp: false` ni nota «no llegó». Dentro de
+ * GSGchat el bus lo sigue repartiendo (el reparto y el panel lo necesitan).
+ */
+export function esMensajeQueNoSalio(evento: NombreEvento, payload: unknown): boolean {
+  if (evento !== 'mensaje.estado') return false;
+  const p = payload as { estado?: unknown; llegoAWhatsapp?: unknown } | null;
+  return p?.llegoAWhatsapp === false || p?.estado === 'failed' || p?.estado === 'blocked_by_gate';
+}
+
 export function encolarEventos(bus: Bus, repo: WebhooksRepo, log?: DespachadorDeps['log']): () => void {
   return bus.escucharTodo(async (evento: NombreEvento, payload) => {
     if (esEventoDePrueba(payload)) return;
+    if (esMensajeQueNoSalio(evento, payload)) return;
     const suscritos = await repo.activosPara(evento);
     for (const w of suscritos) {
       try {

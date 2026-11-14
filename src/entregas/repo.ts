@@ -153,20 +153,36 @@ export interface DatosEnvio {
    */
   motorizadoNombre?: string | null;
   telefonoMotorizado?: string | null;
+  /**
+   * `firstMessage` del contrato: el texto exacto del PRIMER mensaje que se
+   * le manda al cliente por este pedido, redactado por GSG. Si viene,
+   * reemplaza al texto editable de GSGchat solo en ese primer mensaje; los
+   * recordatorios y el resto del flujo siguen igual.
+   */
+  firstMessage?: string | null;
 }
+
+/** Lo maximo que admite WhatsApp en el cuerpo de un mensaje con botones. */
+export const MAX_FIRST_MESSAGE = 1024;
 
 const CLAVES_DATOS_ENVIO: Array<keyof DatosEnvio> = ['costServ', 'referenciaDireccion', 'fecRegistro', 'fecRuta', 'observacionCliente', 'detalleProducto', 'telefono2', 'tamano', 'cantBultos', 'clientePagaDelivery', 'sede', 'tipoRuta', 'nroDocumento', 'agenciaNombre', 'agenciaDestino', 'pagoEnDestino', 'producto', 'empresaCodigo', 'empresaNombre', 'tracking', 'nroPedido', 'metodoPago', 'monto', 'remitente', 'motorizadoNombre', 'telefonoMotorizado'];
 
-/** Solo los campos con texto (recortados a 200); null si no queda ninguno. */
+/** El producto y su detalle se guardan enteros, con cualquier largo (pedido del dueño, 11/11). */
+const SIN_TOPE: ReadonlySet<keyof DatosEnvio> = new Set<keyof DatosEnvio>(['producto', 'detalleProducto']);
+
+/** Solo los campos con texto (recortados a 200, salvo el producto y su detalle); null si no queda ninguno. */
 export function datosEnvioLimpios(d: DatosEnvio | null | undefined): DatosEnvio | null {
   if (!d || typeof d !== 'object') return null;
   const limpio: DatosEnvio = {};
   for (const clave of [...CLAVES_DATOS_ENVIO, 'horarioEntregaDesde', 'horarioEntregaHasta', 'horarioEntregaFechaDesde', 'horarioEntregaFechaHasta', 'horarioEntregaZonaHoraria'] as Array<keyof DatosEnvio>) {
     const v = (d as Record<string, unknown>)[clave];
     if (v === null || v === undefined) continue;
-    const texto = String(v).trim().slice(0, 200);
+    const texto = SIN_TOPE.has(clave) ? String(v).trim() : String(v).trim().slice(0, 200);
     if (texto) limpio[clave] = texto;
   }
+  // El primer mensaje es un texto entero (con saltos de linea): no se recorta a 200.
+  const primero = (d as Record<string, unknown>).firstMessage;
+  if (typeof primero === 'string' && primero.trim()) limpio.firstMessage = primero.trim().slice(0, MAX_FIRST_MESSAGE);
   return Object.keys(limpio).length ? limpio : null;
 }
 

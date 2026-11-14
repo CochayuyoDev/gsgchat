@@ -20,6 +20,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 # mysqldump, para la copia diaria de la base (sin el, se usa el volcado propio).
 RUN apk add --no-cache mariadb-client
+# ffmpeg: pasa los audios (webm del navegador, wav...) a ogg/opus, el formato de las notas de voz de WhatsApp.
+RUN apk add --no-cache ffmpeg
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist

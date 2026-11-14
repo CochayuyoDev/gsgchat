@@ -178,7 +178,8 @@ describe('lo que se valida de cada dato', () => {
 // ------------------------------------------------------------------ plantillas de punta a punta
 
 describe('Pedir y validar datos', () => {
-  it('flujo completo: ubicación, un DNI que no vale, el bueno, la dirección y la foto; cierre al final', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('flujo completo: ubicación, un DNI que no vale, el bueno, la dirección y la foto; cierre al final', async () => {
     const t = await armar();
     const p = await t.desde('datos');
     const r = await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre\n000000201;Ana Ruiz' });
@@ -219,7 +220,8 @@ describe('Pedir y validar datos', () => {
     expect(await t.repo.vivaPorTelefono(tel)).toBeNull();
   });
 
-  it('«¿para qué?» se explica con el texto del paso y se vuelve a pedir; una consulta ajena recibe el cierre y pasa a una persona', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('«¿para qué?» se explica con el texto del paso y se vuelve a pedir; una consulta ajena recibe el cierre y pasa a una persona', async () => {
     const t = await armar();
     const p = await t.desde('datos');
     await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre\n000000202;Luis Paz\n000000203;Rosa Díaz' });
@@ -258,7 +260,8 @@ describe('Pedir y validar datos', () => {
     expect(fin.motivo).toMatch(/No respondió a 3 mensajes/);
   });
 
-  it('a la tercera respuesta que no vale pasa a una persona', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('a la tercera respuesta que no vale pasa a una persona', async () => {
     const t = await armar();
     const p = await t.desde('datos');
     await t.procesos.cargarPersonas(p.id, { texto: '000000205;Elena' });
@@ -272,7 +275,8 @@ describe('Pedir y validar datos', () => {
 });
 
 describe('Confirmaciones y recordatorios', () => {
-  it('SÍ con el botón: confirma y, con la cita dentro de una hora, el recordatorio sale en el mismo mensaje', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('SÍ con el botón: confirma y, con la cita dentro de una hora, el recordatorio sale en el mismo mensaje', async () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
     await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n000000301;Ana;${hoyLima()};${enMinutos(60)}` });
@@ -287,7 +291,8 @@ describe('Confirmaciones y recordatorios', () => {
     expect((await t.salidas(tel)).at(-1)).toMatch(/Tu cita queda confirmada\.\s+Te recordamos, Ana: hoy a las/);
   });
 
-  it('SÍ con la cita lejos: queda programada hasta 2 horas antes', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('SÍ con la cita lejos: queda programada hasta 2 horas antes', async () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
     const pasado = new Date(Date.now() + 3 * 86_400_000).toLocaleDateString('es-PE', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -305,7 +310,8 @@ describe('Confirmaciones y recordatorios', () => {
     expect((await t.persona('51000000302')).estado).toBe('persona');
   });
 
-  it('NO: se libera con el texto del paso y termina como «dijo que no»', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('NO: se libera con el texto del paso y termina como «dijo que no»', async () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
     await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n000000303;Rosa;${hoyLima()};${enMinutos(90)}` });
@@ -316,7 +322,8 @@ describe('Confirmaciones y recordatorios', () => {
     expect((await t.salidas('51000000303')).at(-1)).toMatch(/liberamos tu cita/);
   });
 
-  it('REPROGRAMAR: pide la nueva fecha, la guarda y sigue con ella', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('REPROGRAMAR: pide la nueva fecha, la guarda y sigue con ella', async () => {
     const t = await armar();
     const p = await t.desde('confirmaciones');
     await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;fecha;hora\n000000304;Jorge;${hoyLima()};${enMinutos(90)}` });
@@ -338,7 +345,8 @@ describe('Confirmaciones y recordatorios', () => {
 });
 
 describe('Avisos al personal de campo', () => {
-  it('llegué, terminé: el avance queda con sus horas y la tarea se cierra', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('llegué, terminé: el avance queda con sus horas y la tarea se cierra', async () => {
     const t = await armar();
     const p = await t.desde('campo');
     await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre;tarea;direccion;hora\n000000401;Carlos;Instalación de router;Av. Arequipa 1234;10:00' });
@@ -358,7 +366,8 @@ describe('Avisos al personal de campo', () => {
     expect((await t.salidas(tel)).at(-1)).toMatch(/La tarea queda cerrada/);
   });
 
-  it('no pude: pasa al coordinador', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('no pude: pasa al coordinador', async () => {
     const t = await armar();
     const p = await t.desde('campo');
     await t.procesos.cargarPersonas(p.id, { texto: 'telefono;nombre;tarea;direccion;hora\n000000402;Rosa;Inspección;Jr. Puno 340;15:00' });
@@ -372,7 +381,8 @@ describe('Avisos al personal de campo', () => {
 });
 
 describe('Cobranza y trámites', () => {
-  it('con el vencimiento cerca pide la captura; un texto no vale; la captura pasa a una persona para validarla', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('con el vencimiento cerca pide la captura; un texto no vale; la captura pasa a una persona para validarla', async () => {
     const t = await armar();
     const p = await t.desde('cobranza');
     await t.procesos.cargarPersonas(p.id, { texto: `telefono;nombre;monto;vencimiento\n000000501;Ana;S/ 150.00;${hoyLima()}` });
@@ -409,7 +419,8 @@ describe('lo que no es de un proceso sigue su camino', () => {
     expect(r.atendida).toBe(false);
   });
 
-  it('un chat pasado a una persona no le quita sus mensajes al reparto: si tiene una solicitud de ubicación abierta, la atiende el reparto', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('un chat pasado a una persona no le quita sus mensajes al reparto: si tiene una solicitud de ubicación abierta, la atiende el reparto', async () => {
     const t = await armar();
     const p = await t.desde('datos');
     await t.procesos.cargarPersonas(p.id, { texto: '000000801;Ana' });
@@ -439,7 +450,8 @@ describe('lo que no es de un proceso sigue su camino', () => {
     expect(baja.motivo).toMatch(/Se dio de baja/);
   });
 
-  it('acciones en masa: pausar, pedir ahora, pasar a una persona; y el CSV con las respuestas', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): procesos.
+  it.skip('acciones en masa: pausar, pedir ahora, pasar a una persona; y el CSV con las respuestas', async () => {
     const t = await armar();
     const p = await t.desde('datos');
     const c = await t.procesos.cargarPersonas(p.id, { texto: '000000701;Ana\n000000702;Luis' });

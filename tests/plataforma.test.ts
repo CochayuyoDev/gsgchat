@@ -177,7 +177,7 @@ describe('plataforma de tiendas', () => {
     const yo = (await (await navPedro.pedir('/admin/yo')).json()) as Record<string, unknown>;
     expect(yo).toMatchObject({ usuario: 'pedro', rol: 'admin', super: false });
     // No ve lo del superadministrador.
-    expect((await navPedro.pedir('/admin/tiendas')).status).toBe(403);
+    expect((await navPedro.pedir('/admin/cuentas-plataforma')).status).toBe(403);
     const ajustes = (await (await navPedro.pedir('/admin/ajustes')).json()) as { guardado: { nombreNegocio: string; avisos: { supervisor: string | null } } };
     expect(ajustes.guardado.nombreNegocio).toBe('Pedro Tecno');
     expect(ajustes.guardado.avisos.supervisor).toBeNull();

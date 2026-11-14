@@ -12,17 +12,25 @@
  * se recuerda un rato y la repeticion se ignora.
  */
 
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Repos, TemplateQuality, TemplateStatus } from '../db/repos.js';
 import { verifyChallenge, verifySignature } from './signature.js';
 import type { ChangeValue, WebhookPayload } from './types.js';
-import { handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
+import { claveEntrada, handleInboundMessage, type InboundDeps } from '../handlers/inbound.js';
+import type { CredencialesLinea, ServicioLineas } from './lineas.js';
+import type { RegistroClientes } from './registro.js';
+import { resumenDelAviso, type ServicioWebhookMeta } from './webhook-meta.js';
+import type { WhatsAppClient } from './client.js';
+import type { LineaDeMensaje } from './types.js';
 import type { SettingsService } from '../settings/service.js';
 import { TtlCache } from '../util/cache.js';
 import { esPausaAutomatica } from '../salud/monitor.js';
 import { perteneceAlChatActual } from './alcance-chat.js';
 import { entradaAdmitida } from './entradas-admitidas.js';
+import { tamanoMedia, conCupoDeDescarga, extensionDe, idDeMedia, mediaDirectory, type MediaKind } from './local/media.js';
 
 export interface WebhookDeps extends InboundDeps {
   repos: Repos;
@@ -30,6 +38,43 @@ export interface WebhookDeps extends InboundDeps {
   settings: SettingsService;
   /** Ids de mensajes ya procesados; si falta, no se deduplica. */
   seen?: TtlCache<true>;
+  /** Donde se guardan los ficheros que llegan (por defecto, el de siempre). */
+  mediaDir?: string;
+  /** Las lineas de la tienda, para saber por cual llego cada mensaje. Sin ellas, no se anota. */
+  lineas?: ServicioLineas;
+  /**
+   * El cliente de cada linea: un adjunto que llega por una linea de la API que
+   * no es la principal se baja con el token de ESA linea. Sin esto, con `wa`.
+   */
+  registroClientes?: Pick<RegistroClientes, 'transporte'>;
+  /** Verify token y app secret propios del webhook de Meta, y su bitacora (ver webhook-meta.ts). */
+  webhookMeta?: ServicioWebhookMeta;
+}
+
+/** Cabecera con la que la prueba de «Nuestra API» marca sus llamadas (no cuentan como de Meta). */
+export const CABECERA_PRUEBA_WEBHOOK = 'x-gsgchat-prueba-webhook';
+
+/**
+ * Los app secret y verify token con los que Meta puede firmar o verificar: el
+ * de /setup y el de cada linea de la API que no es la principal (pueden ser
+ * apps distintas de Meta). Sin repetidos ni vacios.
+ */
+export async function secretosDeMeta(settings: SettingsService, lineas: ServicioLineas | undefined, webhookMeta?: ServicioWebhookMeta): Promise<{ appSecrets: string[]; verifyTokens: string[] }> {
+  const actual = settings.current();
+  const propio = webhookMeta?.config();
+  // Los propios de «Nuestra API» primero; los de /setup se siguen aceptando.
+  const appSecrets = [propio?.appSecret ?? '', actual.appSecret];
+  const verifyTokens = [propio?.verifyToken ?? '', actual.verifyToken];
+  if (lineas) {
+    for (const linea of await lineas.listar().catch(() => [])) {
+      if (linea.principal || linea.proveedor !== 'cloud') continue;
+      const cred = await lineas.credenciales(linea.id).catch(() => ({}) as CredencialesLinea);
+      appSecrets.push(cred.appSecret ?? '');
+      verifyTokens.push(cred.verifyToken ?? '');
+    }
+  }
+  const limpios = (lista: string[]) => [...new Set(lista.map((s) => (s ?? '').trim()).filter(Boolean))];
+  return { appSecrets: limpios(appSecrets), verifyTokens: limpios(verifyTokens) };
 }
 
 type RawRequest = FastifyRequest & { rawBody?: Buffer };
@@ -65,26 +110,35 @@ export async function registerWebhookRoutes(
 
   // Handshake de verificacion.
   app.get('/webhooks/whatsapp', async (request, reply) => {
-    const challenge = verifyChallenge(
-      request.query as Record<string, unknown>,
-      settings.current().verifyToken,
-    );
-    if (!challenge) return reply.code(403).send('forbidden');
+    // Vale el verify token de /setup o el de cualquier linea de la API.
+    const { verifyTokens } = await secretosDeMeta(settings, deps.lineas, deps.webhookMeta);
+    const prueba = request.headers[CABECERA_PRUEBA_WEBHOOK] === '1';
+    const challenge = verifyTokens
+      .map((token) => verifyChallenge(request.query as Record<string, unknown>, token))
+      .find((c): c is string => c !== null) ?? null;
+    if (!challenge) {
+      deps.webhookMeta?.anotar({ resultado: 'verificacion_fallida', detalle: verifyTokens.length ? 'el verify token no coincide con el guardado' : 'no hay ningún verify token guardado', prueba });
+      return reply.code(403).send('forbidden');
+    }
+    deps.webhookMeta?.anotar({ resultado: 'verificado', detalle: 'Meta verificó el webhook', prueba });
     return reply.type('text/plain').send(challenge);
   });
 
   app.post('/webhooks/whatsapp', async (request, reply) => {
     const raw = (request as RawRequest).rawBody ?? Buffer.from(JSON.stringify(request.body ?? {}));
     const signature = request.headers['x-hub-signature-256'];
+    const prueba = request.headers[CABECERA_PRUEBA_WEBHOOK] === '1';
 
-    const appSecret = settings.current().appSecret;
-    if (!appSecret) {
+    const { appSecrets } = await secretosDeMeta(settings, deps.lineas, deps.webhookMeta);
+    if (!appSecrets.length) {
       request.log.error('webhook recibido sin app secret configurado: revisa /setup');
+      deps.webhookMeta?.anotar({ resultado: 'sin_secreto', detalle: 'llegó un aviso pero no hay app secret guardado para comprobar la firma', prueba });
       return reply.code(503).send('not configured');
     }
 
-    if (!verifySignature(raw, typeof signature === 'string' ? signature : undefined, appSecret)) {
+    if (!appSecrets.some((appSecret) => verifySignature(raw, typeof signature === 'string' ? signature : undefined, appSecret))) {
       request.log.warn('webhook con firma invalida');
+      deps.webhookMeta?.anotar({ resultado: 'firma_invalida', detalle: signature ? 'la firma no cuadra con el app secret guardado' : 'llegó sin firma (cabecera X-Hub-Signature-256)', prueba });
       return reply.code(401).send('invalid signature');
     }
 
@@ -92,6 +146,7 @@ export async function registerWebhookRoutes(
     void reply.code(200).send('ok');
 
     const payload = request.body as WebhookPayload;
+    deps.webhookMeta?.anotar({ resultado: 'recibido', detalle: resumenDelAviso(payload), prueba });
     setImmediate(() => {
       void processPayload(payload, withSeen).catch((error) => {
         request.log.error({ err: error }, 'fallo procesando el webhook');
@@ -130,13 +185,29 @@ export function qualityFromEvent(event: string | undefined): 'GREEN' | 'YELLOW' 
   return null;
 }
 
+/**
+ * La linea por la que llego un aviso: la que diga el transporte (`lineaId`:
+ * WAHA por sesion, local por socket) o, en Meta, la del `phone_number_id` de
+ * los metadatos. Si no se reconoce, es la principal: asi lo de siempre sigue
+ * funcionando aunque llegue algo que no encaja con ninguna linea.
+ */
+export async function lineaDelAviso(value: ChangeValue, lineas: ServicioLineas | undefined): Promise<LineaDeMensaje | undefined> {
+  if (!lineas) return undefined;
+  const linea =
+    (value.lineaId ? await lineas.obtener(value.lineaId) : null) ??
+    (value.metadata?.phone_number_id ? await lineas.porIdExterno('cloud', value.metadata.phone_number_id) : null) ??
+    (await lineas.principal());
+  return { id: linea.id, etiqueta: linea.etiqueta, numero: linea.telefono };
+}
+
 export async function processChange(
   field: string,
   value: ChangeValue,
   deps: WebhookDeps,
 ): Promise<void> {
   const { repos, settings, seen } = deps;
-  const phoneNumberId = settings.current().phoneNumberId;
+  const principalId = settings.current().phoneNumberId;
+  const phoneNumberId = principalId;
 
   switch (field) {
     case 'messages': {
@@ -145,7 +216,7 @@ export async function processChange(
         const titulo = status.errors?.[0]?.title ?? status.errors?.[0]?.message;
         await repos.deliveries.updateByWamid(status.id, status.status, { code: codigo, title: titulo });
         // El doble check del chat sale de aqui.
-        await repos.messages.setStatusByWamid(status.id, status.status);
+        await repos.messages.setStatusByWamid(status.id, status.status, { code: codigo, title: titulo });
         // Un `failed` con codigo es un envio que Meta acepto y luego no
         // entrego: el 131049 (limite por usuario) y el 131026 llegan asi. El
         // monitor aplica la misma regla que a un error en caliente.
@@ -157,17 +228,27 @@ export async function processChange(
       }
 
       const profileName = value.contacts?.[0]?.profile?.name;
-      for (const message of value.messages ?? []) {
+      const linea = (value.messages ?? []).length ? await lineaDelAviso(value, deps.lineas) : undefined;
+      for (const recibido of value.messages ?? []) {
+        const message = linea ? { ...recibido, linea } : recibido;
         if (!entradaAdmitida(message)) continue;
-        if (!(await perteneceAlChatActual(repos, deps.settings, message))) continue;
+        // Lo de Meta (sin `provider`: WAHA y el QR lo traen puesto) no depende del corte del QR.
+        const deMeta = !recibido.provider || recibido.provider === 'meta';
+        if (!(await perteneceAlChatActual(repos, deps.settings, message, { sinCorte: deMeta }))) {
+          console.warn('[webhook] mensaje entrante no admitido: el sistema no le escribió antes a ese número', { de: String(message.from ?? '').slice(-4), tipo: message.type, linea: linea?.etiqueta ?? null });
+          continue;
+        }
         // La segunda entrega de un mensaje (el telefono reenvio un "ver una
         // vez") lleva el mismo id a proposito: no es un duplicado, es el
         // fichero que faltaba.
         if (seen && message.id && !message.reenvio) {
-          if (seen.get(message.id)) continue;
-          seen.set(message.id, true);
+          const clave = claveEntrada(message);
+          if (seen.get(clave)) continue;
+          seen.set(clave, true);
         }
-        await handleInboundMessage({ ...message, provider: message.provider ?? 'meta' }, profileName, deps);
+        const entrante = conMediaDeMeta({ ...message, provider: message.provider ?? 'meta' });
+        await guardarMediaDeMeta(entrante, deps, await clienteDelAviso(linea?.id, deps));
+        await handleInboundMessage(entrante, profileName, deps);
       }
       return;
     }
@@ -249,6 +330,8 @@ export async function processChange(
     // Circuit breaker del numero: en rojo se pausa todo lo saliente y, cuando
     // Meta lo levanta, se reanuda solo si fue el sistema quien pauso.
     case 'phone_number_quality_update': {
+      // La calidad es de UN numero: si es el de otra linea de la API, va a su estado y no al de la principal.
+      const phoneNumberId = await identidadDelNumero(value, deps, principalId);
       if (value.current_limit) {
         await repos.numberState.setTier(phoneNumberId, value.current_limit);
       }
@@ -344,7 +427,117 @@ export async function processChange(
       return;
     }
 
+    // Alertas de Meta sobre la cuenta o el numero (limites, pagos, politicas).
+    // Quedan en Que todo funcione; las que no estan resueltas, como aviso.
+    case 'account_alerts': {
+      const a = value.alert_info ?? {};
+      const tipo = (a.alert_type ?? '').toUpperCase() || 'ALERTA';
+      const detalle = [a.alert_severity, a.alert_status, a.alert_description, value.entity_type].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', tipo, `account_alerts: ${detalle || tipo}`.slice(0, 500)).catch(() => undefined);
+      return;
+    }
+
+    // Meta reviso la cuenta de WhatsApp Business (APPROVED / REJECTED / PENDING).
+    case 'account_review_update': {
+      const decision = (value.decision ?? '').toUpperCase() || 'SIN_DECISION';
+      await deps.salud?.registrarEvento('cuenta', `REVISION_${decision}`, `account_review_update: ${decision}`).catch(() => undefined);
+      return;
+    }
+
+    // El nombre visible del numero: aprobado, rechazado (con el motivo) o pendiente.
+    case 'phone_number_name_update': {
+      const decision = (value.decision ?? '').toUpperCase() || 'SIN_DECISION';
+      const detalle = [value.display_phone_number, value.requested_verified_name, value.rejection_reason].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', `NOMBRE_${decision}`, `phone_number_name_update: ${decision}${detalle ? ` (${detalle})` : ''}`.slice(0, 500)).catch(() => undefined);
+      return;
+    }
+
+    // Cambios de seguridad del numero (PIN de dos pasos cambiado o pedido de cambio).
+    case 'security': {
+      const evento = (value.event ?? '').toUpperCase() || 'SEGURIDAD';
+      const detalle = [value.display_phone_number, evento].filter(Boolean).join(' | ');
+      await deps.salud?.registrarEvento('cuenta', 'SEGURIDAD', `security: ${detalle}`).catch(() => undefined);
+      return;
+    }
+
+    // El resto de campos que se pueden suscribir en Meta (calls, flows,
+    // history, smb_message_echoes, smb_app_state_sync, standby, grupos,
+    // pagos, tracking_events, automatic_events, business_status_update,
+    // account_settings_update, message_template_components_update,
+    // template_correct_category_detection, business_username_updates,
+    // messaging_handovers, partner_solutions...) se reciben, se contesta 200
+    // y quedan en el registro del webhook, pero no cambian nada: el flujo de
+    // mensajes, entregas y bot sigue igual.
     default:
       return;
   }
+}
+
+/**
+ * Meta solo guarda el fichero un tiempo (unos 30 dias): si nadie lo abre antes,
+ * la foto, el video o el audio desaparecen del chat. Por eso se baja en cuanto
+ * llega y se deja en el disco, con el nombre que ya busca `GET /archivos/:token`
+ * (ver src/api/v1/archivos-gsg.ts). Si falla no se pierde nada: se vuelve a
+ * intentar cuando alguien lo abra.
+ */
+/**
+ * Con que id se lleva el estado del numero del aviso: el de otra linea de la
+ * API si el numero mostrado es suyo (`linea:<id>`, como en el sender), si no
+ * el de la principal.
+ */
+async function identidadDelNumero(value: ChangeValue, deps: WebhookDeps, principal: string): Promise<string> {
+  const mostrado = String(value.display_phone_number ?? value.metadata?.display_phone_number ?? '').replace(/\D+/g, '');
+  if (!mostrado || !deps.lineas) return principal;
+  const linea = (await deps.lineas.listar().catch(() => [])).find((l) => !l.principal && l.proveedor === 'cloud' && l.telefono === mostrado);
+  return linea ? `linea:${linea.id}` : principal;
+}
+
+/** El cliente de la linea por la que llego el aviso; sin registro o sin linea, el de siempre. */
+async function clienteDelAviso(lineaId: string | undefined, deps: WebhookDeps): Promise<WhatsAppClient> {
+  if (!lineaId || !deps.registroClientes) return deps.wa;
+  const t = await deps.registroClientes.transporte(lineaId).catch(() => null);
+  return t?.cliente ?? deps.wa;
+}
+
+async function guardarMediaDeMeta(message: { type?: string; media?: unknown }, deps: WebhookDeps, wa: WhatsAppClient = deps.wa): Promise<void> {
+  const media = message.media as { id?: unknown; mimeType?: unknown } | undefined;
+  if (!media || typeof media.id !== 'string' || typeof media.mimeType !== 'string' || (!wa.downloadMedia && !wa.downloadMediaToFile)) return;
+  try {
+    const dir = deps.mediaDir ?? mediaDirectory();
+    const copia = idDeMedia(`meta:${media.id}`, extensionDe(media.mimeType, message.type as MediaKind));
+    // Ya esta en disco: lo del QR se guarda al recibirlo (su id es el nombre del fichero) y lo de Meta, la vez anterior. No se baja nada.
+    if ((await tamanoMedia(dir, media.id)) !== null || (await tamanoMedia(dir, copia)) !== null) return;
+    await mkdir(dir, { recursive: true });
+    await conCupoDeDescarga(async () => {
+      if (wa.downloadMediaToFile) {
+        await wa.downloadMediaToFile(media.id as string, path.join(dir, copia));
+        return;
+      }
+      const bajado = await wa.downloadMedia!(media.id as string);
+      await writeFile(path.join(dir, copia), bajado.datos);
+    });
+  } catch (error) {
+    console.warn('[webhook] no se pudo guardar el archivo de Meta al recibirlo', error instanceof Error ? error.message : error);
+  }
+}
+
+/**
+ * La API de Meta trae el adjunto como `image: { id, mime_type, caption }` (o
+ * `audio`, `video`): solo el id, el fichero se baja aparte cuando alguien lo
+ * abre (ver src/api/v1/archivos-gsg.ts). Aqui se pasa a `media`, la forma
+ * comun con la que se guarda en el chat.
+ */
+export function conMediaDeMeta<T extends { type?: string; media?: unknown }>(message: T): T {
+  if (message.media || !message.type || !['image', 'audio', 'video', 'sticker'].includes(message.type)) return message;
+  const crudo = (message as Record<string, unknown>)[message.type] as { id?: unknown; mime_type?: unknown; caption?: unknown; voice?: unknown } | undefined;
+  if (!crudo || typeof crudo.id !== 'string') return message;
+  return {
+    ...message,
+    media: {
+      id: crudo.id,
+      mimeType: typeof crudo.mime_type === 'string' ? crudo.mime_type : 'application/octet-stream',
+      ...(typeof crudo.caption === 'string' && crudo.caption ? { caption: crudo.caption } : {}),
+      ...(crudo.voice === true ? { voice: true } : {}),
+    },
+  };
 }

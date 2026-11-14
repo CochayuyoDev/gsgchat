@@ -1094,8 +1094,11 @@ async function atenderCambioUbicacion(deps: DepsAgente, contact: Contact, que: s
   // Antes de la hora límite: «Claro, {nombre}, por favor mándeme su nueva
   // ubicación», con el botón de ubicación como el primer mensaje. Después, el
   // texto de siempre (que coordine con el motorizado).
-  if (cambio.tarde) await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, text: cambio.texto });
-  else await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, interactive: { body: cambio.texto, locationRequest: true } });
+  // Sale también con el bot callado: el cambio lo atiende el bot (regla del dueño, 28/10).
+  // Sin cambios que le queden no hay texto: el bot se calla (regla del dueño, 29/10).
+  if (!cambio.texto) { /* nada que mandar */ }
+  else if (cambio.tarde) await deps.sender.send({ phone: contact.phone, kind: 'freeform', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, cambioUbicacion: true, text: cambio.texto });
+  else await deps.sender.send({ phone: contact.phone, kind: 'interactive', category: 'UTILITY', origen: 'ia', textoFijo: true, cierreTrasGracias: true, cambioUbicacion: true, interactive: { body: cambio.texto, locationRequest: true } });
   await deps.entregas!.anotarAgente(contact.phone, `pidió cambiar su ubicación (${que}; ${como})`).catch(() => undefined);
   deps.log?.('regla del dueño: pidió cambiar su ubicación', { phone: contact.phone });
   return 'cambio_ubicacion';

@@ -334,6 +334,8 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
     // ubicacion cada 15 min): el manejador de entrantes, igual. Quien quiera
     // probar el modo de 15 min lo guarda en los ajustes del reparto.
     RUTAS_PEDIR_UBI_CADA_MIN: '0',
+    // El escenario recorre una linea de tiempo de 4 envios (la fabrica ahora manda 2).
+    RUTAS_MAX_INTENTOS: '4',
     PUBLIC_BASE_URL: 'http://localhost:3000',
     DATABASE_URL: 'mysql://x/y',
     WHATSAPP_TOKEN: 't',
@@ -446,6 +448,8 @@ export async function crearEscenario(opciones: OpcionesEscenario = {}): Promise<
       horaInicio,
       horaFin,
       negocio: config.businessName,
+      // La linea de tiempo del escenario es de 4 envios (la fabrica ahora manda 2).
+      maxIntentos: config.RUTAS_MAX_INTENTOS,
     },
     usarPlantilla: () => false,
     ahora: reloj,

@@ -141,6 +141,47 @@ describe('el limite de mensajeria por portafolio', () => {
   });
 });
 
+describe('los demás campos del webhook de Meta (v27)', () => {
+  async function preparar() {
+    const config = loadConfig(ENV);
+    const repos = createFakeRepos();
+    const wa = createFakeWhatsApp();
+    const sender = createSender({ repos, wa, phoneNumberId: 'PNID', warmup: { startPerDay: 50, growth: 1.5, hardCap: 1000 }, maxMarketingPerContact7d: 2 });
+    const eventos: Array<[string, string | null | undefined, string | null | undefined]> = [];
+    const salud = { registrarEvento: async (tipo: string, codigo?: string | null, detalle?: string | null) => { eventos.push([tipo, codigo, detalle]); }, evaluar: async () => undefined };
+    type Deps = Parameters<typeof processChange>[2];
+    const deps = { repos, wa, sender, config, settings: await createFakeSettings(config), salud } as unknown as Deps;
+    return { deps, eventos, wa };
+  }
+
+  it('alertas, revisión de la cuenta, nombre del número y seguridad quedan registrados', async () => {
+    const { deps, eventos } = await preparar();
+    await processChange('account_alerts', { entity_type: 'WABA', entity_id: '1', alert_info: { alert_severity: 'WARNING', alert_status: 'ACTIVE', alert_type: 'OBA_APPROVED', alert_description: 'Cuenta revisada' } }, deps);
+    await processChange('account_review_update', { decision: 'APPROVED' }, deps);
+    await processChange('phone_number_name_update', { display_phone_number: '51926260767', decision: 'REJECTED', requested_verified_name: 'GSG', rejection_reason: 'NAME_FORMAT_UNACCEPTABLE' }, deps);
+    await processChange('security', { display_phone_number: '51926260767', event: 'PIN_CHANGED' }, deps);
+    expect(eventos.map((e) => e[1])).toEqual(['OBA_APPROVED', 'REVISION_APPROVED', 'NOMBRE_REJECTED', 'SEGURIDAD']);
+    expect(eventos[2]![2]).toContain('NAME_FORMAT_UNACCEPTABLE');
+    expect(eventos.every((e) => e[0] === 'cuenta')).toBe(true);
+  });
+
+  it('los campos que no usamos se reciben sin romper nada ni tocar el chat', async () => {
+    const { deps, eventos, wa } = await preparar();
+    for (const campo of ['calls', 'flows', 'history', 'smb_message_echoes', 'smb_app_state_sync', 'standby', 'group_lifecycle_update', 'tracking_events', 'automatic_events', 'business_status_update', 'account_settings_update', 'payment_configuration_update', 'business_username_updates', 'messaging_handovers', 'partner_solutions', 'message_template_components_update', 'template_correct_category_detection']) {
+      await expect(processChange(campo, { messaging_product: 'whatsapp', event: 'X' }, deps)).resolves.toBeUndefined();
+    }
+    expect(eventos).toEqual([]);
+    expect(wa.sent).toEqual([]);
+  });
+
+  it('un aviso sin datos tampoco rompe', async () => {
+    const { deps } = await preparar();
+    for (const campo of ['account_alerts', 'account_review_update', 'phone_number_name_update', 'security']) {
+      await expect(processChange(campo, {}, deps)).resolves.toBeUndefined();
+    }
+  });
+});
+
 describe('el reparto dentro de la ventana de 24 h', () => {
   const HORA_BUENA = new Date('2026-03-10T15:00:00Z'); // martes 10:00 en Lima
   const opciones: OpcionesMotor = { ...OPCIONES_POR_DEFECTO, timezone: 'America/Lima' };

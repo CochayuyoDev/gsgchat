@@ -42,18 +42,24 @@ import type { GsgSimulado } from './gsg-simulado.js';
 import { MOTORIZADOS_DE_PRUEBA } from './datos-de-prueba.js';
 import { crearGuionDelDia, type EntranteSimulado } from './guion-dia.js';
 import { registerNumerosRoutes } from './numeros.js';
+import type { WebhooksRepo } from '../webhooks/repo.js';
+import { rotarSecretoWebhookGsg, sincronizarWebhookGsg } from './webhook-gsg.js';
 
 export interface EntregasRoutesDeps {
   entregas: ServicioEntregas;
   conexionGsg?: ServicioConexionGsg;
+  /** Los webhooks salientes: el de GSG se crea y apunta desde Conexión GSG. */
+  webhooks?: WebhooksRepo;
   simulador?: GsgSimulado;
   config: Pick<Config, 'bbox'>;
+  /** Trae de Meta el estado de las plantillas (por la principal o la línea de API). null = no hay WhatsApp API. */
+  traerPlantillas?: () => Promise<number | null>;
 }
 
 const quienEs = (u: { nombre?: string; usuario?: string } | null | undefined): string => u?.nombre || u?.usuario || 'alguien del panel';
 
 export async function registerEntregasRoutes(app: FastifyInstance, deps: EntregasRoutesDeps): Promise<void> {
-  const { entregas, conexionGsg, simulador } = deps;
+  const { entregas, conexionGsg, simulador, webhooks } = deps;
 
   const soloAdmin = (request: { usuario?: { rol?: string; porToken?: boolean } | null }) => request.usuario?.rol === 'admin' && !request.usuario.porToken;
 
@@ -87,6 +93,28 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
 
   // Numeros del dia: la lista de GSG numero por numero y las acciones en masa (ver numeros.ts).
   await registerNumerosRoutes(app, { entregas });
+
+  // «Plantillas aprobadas por Meta» en Pedidos GSG → Ajustes de chat.
+  app.get('/admin/entregas/plantilla-meta', async () => ({ ok: true, ...(await entregas.estadoPlantillaMeta()), puedeTraer: Boolean(deps.traerPlantillas) }));
+  app.post('/admin/entregas/plantilla-meta', async (request, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia la plantilla de Meta.' });
+    const leido = ajustesEntregasSchema.shape.plantillaMeta.removeDefault().partial().safeParse(request.body ?? {});
+    if (!leido.success) return reply.code(400).send({ error: leido.error.issues[0]?.message ?? 'Revisa el nombre de la plantilla.' });
+    await entregas.guardarAjustes({ plantillaMeta: { ...entregas.ajustes().plantillaMeta, ...leido.data } } as never);
+    return { ok: true, ...(await entregas.estadoPlantillaMeta()), puedeTraer: Boolean(deps.traerPlantillas) };
+  });
+  app.post('/admin/entregas/plantilla-meta/traer', async (request, reply) => {
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador trae las plantillas de Meta.' });
+    if (!deps.traerPlantillas) return reply.code(404).send({ error: 'Traer plantillas no está disponible aquí.' });
+    try {
+      const cuantas = await deps.traerPlantillas();
+      if (cuantas === null) return reply.code(409).send({ error: 'No hay una línea de WhatsApp API en uso: agrégala en Conexión WhatsApp → Líneas.' });
+      return { ok: true, traidas: cuantas, ...(await entregas.estadoPlantillaMeta()), puedeTraer: true };
+    } catch (error) {
+      const texto = error instanceof Error ? error.message : String(error);
+      return reply.code(502).send({ error: /token|OAuth|190|401/i.test(texto) ? 'Meta no aceptó el token de la línea de API: revísalo en Conexión WhatsApp.' : `Meta no respondió: ${texto.slice(0, 160)}` });
+    }
+  });
 
   app.post('/admin/entregas/ajustes', async (request, reply) => {
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia los ajustes de las entregas.' });
@@ -244,12 +272,16 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
       urlUbicacion: z.string().trim().max(300).nullable().optional(),
       rutaEstado: z.string().trim().max(300).nullable().optional(),
       rutaIncidencias: z.string().trim().max(300).nullable().optional(),
+      rutaWebhook: z.string().trim().max(300).nullable().optional(),
       paramTracking: z.string().trim().max(60).nullable().optional(),
       paramTelefono: z.string().trim().max(60).nullable().optional(),
     }).parse(request.body ?? {});
 
     try {
-      return { ok: true, gsg: await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion , rutaEstado: body.rutaEstado, paramTracking: body.paramTracking, paramTelefono: body.paramTelefono, rutaIncidencias: body.rutaIncidencias }) };
+      const gsg = await conexionGsg.conectarReal({ url: body.url ?? '', apiKey: body.apiKey ?? body.token, rutaUbicacion: body.rutaUbicacion, urlUbicacion: body.urlUbicacion , rutaEstado: body.rutaEstado, paramTracking: body.paramTracking, paramTelefono: body.paramTelefono, rutaIncidencias: body.rutaIncidencias, rutaWebhook: body.rutaWebhook });
+      // El webhook de GSG apunta a base + ruta; el secreto sale aqui, una sola vez, y solo si nace ahora.
+      const webhookGsg = webhooks ? await sincronizarWebhookGsg(webhooks, gsg.destinoWebhook, request.usuario?.id ?? null) : null;
+      return { ok: true, gsg, webhookGsg };
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : String(error) });
     }
@@ -258,7 +290,23 @@ export async function registerEntregasRoutes(app: FastifyInstance, deps: Entrega
   app.delete('/admin/entregas/gsg', async (request, reply) => {
     if (!conexionGsg) return reply.code(409).send({ error: 'En este arranque la conexión con GSG no se puede cambiar desde la pantalla.' });
     if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia la conexión con GSG.' });
+    if (webhooks) await sincronizarWebhookGsg(webhooks, null);
     return { ok: true, gsg: await conexionGsg.quitar() };
+  });
+
+  /** Un secreto nuevo para el webhook de GSG: se ve una sola vez y el anterior deja de valer. */
+  app.post('/admin/entregas/gsg/webhook/secreto', async (request, reply) => {
+    if (!webhooks) return reply.code(409).send({ error: 'En este arranque los webhooks no están disponibles.' });
+    if (!soloAdmin(request)) return reply.code(403).send({ error: 'Solo un administrador cambia el secreto del webhook de GSG.' });
+    // Con la ruta ya guardada pero sin webhook (se guardó antes de que existiera), se crea ahora: su secreto sale igual, una vez.
+    const destino = conexionGsg?.estado().destinoWebhook ?? null;
+    if (destino) {
+      const r = await sincronizarWebhookGsg(webhooks, destino, request.usuario?.id ?? null);
+      if (r.secreto) return { ok: true, secreto: r.secreto, creado: true };
+    }
+    const secreto = await rotarSecretoWebhookGsg(webhooks);
+    if (!secreto) return reply.code(404).send({ error: 'Todavía no hay webhook de GSG: guarda primero la ruta del webhook en Conexión GSG.' });
+    return { ok: true, secreto, creado: false };
   });
 
   // Probar la consulta de estado contra GSG: solo lectura (no cambia ningun pedido).

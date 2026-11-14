@@ -17,6 +17,7 @@
  *    webhook.
  */
 
+import { OGG_REAL } from './fixtures/audio-real.js';
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -69,7 +70,7 @@ const config = loadConfig(ENV);
 const con = (clave: string) => ({ 'x-api-key': clave, 'content-type': 'application/json' });
 
 /** Un Ogg/Opus de mentira: lo unico que se mira es la firma "OggS". */
-const OGG = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(200, 7)]);
+const OGG = OGG_REAL;
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(120, 3)]);
 
 // ------------------------------------------------------------- el cliente
@@ -254,7 +255,7 @@ async function build() {
 /** Los ficheros que `media.url` puede bajar. */
 const fetchDeFicheros = (async (input: string | URL | Request) => {
   const url = String(input);
-  if (url === 'https://stoky.test/fotos/zapato.png') return new Response(new Uint8Array(Buffer.from('PNGFALSO'.repeat(10))), { status: 200, headers: { 'content-type': 'image/png' } });
+  if (url === 'https://stoky.test/fotos/zapato.png') return new Response(new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('PNG-DE-PRUEBA'.repeat(10))])), { status: 200, headers: { 'content-type': 'image/png' } });
   if (url === 'https://stoky.test/nota.ogg') return new Response(new Uint8Array(OGG), { status: 200, headers: { 'content-type': 'audio/ogg' } });
   return new Response('no', { status: 404 });
 }) as typeof fetch;
@@ -370,15 +371,17 @@ describe('el asistente con voz', () => {
     await voz.guardar({ clave: 'xi-1234-5678', vozId: 'v-lucia', vozNombre: 'Lucía', activa: true, cuando: 'si-manda-audio' });
   });
 
-  it('ignora el audio sin transcripción, IA, respuesta ni registro en el hilo', async () => {
+  it('el audio se guarda en el hilo sin transcripción, IA ni respuesta (regla del dueño, 28/10)', async () => {
     const c = await cliente();
     await processChange('messages', entranteAudio(), deps);
     expect(eleven.estado.transcritos).toBe(0);
     expect(eleven.estado.hablado).toEqual([]);
     expect(modelo.recibido).toEqual([]);
     expect(enviados()).toHaveLength(0);
-    expect(await repos.messages.listMessages(c.id, 10)).toEqual([]);
-    expect(eventos.filter(e => e.nombre === 'mensaje.recibido' || e.nombre === 'mensaje.enviado')).toEqual([]);
+    const hilo = await repos.messages.listMessages(c.id, 10);
+    expect(hilo.map((m) => [m.direction, m.kind])).toEqual([['in', 'audio']]);
+    expect(JSON.stringify(hilo[0]!.payload ?? {})).not.toMatch(/transcripcion/);
+    expect(eventos.filter(e => e.nombre === 'mensaje.enviado')).toEqual([]);
   });
 
   it('los ajustes antiguos de voz no generan audio y los audios entrantes se ignoran', async () => {
@@ -429,7 +432,7 @@ describe('el asistente con voz', () => {
     const c = await cliente();
     const r = await app.inject({ method: 'POST', url: '/admin/chat/send', headers: h, payload: { contactId: c.id, text: 'Ya salió tu pedido, llega mañana.', voz: true } });
     expect(r.json()).toMatchObject({ ok: true, voz: { enviada: true, motivo: null } });
-    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, caption: 'Ya salió tu pedido, llega mañana.' });
+    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, mimeType: 'audio/ogg', caption: 'Ya salió tu pedido, llega mañana.' });
     const hilo = await repos.messages.listMessages(c.id, 5);
     // Firmado por quien esta en sesion, con su nombre de pila.
     expect(hilo.find((m) => m.direction === 'out')!.payload).toMatchObject({ origen: 'persona', autorNombre: 'Ali', media: { voz: true } });
@@ -456,7 +459,7 @@ describe('la API para otros sistemas', () => {
     const r = await app.inject({ method: 'POST', url: '/api/v1/mensajes', headers: con(TODO), payload: { telefono: '51987654321', texto: 'Tu pedido ya está en camino.', voz: true, autor: 'persona', autorNombre: 'Rosa' } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ ok: true, estado: 'enviado', voz: { pedida: true, enviada: true, motivo: null } });
-    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, caption: 'Tu pedido ya está en camino.' });
+    expect(enviados()[0]).toMatchObject({ kind: 'media', tipo: 'audio', voz: true, mimeType: 'audio/ogg', caption: 'Tu pedido ya está en camino.' });
     const enviado = eventos.find((e) => e.nombre === 'mensaje.enviado')!;
     expect(enviado.datos.mensaje).toMatchObject({ autor: 'persona', autorNombre: 'Rosa', voz: true });
     const conv = (await app.inject({ method: 'GET', url: '/api/v1/conversaciones/51987654321', headers: con(TODO) })).json();

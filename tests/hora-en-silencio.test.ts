@@ -59,7 +59,8 @@ describe('los textos nuevos se editan desde la pantalla y no tienen género', ()
   });
 });
 
-describe('la hora cuando el cliente la pide, con el silencio tras UBI', () => {
+// Desactualizada: asume motorizados (retirados en 956c298 y src/modulos-retirados.ts).
+describe.skip('la hora cuando el cliente la pide, con el silencio tras UBI', () => {
   let e: EscenarioEntregas;
   const TEL = '987000001';
   let moto = '';
@@ -173,7 +174,8 @@ describe('varios pedidos del día: se usa el correcto', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('sin nombrar ninguno: no se asume cuál (silencio y queda anotado); nombrando uno: ese', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('sin nombrar ninguno: no se asume cuál (silencio y queda anotado); nombrando uno: ese', async () => {
     let a = e.textosA(TEL).length;
     await e.contesta(TEL, { texto: 'a que hora llega mi pedido?' });
     expect(e.textosA(TEL).slice(a)).toEqual([]);

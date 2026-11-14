@@ -17,10 +17,12 @@
 import { DIALOGO_CSS, DIALOGO_JS } from './dialogo.js';
 import { tiendaActual } from '../plataforma/contexto.js';
 import { DIALOGO_ELEGIR_CSS, DIALOGO_ELEGIR_JS } from './dialogo-elegir.js';
+import { VISOR_CSS, VISOR_JS } from './visor-medios.js';
 import { TEMA_SCRIPT, TOKENS_CSS } from './tokens.js';
 import { SISTEMA_CSS } from './sistema-css.js';
 import { escapeHtml } from './login-page.js';
-import { INICIAL_SISTEMA, NOMBRE_SISTEMA } from '../marca.js';
+import { NOMBRE_SISTEMA } from '../marca.js';
+import { ICONOS_HEAD, RUTA_LOGO } from './marca-routes.js';
 import { AYUDA_PANTALLAS } from './ayuda-pantallas.js';
 import { VERSION } from '../version.js';
 import { CONSULTAS_JS } from './consultas.js';
@@ -117,8 +119,8 @@ export const MENU_GSG: ItemMenu[] = [
   { id: 'gsg-courier', seccion: 'Configuración', etiqueta: 'Conexión con GSG', href: '/conexion-gsg', icono: 'enchufe', descripcion: 'Conexión y reportes de pedidos a GSG.', soloAdmin: true },
   { id: 'api-gsgchat', seccion: 'Configuración', etiqueta: 'Nuestra API', href: '/api-gsgchat', icono: 'llave', descripcion: 'Claves y estado de la conexión que recibe pedidos.', soloAdmin: true },
   { id: 'configuracion', seccion: 'Configuración', etiqueta: 'Ajustes', href: '/panel#configuracion', icono: 'ajustes', descripcion: 'Nombre del negocio y supervisor de avisos.', soloAdmin: true },
-  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'Modelo, instrucciones y ficha de productos para la IA.' },
-  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Conocimiento y ejemplos del asistente.' },
+  { id: 'ia', seccion: 'Avanzado', etiqueta: 'Asistente IA', href: '/panel#ia', icono: 'rayo', descripcion: 'La IA que le pone su nota a cada chat: servicio, modelo y clave.' },
+  { id: 'entrenamiento', seccion: 'Avanzado', etiqueta: 'Entrenamiento IA', href: '/entrenamiento', icono: 'robot', descripcion: 'Enséñale a etiquetar los chats con tus propios casos.' },
   { id: 'fiabilidad', seccion: 'Avanzado', etiqueta: 'Estado del sistema', href: '/salud', icono: 'salud', descripcion: 'Estado y diagnóstico de conexiones.', soloAdmin: true },
   { id: 'usuarios', seccion: 'Avanzado', etiqueta: 'Usuarios', href: '/panel#usuarios', icono: 'usuario', descripcion: 'Cuentas del equipo, roles y contraseñas.', soloAdmin: true },
   { id: 'manual', seccion: 'Ayuda', etiqueta: 'Manual', href: '/manual', icono: 'libro', descripcion: 'Instrucciones para usar GSGchat.' },
@@ -225,7 +227,7 @@ const CSS = `
   .s-plegar { width: 30px; height: 30px; border: 0; background: transparent; color: var(--s-muted); border-radius: 8px; cursor: pointer; display: grid; place-items: center; flex: none; }
   .s-plegar:hover { background: var(--s-hover); color: var(--s-text); }
   .s-logo { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--s-text); min-width: 0; }
-  .s-logo-mark { width: 32px; height: 32px; border-radius: 9px; background: var(--s-accent); color: var(--primario-texto); display: grid; place-items: center; font-weight: 800; flex: none; }
+  .s-logo-mark { width: 32px; height: 32px; object-fit: contain; flex: none; }
   .s-logo-text { font-weight: 800; font-size: 17px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-logo-text small { color: var(--s-accent); font-weight: 700; font-size: 17px; }
   .s-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 10px 12px; }
@@ -248,7 +250,7 @@ const CSS = `
   .s-grupo { margin-top: 2px; }
   /* Cada categoria separada por una linea fina: se ve donde empieza y acaba cada una. */
   .s-menu-gsg > .s-grupo + .s-grupo { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--s-line); }
-  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; border-radius: 8px; font-family: inherit;  }
+  .s-grupo-cab { box-shadow: none; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 10px 7px; border: 0; background: transparent; color: var(--s-muted); font-family: inherit; font-weight: 700; font-size: 11px !important; line-height: 1; min-height: 0; white-space: nowrap; text-align: left; letter-spacing: 0; text-transform: none; cursor: pointer; border-radius: 8px; font-family: inherit;  }
   .s-grupo-cab:hover { background: var(--s-hover); color: var(--s-text); }
   .s-grupo.fijo > .s-grupo-cab { cursor: default; } .s-grupo.fijo > .s-grupo-cab:hover { background: transparent; color: var(--s-muted); } .s-grupo.fijo > .s-grupo-cab .s-ico { display: none; }
   .s-grupo-cab .s-ico { width: 15px; height: 15px;  }
@@ -262,7 +264,8 @@ const CSS = `
   .s-modo:hover { color: var(--s-text); border-style: solid; }
   .s-app.sencillo .s-item[data-avanzado], .s-app.sencillo .s-grupo-avanzado { display: none; }
   .s-app.plegado .s-modo { display: none; }
-  .s-app.modo-gsg .s-menu-completo, .s-app.modo-gsg .s-modo, .s-app.modo-completo .s-menu-gsg { display: none; }
+  /* El menú es siempre el de GSG, sea cual sea el modo del sistema: así se ve igual en todas partes. */
+  .s-menu-completo, .s-modo { display: none; }
   .s-user { border-top: 1px solid var(--s-line); padding: 12px 12px; display: flex; align-items: center; gap: 10px; }
   .s-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--s-accent-soft); color: var(--s-accent); display: grid; place-items: center; font-weight: 800; font-size: 13px; flex: none; }
   .s-user-txt { flex: 1; min-width: 0; line-height: 1.25; }
@@ -290,9 +293,16 @@ const CSS = `
   .s-top { height: 62px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 22px; background: var(--s-top); border-bottom: 1px solid var(--s-line); }
   .s-menu { display: none; width: 34px; height: 34px; border: 0; background: transparent; color: var(--s-text); border-radius: 8px; cursor: pointer; place-items: center; flex: none; }
   .s-titulo { min-width: 0; display: flex; flex-direction: column; justify-content: center; line-height: 1.2; }
-  .s-miga { color: var(--s-muted); font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* En pantalla grande el titulo no se corta: cede el subtitulo, no el nombre de la pantalla. */
+  @media (min-width: 900px) { .s-titulo { flex: 0 1 auto; min-width: 170px; } }
+  /* Hasta 1360 px, Buscar y la ayuda quedan en icono (con su nombre para el lector y su Ctrl K): el titulo cabe entero. */
+  @media (max-width: 1360px) {
+    .s-top .s-buscar-boton, .s-top .s-ayuda-boton { min-width: 0; width: 38px; padding: 0; justify-content: center; }
+    .s-top .s-buscar-boton span, .s-top .s-buscar-boton kbd, .s-top .s-ayuda-boton span { display: none; }
+  }
+  .s-miga { color: var(--s-muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-miga:empty { display: none; }
-  .s-titulo h1 { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+  .s-titulo .s-titulo-h { margin: 0; font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
   .s-titulo p { margin: 0; color: var(--s-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-top-der { margin-left: auto; display: flex; align-items: center; gap: 10px; }
   .s-demo { font-size: 12px; font-weight: 700; color: var(--ambar); background: var(--ambar-suave); border: 1px solid transparent; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
@@ -318,7 +328,7 @@ const CSS = `
   .s-avisos { position: relative; }
   .s-avisos-caja { display: none; position: absolute; right: 0; top: 44px; width: 340px; max-width: calc(100vw - 32px); background: var(--s-top); border: 1px solid var(--s-line); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.18); z-index: 70; overflow: hidden; }
   .s-avisos.abierto .s-avisos-caja { display: block; }
-  .s-avisos-caja h4 { margin: 0; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--s-line); color: var(--s-muted); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .s-avisos-caja h4 { margin: 0; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--s-line); color: var(--s-muted); font-weight: 700; letter-spacing: 0; text-transform: none; }
   .s-aviso { display: flex; gap: 10px; align-items: flex-start; padding: 11px 14px; border-bottom: 1px solid var(--s-line); color: var(--s-text); text-decoration: none; font-size: 13.5px; line-height: 1.4; }
   .s-aviso:last-child { border-bottom: 0; }
   .s-aviso:hover { background: var(--s-hover); }
@@ -426,7 +436,7 @@ const CSS = `
   .s-pal-cab input:focus, .s-pal-cab input:focus-visible { border: 0; outline: 0; box-shadow: none; }
   .s-pal-cab kbd { font: 600 11px/1 ui-monospace, Consolas, monospace; background: var(--s-kbd); border: 1px solid var(--s-line); border-radius: 5px; padding: 3px 5px; color: var(--s-muted); }
   .s-pal-lista { overflow: auto; padding: 6px 0 8px; min-height: 0; }
-  .s-pal-grupo { padding: 8px 14px 3px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--s-muted); }
+  .s-pal-grupo { padding: 8px 14px 3px; font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--s-muted); }
   .s-pal-item { display: flex; gap: 10px; align-items: center; padding: 8px 14px; text-decoration: none; color: var(--s-text); cursor: pointer; }
   .s-pal-item .s-ico { flex: none; color: var(--s-muted); }
   .s-pal-item .t { flex: 1; min-width: 0; line-height: 1.3; }
@@ -485,7 +495,7 @@ const CSS = `
     .s-nav-movil .s-ico { width: 22px; height: 22px; }
     .s-nav-movil a.activo { color: var(--s-accent); font-weight: 700; }
     .s-nav-movil a.activo::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--s-accent); }
-    .s-app.modo-gsg .s-nav-completo, .s-app.modo-completo .s-nav-gsg { display: none; }
+    .s-nav-completo { display: none; }
     .s-app.sin-nav-movil .s-nav-movil { display: none; }
     .s-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 50; opacity: 0; pointer-events: none;  }
     .s-app.abierto .s-backdrop { opacity: 1; pointer-events: auto; }
@@ -494,9 +504,54 @@ const CSS = `
   /* En el telefono la barra de arriba deja solo el titulo y los botones: sin miga, subtitulo ni señal de la IA. */
   @media (max-width: 560px) {
     .s-miga, .s-titulo p, .s-ia-senal { display: none !important; }
-    .s-titulo h1 { font-size: 16px; }
+    .s-titulo .s-titulo-h { font-size: 16px; }
     .s-top-der { gap: 4px; }
     .s-boton { width: 36px; height: 36px; }
+  }
+
+  /* --- cabecera de cada pantalla (11/11) ----------------------------------
+     Antes el titulo, la seccion y la explicacion se apretaban en la barra de
+     arriba junto a siete botones, y la explicacion salia cortada con «…».
+     Ahora la barra lleva solo la ruta (Operación › Pedidos GSG) y la pantalla
+     empieza con su titulo grande y la explicacion entera. El chat (lleno)
+     sigue con todo arriba: ahi cada centimetro de alto es del hilo. */
+  .s-app.con-cabecera .s-titulo { flex-direction: row; align-items: center; gap: 0; min-width: 0; }
+  .s-app.con-cabecera .s-titulo p { display: none; }
+  .s-app.con-cabecera .s-miga { text-transform: none; letter-spacing: 0; font-size: 13.5px; font-weight: 500; }
+  .s-app.con-cabecera .s-miga:not(:empty)::after { content: '›'; margin: 0 8px; color: var(--gris-claro); }
+  .s-app.con-cabecera .s-titulo .s-titulo-h { font-size: 13.5px; font-weight: 600; letter-spacing: 0; }
+  /* --- tono sereno del armazon (11/11): solo apariencia ------------------ */
+  .s-grupo-cab { text-transform: none; letter-spacing: 0; font-size: 12.5px !important; font-weight: 600; color: var(--gris-claro); }
+  .s-menu-gsg > .s-grupo + .s-grupo { border-top-color: transparent; margin-top: 10px; }
+  .s-item { font-weight: 500; color: var(--gris); }
+  .s-item.activo { background: var(--primario-suave); color: var(--primario); }
+  .s-item.activo::before { display: none; }
+  .s-avisos-caja h4, .s-pal-grupo { text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+  .s-plan { background: var(--ambar-suave); color: var(--ambar); border-bottom: 1px solid color-mix(in srgb, var(--ambar) 20%, transparent); }
+  .s-plan.bad { background: var(--rojo-suave); color: var(--rojo); border-bottom-color: color-mix(in srgb, var(--rojo) 20%, transparent); }
+  .s-plan a { color: inherit; }
+  .s-boton { border-color: var(--borde); }
+  .s-boton .s-num { background: var(--rojo); box-shadow: 0 0 0 2px var(--superficie); font-weight: 700; }
+  .s-ia-boton { border-color: transparent; }
+  /* El menu del celular, cerrado, proyectaba su sombra sobre el borde izquierdo de la pantalla. */
+  @media (max-width: 960px) { .s-app:not(.abierto) .s-side { box-shadow: none; } }
+  /* La barra en dos grupos: lo que informa (IA, tema, avisos) | lo que se hace (buscar, órdenes, ayuda). */
+  @media (min-width: 961px) {
+    .s-top-der .s-avisos { padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--s-line); }
+  }
+  .s-pag { max-width: var(--ancho-max); margin: 0 auto var(--esp-5); }
+  .s-pag-tit { margin: 0; font-size: 24px; font-weight: 700; line-height: 1.2; letter-spacing: -.015em; color: var(--texto); text-wrap: balance; }
+  .s-pag-sub { margin: 6px 0 0; max-width: 75ch; color: var(--texto-suave); font-size: 14.5px; line-height: 1.5; text-wrap: pretty; }
+  .s-pag-sub:empty { display: none; }
+  @media (max-width: 960px) {
+    /* En el movil la barra ya dice donde estas: la cabecera queda compacta. */
+    .s-pag { margin-bottom: var(--esp-4); }
+    .s-pag-tit { font-size: 20px; }
+    .s-pag-sub { font-size: 13.5px; }
+  }
+  @media (max-width: 560px) {
+    /* En el telefono el titulo grande va justo debajo: arriba no se repite. */
+    .s-app.con-cabecera .s-titulo { display: none; }
   }
 `;
 
@@ -507,10 +562,8 @@ const JS = String.raw`
   var leer = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
 
   /* plegar / desplegar */
-  if (leer('s-plegado') === '1') app.classList.add('plegado');
   document.getElementById('s-plegar').onclick = function () {
     app.classList.toggle('plegado');
-    guardar('s-plegado', app.classList.contains('plegado') ? '1' : '0');
   };
   document.getElementById('s-menu').onclick = function () { app.classList.toggle('abierto'); };
   /* Chips de variables: chipsDeVariables(textarea, ['{nombre}', '{pedido}'], { etiqueta: 'Tocar para insertar:' })
@@ -546,7 +599,7 @@ const JS = String.raw`
     var ruta = location.pathname;
     document.querySelectorAll('#s-nav-movil a[data-ir]').forEach(function (a) {
       var p = a.getAttribute('data-ir').split('#')[0];
-      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
+      var activo = p === ruta || (p === '/hoy' && (ruta === '/entregas' || ruta === '/automatizacion-gsg' || ruta === '/embudo-chats')) || (p === '/entregas' && ruta === '/hoy') || (p === '/procesos' && ruta.indexOf('/procesos/') === 0);
       a.classList.toggle('activo', activo);
     });
   }
@@ -568,22 +621,19 @@ const JS = String.raw`
   };
   document.getElementById('s-backdrop').onclick = function () { app.classList.remove('abierto'); };
 
-  /* grupos: todos abiertos; el que se cierre a mano queda cerrado hasta que se vuelva a abrir */
+  /* grupos: todos abiertos al cargar la pantalla */
   document.querySelectorAll('.s-grupo').forEach(function (g) {
     var id = g.getAttribute('data-grupo');
     /* Inicio (Dashboard, Pedidos GSG, Chats) siempre a la vista: no se pliega. */
     if (id === 'gsg-inicio') { g.classList.add('fijo'); return; }
-    var guardado = leer('s-grupo-' + id);
-    if (guardado === 'cerrado' || (!guardado && g.hasAttribute('data-cerrado'))) g.classList.add('cerrado');
-    g.querySelector('.s-grupo-cab').onclick = function () {
-      g.classList.toggle('cerrado');
-      guardar('s-grupo-' + id, g.classList.contains('cerrado') ? 'cerrado' : 'abierto');
-    };
+    /* Siempre arrancan igual (abiertos; Superadministración, cerrado): lo que se pliegue a mano no se recuerda. */
+    if (g.hasAttribute('data-cerrado')) g.classList.add('cerrado');
+    g.querySelector('.s-grupo-cab').onclick = function () { g.classList.toggle('cerrado'); };
   });
 
   /* el activo: por ruta y ancla; si no hay ancla que coincida, por ruta */
   function menuVisible() {
-    return app.classList.contains('modo-completo') ? '.s-menu-completo' : '.s-menu-gsg';
+    return '.s-menu-gsg';
   }
   function marcarActivo() {
     var ruta = location.pathname;
@@ -602,7 +652,7 @@ const JS = String.raw`
     if (!activo && ruta.indexOf('/procesos/') === 0) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/procesos"]');
     /* /entregas y /hoy son la misma pantalla */
     /* la solicitud de ubicación y sus ajustes son pestañas de Pedidos GSG */
-    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
+    if (!activo && (ruta === '/entregas' || ruta === '/hoy' || ruta === '/automatizacion-gsg' || ruta === '/embudo-chats')) activo = document.querySelector(menuVisible() + ' .s-item[data-ir="/hoy"], ' + menuVisible() + ' .s-item[data-ir="/entregas"]');
     items.forEach(function (a) { a.classList.toggle('activo', a === activo); });
     var miga = document.getElementById('s-miga');
     if (activo) {
@@ -679,7 +729,7 @@ const JS = String.raw`
     }
   });
   document.querySelector('.s-buscar').addEventListener('click', function () {
-    if (app.classList.contains('plegado')) { app.classList.remove('plegado'); guardar('s-plegado', '0'); q.focus(); }
+    if (app.classList.contains('plegado')) { app.classList.remove('plegado'); q.focus(); }
   });
 
   /* --- el buscador global (Ctrl K): pedidos de hoy, clientes, conversaciones guardadas y modulos --- */
@@ -823,7 +873,7 @@ const JS = String.raw`
   window.pintarSenalIA = function (c) {
     if (!c || !SENAL_IA[c.estado]) return;
     var texto = SENAL_IA[c.estado];
-    var detalle = c.estado === 'sin_conexion' ? (c.motivo || 'La IA no respondió.') : c.estado === 'apagada' ? 'La IA no está activa o le falta la clave.' : c.estado === 'sin_comprobar' ? 'Aún no se le ha preguntado nada desde que arrancó el sistema.' : 'La última llamada al modelo respondió bien.';
+    var detalle = c.estado === 'sin_conexion' ? (c.motivo || 'La IA no respondió.') : c.estado === 'apagada' ? 'A la IA le falta la clave: guárdala en Asistente IA para etiquetar los chats.' : c.estado === 'sin_comprobar' ? 'Aún no se le ha preguntado nada desde que arrancó el sistema.' : 'La última llamada al modelo respondió bien.';
     var cuando = c.comprobada ? ' (comprobado: ' + horaCorta(c.comprobada) + ')' : '';
     var a = document.getElementById('s-ia-senal');
     if (a) {
@@ -1185,6 +1235,10 @@ const JS = String.raw`
   window.shellTitulo = function (titulo, sub) {
     document.getElementById('s-h1').textContent = titulo;
     document.getElementById('s-sub').textContent = sub || '';
+    /* La cabecera de la pagina (titulo grande y explicacion entera), si la hay. */
+    var pt = document.getElementById('s-pag-tit'), ps = document.getElementById('s-pag-sub');
+    if (pt) pt.textContent = titulo;
+    if (ps) ps.textContent = sub || '';
     document.title = titulo + ' - ' + document.getElementById('s-app').getAttribute('data-negocio');
     apuntarAyuda();
   };
@@ -1229,9 +1283,8 @@ export function appShell(opts: ShellOpts): string {
     ...visiblesGsg.filter((i) => !i.seccion).map((i) => itemHtml(i, false)),
     ...secciones.map((sec) => {
       const items = visiblesGsg.filter((i) => i.seccion === sec);
-      // La operación diaria queda visible; configuración, avanzado y ayuda empiezan plegados.
-      const cerrada = sec !== 'Operación';
-      return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}"${cerrada ? ' data-cerrado="1"' : ''}>
+      // Todas las secciones se ven abiertas siempre; solo Superadministración empieza plegada.
+      return `<div class="s-grupo" data-grupo="gsg-${escapeHtml(sec.toLowerCase())}">
         <button class="s-grupo-cab" type="button"><span>${escapeHtml(sec)}</span>${icono('chevron')}</button>
         <div class="s-grupo-items">
           ${items.map((i) => itemHtml(i, true)).join('\n          ')}
@@ -1257,7 +1310,6 @@ export function appShell(opts: ShellOpts): string {
       </div>`,
   ).join('\n      ');
   const demo = opts.demo ? '<span class="s-demo" title="Los mensajes no salen a WhatsApp">Demostración</span>' : '';
-  const favicon = opts.icono ?? '💬';
   // La ayuda de todas las pantallas va en la pagina (JSON); el navegador elige la de la ruta.
   const ayudaJson = JSON.stringify(AYUDA_PANTALLAS).replace(/<\//g, '<\\/');
 
@@ -1272,18 +1324,17 @@ ${TEMA_SCRIPT}
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="${NOMBRE_SISTEMA}">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/icono-192.png">
 <title>${escapeHtml(opts.titulo)} - ${negocio} · ${NOMBRE_SISTEMA}</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>${favicon}</text></svg>">
-<style>${CSS}${DIALOGO_CSS}${DIALOGO_ELEGIR_CSS}${opts.css ?? ''}</style>
+${ICONOS_HEAD}
+<style>${CSS}${DIALOGO_CSS}${DIALOGO_ELEGIR_CSS}${VISOR_CSS}${opts.css ?? ''}</style>
 </head><body>
-<div class="s-app modo-${modo}" id="s-app" data-negocio="${negocio}" data-modo="${modo}" data-gsg="${conGsg ? '1' : '0'}">
+<div class="s-app modo-${modo}${opts.lleno ? '' : ' con-cabecera'}" id="s-app" data-negocio="${negocio}" data-modo="${modo}" data-gsg="${conGsg ? '1' : '0'}">
   <div class="s-backdrop" id="s-backdrop"></div>
   <div class="s-panel-fondo" id="s-panel-fondo"></div>
   <aside class="s-side">
     <div class="s-brand">
       <button class="s-plegar" id="s-plegar" type="button" title="Plegar el menú" aria-label="Plegar o desplegar el menú">${icono('plegar')}</button>
-      <a class="s-logo" href="/panel#inicio" title="${NOMBRE_SISTEMA}"><span class="s-logo-mark">${INICIAL_SISTEMA}</span><span class="s-logo-text">${negocio}</span></a>
+      <a class="s-logo" href="/panel#inicio" title="${NOMBRE_SISTEMA}"><img class="s-logo-mark" src="${RUTA_LOGO}" alt="" width="32" height="32"><span class="s-logo-text">${negocio}</span></a>
     </div>
     <nav class="s-nav">
       <div class="s-menu-gsg">
@@ -1310,7 +1361,7 @@ ${TEMA_SCRIPT}
     <div id="s-plan" class="s-plan hidden"></div>
     <header class="s-top">
       <button class="s-menu" id="s-menu" type="button" title="Menú" aria-label="Abrir el menú">${icono('menu')}</button>
-      <div class="s-titulo"><div class="s-miga" id="s-miga"></div><h1 id="s-h1">${escapeHtml(opts.titulo)}</h1><p id="s-sub">${escapeHtml(opts.subtitulo ?? '')}</p></div>
+      <div class="s-titulo"><div class="s-miga" id="s-miga"></div>${opts.lleno ? '<h1' : '<div'} class="s-titulo-h" id="s-h1">${escapeHtml(opts.titulo)}${opts.lleno ? '</h1>' : '</div>'}<p id="s-sub">${escapeHtml(opts.subtitulo ?? '')}</p></div>
       <span id="state" class="pill hidden"></span>
       <div class="s-top-der">${demo}
         <a class="s-ia-senal hidden" id="s-ia-senal" href="/panel#ia" data-estado="" title="Asistente IA" aria-label="Estado de la IA"><i></i><span>IA</span></a>
@@ -1326,6 +1377,7 @@ ${TEMA_SCRIPT}
       </div>
     </header>
     <div class="s-content${opts.lleno ? ' lleno' : ' s-base'}" id="s-content">
+${opts.lleno ? '' : `<header class="s-pag"><h1 class="s-pag-tit" id="s-pag-tit">${escapeHtml(opts.titulo)}</h1><p class="s-pag-sub" id="s-pag-sub">${escapeHtml(opts.subtitulo ?? '')}</p></header>`}
 ${opts.contenido}
     </div>
     <nav class="s-nav-movil" id="s-nav-movil" aria-label="Ir a">
@@ -1362,6 +1414,7 @@ ${FILTRO_TABLA_JS}
 ${EVENTOS_PANEL_JS}
 ${DIALOGO_JS}
 ${DIALOGO_ELEGIR_JS}
+${VISOR_JS}
 ${JS}
 ${opts.script ?? ''}
 </script>

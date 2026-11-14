@@ -48,10 +48,11 @@ const CSS = `
   .aviso .botones { margin-top: 10px; }
 
   /* El veredicto: lo primero que se lee y lo unico que hace falta si va todo bien. */
-  .veredicto { margin-bottom: var(--esp-4); border-left: 4px solid var(--gris); }
-  .veredicto.verde { border-left-color: var(--verde); }
-  .veredicto.ambar { border-left-color: var(--ambar); }
-  .veredicto.rojo { border-left-color: var(--rojo); }
+  /* El veredicto se lee por el tono de toda la tarjeta (borde y fondo), no por una franja lateral. */
+  .veredicto { margin: var(--esp-4) 0; }
+  .veredicto.verde { border-color: color-mix(in srgb, var(--verde) 16%, var(--borde)); background: color-mix(in srgb, var(--verde-suave) 45%, var(--superficie)); }
+  .veredicto.ambar { border-color: color-mix(in srgb, var(--ambar) 16%, var(--borde)); background: color-mix(in srgb, var(--ambar-suave) 45%, var(--superficie)); }
+  .veredicto.rojo { border-color: color-mix(in srgb, var(--rojo) 16%, var(--borde)); background: color-mix(in srgb, var(--rojo-suave) 45%, var(--superficie)); }
   .veredicto .cabecera { display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .veredicto h2 { font-size: var(--fs-h2); font-weight: 700; margin: 0; }
   .veredicto p { margin: var(--esp-2) 0 0; font-size: var(--fs-small); }
@@ -61,7 +62,10 @@ const CSS = `
   .veredicto li .que { flex: 1; min-width: 220px; }
 
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
-  @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
+  /* minmax(0, 1fr): una tabla ancha se desplaza dentro de su caja, no ensancha la pantalla. */
+  @media (max-width: 1000px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .tabla-desliza { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabla-desliza table { min-width: 520px; }
   .caja { padding: 0; overflow: hidden; margin-bottom: var(--esp-4); min-width: 0; }
   .caja > h2 { font-size: var(--fs-h3); font-weight: 700; margin: 0; padding: var(--esp-3) var(--esp-4); border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: var(--esp-2); flex-wrap: wrap; }
   .caja > h2 .sep { flex: 1; }
@@ -92,9 +96,17 @@ const CSS = `
   .barra.apretado .previsto { background: var(--ambar); }
   .barra.rojo .previsto { background: var(--rojo); }
 
+  /* Numeros de WhatsApp: salud y maximo por dia en una sola tabla. */
+  #numeros-tabla td { vertical-align: middle; }
+  #numeros-tabla .causa { display: block; margin-top: 3px; font-size: 12.5px; color: var(--texto-suave); }
+  #numeros-tabla .num-etiqueta { font-weight: 600; }
+  #numeros-tabla .num-telefono { display: block; font-size: 12.5px; color: var(--texto-suave); }
+  #numeros-tabla input.maximo { width: 110px; }
+  #numeros-tabla .fila-maximo { display: flex; gap: 8px; align-items: center; }
+  #numeros-pie { margin-top: var(--esp-2); }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--borde); vertical-align: top; }
-  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
+  th { font-size: 11.5px; text-transform: none; letter-spacing: 0; color: var(--texto-suave); font-weight: 600; background: var(--superficie-2); }
   tr:last-child td { border-bottom: 0; }
   td.num, th.num { text-align: right; white-space: nowrap; }
 
@@ -112,7 +124,7 @@ const CSS = `
   details.avanzado { border-top: 0; margin-top: var(--esp-2); padding-top: 0; }
   details.avanzado summary { font-weight: 500; color: var(--texto-suave); font-size: 13.5px; }
   .fila { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  @media (max-width: 560px) { .fila { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .fila { grid-template-columns: minmax(0, 1fr); } }
 
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--texto); color: var(--bg); padding: 10px 16px; border-radius: var(--radio-sm); font-size: var(--fs-cuerpo); z-index: 50; max-width: 90vw; box-shadow: var(--sombra-2); }
 `;
@@ -125,14 +137,51 @@ export function fiabilidadPage(opts: { disponible: boolean; demo: boolean; nombr
   const contenido = `
 <div class="wrap" id="wrap" data-disponible="${opts.disponible ? '1' : '0'}">
 
-<section class="tarjeta"><h2>API y conexión</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones"><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a href="/panel#historial">Historial</a></div></section>
+<!-- Primero el veredicto (si hay que hacer algo, es lo que se busca al entrar); después el resumen de la API. -->
 <section class="tarjeta veredicto" id="veredicto" aria-live="polite">
   <div class="cabecera"><span class="chip tono-gris" id="veredicto-chip">Comprobando</span><h2 id="veredicto-titulo">Mirando cómo está todo…</h2></div>
   <p class="muted" id="veredicto-pie">El sistema se vigila a sí mismo cada pocos segundos. Si algo falla, aquí sale qué pasa y a dónde ir.</p>
   <ul id="veredicto-acciones"></ul>
 </section>
+<section class="tarjeta"><h2>API y conexión</h2><p id="api-salud-estado" role="status">Consultando…</p><div class="botones" style="display:flex;flex-wrap:wrap;gap:var(--esp-2);align-items:center"><button class="btn" id="api-salud-pausa" type="button">Pausar envíos</button><button class="btn" id="api-salud-reanudar" type="button">Reanudar envíos</button><a class="btn fantasma" href="/panel#historial">Ver historial</a></div></section>
 
 <p class="aviso ambar hidden" id="aviso-red" role="status"></p>
+
+<section class="tarjeta caja" id="caja-numeros">
+  <h2>Números de WhatsApp <span class="sep"></span><button class="btn sm" id="numeros-abrir" type="button">Agregar número</button><button class="btn sm" id="numeros-mirar" type="button">Actualizar</button></h2>
+  <div class="cuerpo">
+    <div class="tabla-desliza"><table id="numeros-tabla">
+      <thead><tr><th>Número</th><th>Estado</th><th class="num">Mensajes hoy</th><th>Máximo por día</th></tr></thead>
+      <tbody id="numeros-filas"><tr><td colspan="4" class="muted">Cargando…</td></tr></tbody>
+    </table></div>
+    <p class="muted detalle" id="numeros-uno" hidden>Aquí salen todos los números de la tienda. Ahora hay uno: pulsa «Agregar número» para sumar otro (hasta 8) y ponerle su máximo.</p>
+    <details id="numeros-nuevo">
+      <summary>Agregar otro número (hasta 8 por tienda)</summary>
+      <div class="fila">
+        <div><label for="nn-etiqueta">Nombre del número</label><input id="nn-etiqueta" type="text" maxlength="80" placeholder="Ventas" autocomplete="off"></div>
+        <div><label for="nn-tipo">Cómo se conecta</label>
+          <select id="nn-tipo">
+            <option value="local">WhatsApp con código QR</option>
+            <option value="cloud">API oficial de Meta</option>
+            <option value="waha">WAHA</option>
+          </select></div>
+      </div>
+      <div class="fila hidden" id="nn-cloud">
+        <div><label for="nn-phone-id">Phone number ID</label><input id="nn-phone-id" type="text" autocomplete="off"></div>
+        <div><label for="nn-waba">ID de la cuenta de negocio</label><input id="nn-waba" type="text" autocomplete="off"></div>
+        <div><label for="nn-token">Token de acceso</label><input id="nn-token" type="password" autocomplete="new-password"></div>
+      </div>
+      <div class="fila hidden" id="nn-waha">
+        <div><label for="nn-waha-url">Dirección de WAHA</label><input id="nn-waha-url" type="text" placeholder="http://servidor:3000" autocomplete="off"></div>
+        <div><label for="nn-waha-sesion">Sesión</label><input id="nn-waha-sesion" type="text" autocomplete="off"></div>
+        <div><label for="nn-waha-clave">Clave de WAHA (opcional)</label><input id="nn-waha-clave" type="password" autocomplete="new-password"></div>
+      </div>
+      <p class="muted detalle" id="nn-ayuda">Se agrega a la tabla de arriba. Con código QR, después hay que vincularlo escaneando el QR en Conexión WhatsApp → Líneas de WhatsApp.</p>
+      <div class="botones"><button class="btn primario" id="nn-crear" type="button">Agregar número</button> <a class="btn" href="/setup#card-lineas">Ir a Conexión WhatsApp</a></div>
+    </details>
+    <p class="muted detalle" id="numeros-pie">El máximo cuenta todos los mensajes que salen por ese número, de cualquier cliente, y vuelve a cero a las 00:00 (hora de Lima). Vacío o 0 = sin límite. Si un número llega a su máximo o se desconecta, el mensaje sale por otro número habilitado y conectado; el número asignado al cliente no cambia.</p>
+  </div>
+</section>
 
 <div class="cols">
   <div>
@@ -597,14 +646,95 @@ if ($('wa-simular')) {
   simular($('wa-sim-real'), { caido: null }, '');
 }
 
+/* ------------------------------------------- numeros de WhatsApp ---------
+   Una sola tabla: cada numero con su estado de salud, lo que lleva hoy y su
+   maximo por dia. Los datos vienen de dos sitios (limites y salud) y se
+   juntan aqui por el id del numero. */
+
+var ESTADO_NUMERO = {
+  operativo: { tono: 'verde', texto: 'Operativo' },
+  con_problemas: { tono: 'ambar', texto: 'Con problemas' },
+  desconectado: { tono: 'rojo', texto: 'Desconectado' },
+  no_verificado: { tono: 'gris', texto: 'No verificado' }
+};
+var numerosLimites = null;
+var numerosSalud = null;
+
+function pintarNumeros() {
+  var cuerpo = $('numeros-filas');
+  // Mientras alguien escribe un maximo no se redibuja la tabla.
+  if (cuerpo.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+  if (!numerosLimites) return;
+  var salud = {};
+  ((numerosSalud && numerosSalud.lineas) || []).forEach(function (l) { salud[l.id] = l; });
+  $('numeros-uno').hidden = numerosLimites.lineas.length > 1;
+  if (!numerosLimites.lineas.length) { cuerpo.innerHTML = '<tr><td colspan="4" class="muted">Todavía no hay números de WhatsApp.</td></tr>'; return; }
+  cuerpo.innerHTML = numerosLimites.lineas.map(function (l) {
+    var s = salud[l.id];
+    var est = s ? ESTADO_NUMERO[s.estado] : (numerosSalud ? ESTADO_NUMERO.no_verificado : { tono: 'gris', texto: 'Comprobando…' });
+    var causa = s && s.causa ? '<span class="causa">' + esc(s.causa) + '</span>' : '';
+    var tel = l.numero || (s && s.numero) || '';
+    return '<tr data-id="' + esc(l.id) + '">' +
+      '<td><span class="num-etiqueta">' + esc(l.etiqueta) + '</span>' + (tel ? '<span class="num-telefono">+' + esc(tel) + '</span>' : '') + '</td>' +
+      '<td><span class="chip tono-' + est.tono + '">' + est.texto + '</span>' + causa + '</td>' +
+      '<td class="num"><strong>' + esc(l.consumo) + '</strong></td>' +
+      '<td><div class="fila-maximo"><input class="maximo" type="number" min="0" step="1" inputmode="numeric" placeholder="Sin límite" value="' + (l.limiteDiario > 0 ? l.limiteDiario : '') + '" aria-label="Máximo de mensajes por día de ' + esc(l.etiqueta) + '">' +
+      '<button class="btn sm primario guardar-maximo" type="button">Guardar</button></div></td></tr>';
+  }).join('');
+}
+
+async function cargarNumeros() {
+  // Los maximos y el consumo salen enseguida; la salud puede tardar (consulta al proveedor).
+  var limites = api('/admin/fiabilidad/limites').then(function (d) { numerosLimites = d; pintarNumeros(); });
+  var salud = api('/admin/fiabilidad/whatsapp').then(function (d) { numerosSalud = d; pintarNumeros(); }).catch(function () { numerosSalud = { lineas: [] }; pintarNumeros(); });
+  await Promise.all([limites, salud]);
+}
+
+$('numeros-filas').addEventListener('click', function (ev) {
+  var boton = ev.target.closest('.guardar-maximo');
+  if (!boton) return;
+  var fila = boton.closest('tr');
+  var valor = fila.querySelector('input.maximo').value.trim();
+  if (valor !== '' && !/^[0-9]+$/.test(valor)) { toast('El máximo tiene que ser un número entero: 0 o más. Vacío o 0 = sin límite.'); return; }
+  ocupado(boton, 'Guardando…', async function () {
+    var r = await api('/admin/fiabilidad/limites/' + encodeURIComponent(fila.getAttribute('data-id')), { method: 'PUT', body: { limiteDiario: valor } });
+    numerosLimites = r;
+    fila.querySelector('input.maximo').blur();
+    pintarNumeros();
+    toast(r.limiteDiario > 0 ? 'Máximo guardado: ' + r.limiteDiario + ' mensajes por día.' : 'Guardado: sin límite.');
+  })();
+});
+$('numeros-mirar').onclick = ocupado($('numeros-mirar'), 'Mirando…', cargarNumeros);
+
+$('numeros-abrir').onclick = function () { var d = $('numeros-nuevo'); d.open = true; d.scrollIntoView({ block: 'center' }); $('nn-etiqueta').focus(); };
+
+/* Agregar otro numero: el mismo alta de siempre (POST /admin/lineas), sin salir de la tabla. */
+$('nn-tipo').addEventListener('change', function () {
+  $("nn-cloud").classList.toggle("hidden", $("nn-tipo").value !== "cloud");
+  $("nn-waha").classList.toggle("hidden", $("nn-tipo").value !== "waha");
+});
+$('nn-crear').onclick = ocupado($('nn-crear'), 'Agregando…', async function () {
+  var tipo = $('nn-tipo').value;
+  var etiqueta = $('nn-etiqueta').value.trim();
+  if (!etiqueta) { toast('Ponle un nombre al número, por ejemplo «Ventas».'); return; }
+  var cuerpo = { etiqueta: etiqueta, proveedor: tipo };
+  if (tipo === 'cloud') cuerpo.credenciales = { phoneNumberId: $('nn-phone-id').value.trim(), businessAccountId: $('nn-waba').value.trim(), token: $('nn-token').value.trim() };
+  if (tipo === 'waha') cuerpo.credenciales = { wahaUrl: $('nn-waha-url').value.trim(), wahaSession: $('nn-waha-sesion').value.trim(), wahaApiKey: $('nn-waha-clave').value.trim() };
+  var r = await api('/admin/lineas', { method: 'POST', body: cuerpo });
+  ['nn-etiqueta', 'nn-phone-id', 'nn-waba', 'nn-token', 'nn-waha-url', 'nn-waha-sesion', 'nn-waha-clave'].forEach(function (id) { $(id).value = ''; });
+  await cargarNumeros();
+  toast(tipo === 'local' ? 'Número «' + r.linea.etiqueta + '» agregado. Falta vincularlo: escanea su QR en Conexión WhatsApp.' : 'Número «' + r.linea.etiqueta + '» agregado.');
+});
+
 /* ------------------------------------------------------------ arranque -- */
 
 if ($('wrap').dataset.disponible === '1') {
   document.addEventListener('ia:cambio', function () { refrescar(); });
   // Mientras hay un cuadro de diálogo abierto no se refresca: cambiar lo de
   // debajo mientras alguien decide es como moverle la mesa.
-  setInterval(function () { if (!document.querySelector('.dlg-fondo')) refrescar(); }, 30000);
+  setInterval(function () { if (!document.querySelector('.dlg-fondo')) { refrescar(); cargarNumeros().catch(function () {}); } }, 30000);
   refrescar();
+  cargarNumeros().catch(function (e) { $('numeros-filas').innerHTML = '<tr><td colspan="4" class="muted">' + esc(e.message) + '</td></tr>'; });
 } else {
   // Sin el servicio de fiabilidad no hay nada que leer: se dice una vez y no
   // se pregunta cada 30 segundos.

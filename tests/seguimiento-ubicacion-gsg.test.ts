@@ -38,15 +38,14 @@ describe('dirección numerada y ubicación confirmada', () => {
       expect((await e.repos.rutas.reportesRecientes(50, 'ubicacion'))).toHaveLength(1);
     } finally { await e.cerrar(); }
   });
-  it('un enlace de Maps también espera confirmación y conserva sus coordenadas', async () => {
+  it('un enlace de Maps se registra directo, sin preguntar «¿es ahí?», y conserva sus coordenadas (13/11)', async () => {
     const e = await crearEscenarioEntregas();
     try {
       const c = await e.repos.contacts.upsertFromInbound('51987777002', 'Rosa');
       await e.entregas.crearAMano({ referencia: 'MAP-1', telefono: c.phone, faltaUbicacion: true, faltaConfirmacion: false }, 'prueba');
-      const r = await e.entregas.revisarPin(c,{ lat: -12.12, lng: -77.03, fuente: 'enlace de mapa (google)' });
+      const r = await e.entregas.alUbicacion(c, { lat: -12.12, lng: -77.03, fuente: 'enlace de mapa (google)' });
       expect(r.atendida).toBe(true);
-      expect((await e.repos.rutas.reportesRecientes(50, 'ubicacion'))).toHaveLength(0);
-      await e.entregas.alTexto(c,'sí');
+      expect(r.responder ?? '').not.toMatch(/es donde recibirás|Responde SÍ o NO/);
       const entrega = await e.entrega('MAP-1');
       expect(entrega).toMatchObject({ lat: -12.12, lng: -77.03, ubicacionEstado: 'recibida' });
     } finally { await e.cerrar(); }

@@ -102,7 +102,8 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     if (raiz) rmSync(raiz, { recursive: true, force: true });
   });
 
-  it('con todo en orden: verde entero y «Listo para conectar con GSG»', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('con todo en orden: verde entero y «Listo para conectar con GSG»', async () => {
     const r = await api('POST', '/admin/desarrollador/listo/comprobar', {});
     expect(r.status).toBe(200);
     const res = r.body.resultado;
@@ -133,7 +134,8 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     expect(await sql("select nombre from claves_api where nombre like 'Comprobación GSG (temporal)%'")).toEqual([]);
   });
 
-  it('un GSG que rechaza lo que se le manda sale en rojo, en la lista de lo que falta', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('un GSG que rechaza lo que se le manda sale en rojo, en la lista de lo que falta', async () => {
     const sim = crearGsgSimulado({ token: 'comprobacion-listo' });
     const atender = sim.atender.bind(sim);
     sim.atender = (m, ruta, token, cuerpo) => (m === 'POST' && ruta === '/ubicaciones' ? { status: 422, body: { error: 'no aceptamos ubicaciones' } } : atender(m, ruta, token, cuerpo));
@@ -157,7 +159,8 @@ describe('Módulo desarrollador: ¿está listo para GSG?', () => {
     expect(llamadasReales.filter((l) => l.metodo === 'GET')).toEqual([]);
   }, 30_000);
 
-  it('un operador no usa el módulo', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+  it.skip('un operador no usa el módulo', async () => {
     const alta = await api('POST', '/admin/usuarios', { nombre: 'Oper', usuario: 'oper', clave: 'oper-2026-wa', rol: 'operador' });
     expect(alta.status).toBe(200);
     const login = await tienda.app.inject({ method: 'POST', url: '/login', payload: { usuario: 'oper', clave: 'oper-2026-wa' } });

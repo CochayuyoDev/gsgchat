@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 /**
  * El chat: conversaciones, hilo y envio.
  *
@@ -17,6 +18,8 @@ import { createSender } from '../src/outbound/sender.js';
 import type { OutboundQueue } from '../src/outbound/queue.js';
 import { processChange } from '../src/whatsapp/webhook.js';
 import { readInbound } from '../src/handlers/inbound.js';
+import { idDeMedia } from '../src/whatsapp/local/media.js';
+import { chatPage } from '../src/web/chat-page.js';
 import {
   approvedTemplate,
   createFakeRepos,
@@ -166,11 +169,31 @@ describe('la conversacion se guarda sola', () => {
     expect(hilo.json().canWrite).toBe(true);
   });
 
-  it('una foto se ignora sin crear contacto ni descargar o guardar mensajes', async () => {
-    await processChange('messages', inbound({ type: 'image', text: undefined }), deps);
+  it('una foto se guarda en el chat y no se le contesta (regla del dueño, 28/10)', async () => {
+    const antes = repos.messages._all.length;
+    await processChange('messages', inbound({ type: 'image', text: undefined, image: { id: 'meta-foto-1', mime_type: 'image/jpeg', caption: 'mi fachada' } } as Partial<InboundMessage>), deps);
 
-    expect(await repos.contacts.getByPhone('5215500001111')).toBeNull();
-    expect(repos.messages._all).toHaveLength(0);
+    expect(await repos.contacts.getByPhone('5215500001111')).not.toBeNull();
+    const nuevos = repos.messages._all.slice(antes);
+    expect(nuevos).toHaveLength(1);
+    expect(nuevos[0]).toMatchObject({ direction: 'in', kind: 'image', payload: { media: { id: 'meta-foto-1', mimeType: 'image/jpeg', caption: 'mi fachada' } } });
+  });
+
+  it('la foto de Meta se baja y se guarda en cuanto llega, para que no desaparezca cuando Meta la borre', async () => {
+    const FOTO = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    const bajados: string[] = [];
+    const conDescarga = { ...deps, mediaDir, wa: { ...wa, downloadMedia: async (id: string) => { bajados.push(id); return { datos: FOTO, mimeType: 'image/jpeg' }; } } } as typeof deps;
+    await processChange('messages', inbound({ type: 'image', text: undefined, image: { id: 'meta-foto-guardada', mime_type: 'image/jpeg' } } as Partial<InboundMessage>), conDescarga);
+    expect(bajados).toEqual(['meta-foto-guardada']);
+    const copia = idDeMedia('meta:meta-foto-guardada', '.jpg');
+    expect(readFileSync(join(mediaDir, copia)).equals(FOTO)).toBe(true);
+    // Un mensaje repetido no la baja otra vez; y si la descarga falla, el mensaje se guarda igual.
+    await processChange('messages', inbound({ type: 'image', text: undefined, image: { id: 'meta-foto-guardada', mime_type: 'image/jpeg' } } as Partial<InboundMessage>), conDescarga);
+    expect(bajados).toHaveLength(1);
+    const rota = { ...conDescarga, wa: { ...wa, downloadMedia: async () => { throw new Error('Meta no responde'); } } } as typeof deps;
+    const antes = repos.messages._all.length;
+    await processChange('messages', inbound({ type: 'video', text: undefined, video: { id: 'meta-video-roto', mime_type: 'video/mp4' } } as Partial<InboundMessage>), rota);
+    expect(repos.messages._all.length).toBe(antes + 1);
   });
 
   it('el estado de entrega llega al mensaje', async () => {
@@ -227,12 +250,26 @@ describe('lista de conversaciones', () => {
     expect(cambiado.body).toContain('segundo');
   });
 
-  it('descarta archivos entrantes antes de crear contactos o registrar mensajes', async () => {
-    for (const type of ['audio', 'video', 'sticker', 'image', 'document']) {
-      await processChange('messages', inbound({ type } as Partial<InboundMessage>), deps);
-    }
+  it('descarta documentos antes de crear contactos o registrar mensajes', async () => {
+    await processChange('messages', inbound({ type: 'document' } as Partial<InboundMessage>), deps);
     expect(await repos.contacts.getByPhone('5215500001111')).toBeNull();
     expect(repos.messages._all).toHaveLength(0);
+  });
+
+  it('un sticker del cliente se guarda con su archivo (se baja al llegar) y no se le contesta', async () => {
+    const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBP')]);
+    const conDescarga = { ...deps, mediaDir, wa: { ...wa, downloadMedia: async () => ({ datos: WEBP, mimeType: 'image/webp' }) } } as typeof deps;
+    await processChange('messages', inbound({ type: 'sticker', text: undefined, sticker: { id: 'meta-sticker-1', mime_type: 'image/webp' } } as Partial<InboundMessage>), conDescarga);
+    expect(repos.messages._all).toHaveLength(1);
+    expect(repos.messages._all[0]).toMatchObject({ direction: 'in', kind: 'sticker', payload: { media: { id: 'meta-sticker-1', mimeType: 'image/webp' } } });
+    expect(readFileSync(join(mediaDir, idDeMedia('meta:meta-sticker-1', '.webp'))).equals(WEBP)).toBe(true);
+  });
+
+  it('fotos, audios y videos se guardan sin respuesta del bot', async () => {
+    for (const type of ['audio', 'video', 'image']) {
+      await processChange('messages', inbound({ type, [type]: { id: `meta-${type}`, mime_type: type === 'audio' ? 'audio/ogg' : type === 'video' ? 'video/mp4' : 'image/jpeg' } } as Partial<InboundMessage>), deps);
+    }
+    expect(repos.messages._all.map((m) => [m.direction, m.kind])).toEqual([['in', 'audio'], ['in', 'video'], ['in', 'image']]);
   });
   it('ordena por lo mas reciente y cuenta los no leidos', async () => {
     await processChange('messages', inbound({ text: { body: 'primero' } }, '5215500004444'), deps);
@@ -292,6 +329,32 @@ describe('lista de conversaciones', () => {
     expect(respuesta.json().messages[0].expiresAt).toBeTruthy();
   });
 
+  it('al sincronizar, el mensaje con foto, audio, video o sticker conserva su archivo (si no, desaparecia hasta recargar)', async () => {
+    const contact = await repos.contacts.upsertFromInbound('5215500007811', 'Eva');
+    const inicio = await repos.messages.add({ contactId: contact.id, direction: 'out', kind: 'text', wamid: 'wamid.arch.out', body: 'Hola', status: 'sent', payload: { origen: 'sistema' } });
+    const ids: Record<string, number> = {};
+    for (const [kind, mime] of [['image', 'image/jpeg'], ['audio', 'audio/ogg'], ['video', 'video/mp4'], ['sticker', 'image/webp']] as const) {
+      ids[kind] = await repos.messages.add({ contactId: contact.id, direction: 'in', kind, wamid: `wamid.arch.${kind}`, body: `(${kind})`, status: 'delivered', payload: { media: { id: `${kind}`.padEnd(24, '0') + '.bin', mimeType: mime } } });
+    }
+    // El hilo completo y la sincronizacion tienen que traer el mismo `archivo`.
+    const hilo = await app.inject({ url: `/admin/chat/${contact.id}?read=false`, headers: auth });
+    const sync = await app.inject({ method: 'POST', url: `/admin/chat/${contact.id}/sync`, headers: auth, payload: { afterId: String(inicio), knownIds: Object.values(ids).map(String) } });
+    expect(sync.statusCode).toBe(200);
+    for (const [kind, id] of Object.entries(ids)) {
+      const deHilo = hilo.json().messages.find((m: { id: number }) => m.id === id);
+      const deSync = sync.json().messages.find((m: { id: number }) => m.id === id);
+      expect(deHilo.archivo, kind).toMatchObject({ url: expect.stringMatching(/^\.\/archivos\/[\w-]+\.[\w-]+$/) });
+      expect(deSync.archivo, kind).toEqual(deHilo.archivo);
+    }
+    expect(sync.json().messages.find((m: { id: number }) => m.id === ids.sticker).archivo.tipo).toBe('sticker');
+  });
+
+  it('la pantalla del chat pinta stickers, fotos, audios y videos', () => {
+    const html = chatPage({ proveedor: 'local', configured: true, nombreNegocio: 'Prueba' });
+    expect(html).toContain("'image', 'audio', 'video', 'sticker'");
+    expect(html).toContain('adjunto-sticker');
+  });
+
   it('busca por nombre y por numero', async () => {
     await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500008888'), deps);
 
@@ -320,15 +383,15 @@ describe('escribir desde el chat', () => {
     expect(messages.at(-1)).toMatchObject({ direction: 'out', body: 'Claro que si, te ayudo' });
   });
 
-  it('fuera de la ventana el chat se bloquea y lo explica', async () => {
+  it('fuera de la ventana el chat NO se bloquea: se escribe libre (decisión del dueño, 10/11)', async () => {
     await repos.contacts.upsertFromInbound('5215501010101', 'Viejo');
     await repos.contacts.setOptIn('5215501010101', 'formulario');
     const contact = (await repos.contacts.getByPhone('5215501010101'))!;
     await repos.messages.add({ contactId: contact.id, direction: 'out', kind: 'text', wamid: 'wamid.chat.viejo', body: 'Pedido registrado', status: 'sent', payload: { origen: 'sistema' } });
 
     const hilo = await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth });
-    expect(hilo.json().canWrite).toBe(false);
-    expect(hilo.json().blockedReason).toContain('24 h');
+    expect(hilo.json().canWrite).toBe(true);
+    expect(hilo.json().blockedReason).toBeNull();
 
     const intento = await app.inject({
       method: 'POST',
@@ -336,7 +399,14 @@ describe('escribir desde el chat', () => {
       headers: auth,
       payload: { contactId: contact.id, text: 'hola?' },
     });
-    expect(intento.json()).toMatchObject({ ok: false, code: 'window_closed' });
+    expect(intento.json()).toMatchObject({ ok: true });
+  });
+
+  it('el envío automático del sistema sí sigue respetando la ventana de 24 h', async () => {
+    await repos.contacts.upsertFromInbound('5215503030303', 'Otro');
+    await repos.contacts.setOptIn('5215503030303', 'formulario');
+    const r = await sender.send({ phone: '5215503030303', kind: 'freeform', category: 'UTILITY', text: 'aviso automático' });
+    expect(r).toMatchObject({ ok: false, code: 'window_closed' });
   });
 
   it('fuera de la ventana una plantilla aprobada si sale', async () => {
@@ -420,10 +490,99 @@ describe('escribir desde el chat', () => {
     expect(respuesta.json().contact).toMatchObject({ phone: '5215506060606', name: 'Nuevo' });
   });
 
-  it('retira el endpoint para adjuntos del chat', async () => {
-    const r = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: 'cualquiera', datos: 'aGVsbG8=', mimeType: 'image/png' } });
-    expect(r.statusCode).toBe(410);
+  it('una foto pegada sale como foto, con su pie, y queda en el hilo como una recibida', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    // Un PNG minimo (1x1), como lo entrega el portapapeles.
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+
+    const respuesta = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/adjunto',
+      headers: auth,
+      payload: { contactId: contact.id, datos: 'data:image/png;base64,' + png.toString('base64'), mimeType: 'image/png', filename: 'pegado.png', caption: 'la fachada' },
+    });
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json().ok).toBe(true);
+
+    // Salio por el cliente como foto, con los bytes y el pie.
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'image', bytes: png.length, mimeType: 'image/png', caption: 'la fachada' });
+
+    // En el hilo es una foto con su fichero, igual que una recibida.
+    const messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    const ultimo = messages.at(-1);
+    expect(ultimo).toMatchObject({ direction: 'out', kind: 'image', body: 'la fachada', payload: { media: { kind: 'image', mimeType: 'image/png', caption: 'la fachada', bytes: png.length } } });
+    expect(ultimo.payload.media.id).toMatch(/^[0-9a-f]{24}\.png$/);
+    // Y el fichero esta en disco, servible por /admin/local/media/:id.
+    expect(existsSync(join(mediaDir, ultimo.payload.media.id))).toBe(true);
+    expect(readFileSync(join(mediaDir, ultimo.payload.media.id)).equals(png)).toBe(true);
+  });
+
+  it('una nota de voz grabada en Chrome (data URI con codecs) llega entera y como ogg/opus, sin depender de ffmpeg', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const webm = readFileSync(join(__dirname, 'fixtures', 'nota-de-voz-chrome.webm'));
+    // Tal cual lo entrega FileReader: el `=` de `codecs=opus` no debe cortar la decodificacion.
+    const r = await app.inject({
+      method: 'POST',
+      url: '/admin/chat/adjunto',
+      headers: auth,
+      payload: { contactId: contact.id, datos: 'data:audio/webm;codecs=opus;base64,' + webm.toString('base64'), mimeType: 'audio/webm;codecs=opus', filename: 'nota-de-voz.webm', voz: true },
+    });
+    expect(r.json().ok).toBe(true);
+    const salido = wa.sent.at(-1) as { bytes: number };
+    expect(salido).toMatchObject({ kind: 'media', tipo: 'audio', mimeType: 'audio/ogg', filename: 'nota-de-voz.ogg', voz: true });
+    // Sale con todo su sonido: no unos bytes sueltos.
+    expect(salido.bytes).toBeGreaterThan(webm.length * 0.8);
+    const messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    // Lo guardado en el hilo es lo que grabo el navegador, entero.
+    expect(readFileSync(join(mediaDir, messages.at(-1).payload.media.id)).equals(webm)).toBe(true);
+  });
+
+  it('un audio webm que no se puede preparar se dice y no sale roto', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const antes = wa.sent.length;
+    const roto = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from('no soy audio')]);
+    const r = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: roto.toString('base64'), mimeType: 'audio/webm', voz: true } });
+    expect(r.json().ok).not.toBe(true);
+    expect(wa.sent.length).toBe(antes);
+  });
+
+  it('un documento lleva su nombre; un GIF va como documento para que se mueva', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const pdf = Buffer.from('%PDF-1.4 prueba');
+    const r1 = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: pdf.toString('base64'), mimeType: 'application/pdf', filename: 'boleta.pdf' } });
+    expect(r1.json().ok).toBe(true);
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'document', filename: 'boleta.pdf' });
+    let messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    expect(messages.at(-1)).toMatchObject({ kind: 'document', body: 'boleta.pdf', payload: { media: { filename: 'boleta.pdf' } } });
+    expect(messages.at(-1).payload.media.id).toMatch(/\.pdf$/);
+
+    const r2 = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: Buffer.from('GIF89a').toString('base64'), mimeType: 'image/gif', filename: 'risa.gif' } });
+    expect(r2.json().ok).toBe(true);
+    expect(wa.sent.at(-1)).toMatchObject({ kind: 'media', tipo: 'document' });
+    messages = (await app.inject({ url: `/admin/chat/${contact.id}`, headers: auth })).json().messages;
+    expect(messages.at(-1).payload.media.id).toMatch(/\.gif$/);
+  });
+
+  it('un fichero vacio o de mas de 16 MB se rechaza con un motivo', async () => {
+    await processChange('messages', inbound({ text: { body: 'hola' } }, '5215500009999'), deps);
+    const contact = (await repos.contacts.getByPhone('5215500009999'))!;
+    const vacio = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: 'data:image/png;base64,', mimeType: 'image/png' } });
+    expect(vacio.statusCode).toBe(400);
+    expect(vacio.json().error).toMatch(/vacío/);
+    const enorme = Buffer.alloc(16 * 1024 * 1024 + 1).toString('base64');
+    const grande = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: contact.id, datos: enorme, mimeType: 'video/mp4', filename: 'v.mp4' } });
+    expect(grande.statusCode).toBe(400);
+    expect(grande.json().error).toMatch(/16 MB/);
     expect(wa.sent.filter((m) => m.kind === 'media')).toHaveLength(0);
+  });
+
+  it('a un contacto que no existe no se le manda nada', async () => {
+    const r = await app.inject({ method: 'POST', url: '/admin/chat/adjunto', headers: auth, payload: { contactId: 'no-existe', datos: 'aGVsbG8=', mimeType: 'image/png' } });
+    expect(r.statusCode).toBe(404);
   });
 
   it('un mensaje vacio se rechaza con un motivo', async () => {

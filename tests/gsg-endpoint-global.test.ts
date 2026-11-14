@@ -158,14 +158,14 @@ describe('recepcion global aislada por clave', () => {
     expect(await mala.json()).toMatchObject({ codigo: 'CLAVE_INVALIDA' });
     expect(await a.entrega('DOBLE-3')).toBeFalsy();
   });
-  it('GET y POST /api/v1/chat llegan a la tienda de la clave (sin prefijo, cookie ni Referer) y piden su permiso', async () => {
+  it('GET /api/v1/historial y POST /api/v1/chat llegan a la tienda de la clave (sin prefijo, cookie ni Referer) y piden su permiso', async () => {
     const leeA = (await nueva(a, ['conversaciones:leer'])).clave;
     const leeB = (await nueva(b, ['conversaciones:leer'])).clave;
     const escribeA = (await nueva(a, ['mensajes:enviar'])).clave;
     const escribeB = (await nueva(b, ['mensajes:enviar'])).clave;
     expect((await enviar(claveA, '/api/v1/entregas', 'CHAT-RAIZ')).status).toBe(201);
     const cabeceras = (clave: string | undefined) => ({ 'content-type': 'application/json', ...(clave ? { 'x-api-key': clave } : {}), cookie: 'gsg_tienda=tienda-b', referer: base + '/tienda/tienda-b/conexion-gsg' });
-    const leer = (clave: string | undefined) => fetch(base + '/api/v1/chat?tracking=CHAT-RAIZ', { headers: cabeceras(clave) });
+    const leer = (clave: string | undefined) => fetch(base + '/api/v1/historial?tracking=CHAT-RAIZ', { headers: cabeceras(clave) });
     const escribir = (clave: string | undefined) => fetch(base + '/api/v1/chat', { method: 'POST', headers: cabeceras(clave), body: JSON.stringify({ tracking: 'CHAT-RAIZ', texto: 'Hola desde GSG', idExterno: 'raiz-1', usuario: { id: 1, nombre: 'Juan', rol: 'motorizado' } }) });
 
     // GET: la clave de la tienda A encuentra el pedido que solo existe en A, aunque la cookie diga tienda-b.

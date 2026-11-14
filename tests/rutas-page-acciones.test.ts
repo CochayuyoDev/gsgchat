@@ -174,8 +174,10 @@ describe('acciones del detalle en Automatización GSG', () => {
     expect(pintado).toContain('Quitada de esta automatización');
     expect(pintado).toContain('Abrir el chat');
     expect(pintado).toContain('/chat?phone=51987654321');
-    // Nada que pueda volver a escribirle al cliente.
-    expect(pintado).not.toContain('<button');
+    // Nada que pueda volver a escribirle al cliente: el único botón es
+    // «Ver qué pasó con este pedido», que solo lee.
+    expect(pintado.replace(/<button[^>]*id="d-que-paso"[^>]*>/, '')).not.toContain('<button');
+    expect(pintado).toContain('Ver qué pasó con este pedido');
     expect(pintado).not.toContain('<input');
     expect(pintado).not.toContain('Reintentar');
     expect(pintado).not.toContain('Pedir ubicación otra vez');

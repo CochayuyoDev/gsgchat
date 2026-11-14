@@ -35,7 +35,7 @@ export async function crearControlEnvios(deps: {
     async fotoRitmo(_contacto, momento) {
       return { ahora: momento, factor: 1, ultimoMinuto: 0, ultimaHora: 0, ultimoEnvioAt: marcapasos.ultimoEnvioAt(),
         pausaSorteadaMs: marcapasos.pausaSorteadaMs(), destinatariosUnicos24h: 0, limiteTier: null,
-        nuevosContactosHoy: 0, esContactoNuevo: false };
+        nuevosContactosHoy: 0, esContactoNuevo: false, enviosTanda: marcapasos.enviosTanda(momento) };
     },
     async snapshot(): Promise<SnapshotSalud> {
       const momento = ahora();

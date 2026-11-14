@@ -63,7 +63,8 @@ async function tienda(opciones: Parameters<typeof crearEscenarioEntregas>[0] = {
 }
 
 describe('revisar el flujo', () => {
-  it('un pedido: línea de tiempo en palabras y lo que está mal (mensajes en pausa), sin cambiar nada', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('un pedido: línea de tiempo en palabras y lo que está mal (mensajes en pausa), sin cambiar nada', async () => {
     const t = await tienda();
     const ana = (await t.entrega('GSG-IA-001'))!;
     expect((await t.api.post('/admin/entregas/masa', { accion: 'pausar', ids: [ana.id] })).status).toBe(200);
@@ -87,7 +88,8 @@ describe('revisar el flujo', () => {
     expect(t.wa.sent.length).toBe(enviados);
   });
 
-  it('el día entero: lista los atascados con su motivo y qué hacer', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('el día entero: lista los atascados con su motivo y qué hacer', async () => {
     // A las 10:00 de Lima: después de las 12:00 los que no mandaron su ubicación también salen como atascados.
     const t = await tienda({ arranque: new Date('2026-09-29T15:00:00Z') });
     const ana = (await t.entrega('GSG-IA-001'))!;
@@ -100,7 +102,8 @@ describe('revisar el flujo', () => {
     expect(t.ia.llamadas.at(-1)!.usuario).toContain('"hacer"');
   });
 
-  it('creado fuera del horario de envío y aún sin escribir: «sale a las 9:00»', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('creado fuera del horario de envío y aún sin escribir: «sale a las 9:00»', async () => {
     // 23:30 en Lima (UTC-5): fuera del horario del reparto (9 a 19, ampliado hasta las 22 por el horario de entregas).
     const t = await tienda({ horario: [9, 19], arranque: new Date('2026-09-29T04:30:00Z') });
     const ctx = contexto(t);
@@ -114,7 +117,8 @@ describe('revisar el flujo', () => {
     expect(dia.resumen).toContain('3 atascado(s)');
   });
 
-  it('dos pedidos que encajan: pregunta cuál en vez de adivinar', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('dos pedidos que encajan: pregunta cuál en vez de adivinar', async () => {
     const t = await tienda();
     await t.api.post('/admin/entregas/crear', { referencia: 'GSG-IA-009', telefono: '912000009', nombre: 'Ana Quispe', distrito: 'Lince' });
     const r = await ACCIONES_POR_NOMBRE.get('flujo.revisar')!.ejecutar({ cliente: 'Ana Quispe' }, contexto(t));
@@ -124,7 +128,8 @@ describe('revisar el flujo', () => {
 });
 
 describe('reportes', () => {
-  it('el reporte de hoy: por estado, entregados, cancelados, por motorizado y mensajes', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('el reporte de hoy: por estado, entregados, cancelados, por motorizado y mensajes', async () => {
     const t = await tienda();
     const ana = (await t.entrega('GSG-IA-001'))!;
     const carlos = (await t.api.get<{ motorizados: Json[] }>('/admin/motorizados')).body.motorizados.find((m) => m.nombre === 'Carlos Rojas')!;
@@ -145,7 +150,8 @@ describe('reportes', () => {
     expect(datos).toContain('porMotorizado');
   });
 
-  it('un día pasado: solo hay mensajes, y lo dice', async () => {
+  // Desactualizada: Acciones del asistente retiradas (tests/modulos-reducidos.test.ts).
+  it.skip('un día pasado: solo hay mensajes, y lo dice', async () => {
     const t = await tienda();
     const r = await ACCIONES_POR_NOMBRE.get('reportes.dia')!.ejecutar({ dia: '2020-01-01' }, contexto(t));
     expect(r.ok).toBe(true);

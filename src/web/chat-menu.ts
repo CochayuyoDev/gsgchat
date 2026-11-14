@@ -267,7 +267,7 @@ function opcionesDeMensaje(m) {
   var esTexto = m.kind === 'text';
   if (!enGrupo && esTexto && texto) {
     if (m.direction === 'in') ops.push({ icono: '🎓', texto: 'Enseñarle la respuesta al asistente', accion: function () { ensenarDesdeMensaje(m, false); } });
-    else if (m.payload && m.payload.origen === 'ia') ops.push({ icono: '🎓', texto: 'Corregir al asistente', accion: function () { ensenarDesdeMensaje(m, true); } });
+    else if (m.payload && m.payload.origen === 'ia' && !m.payload.textoFijo) ops.push({ icono: '🎓', texto: 'Corregir al asistente', accion: function () { ensenarDesdeMensaje(m, true); } });
   }
   if (m.direction === 'out' && !enGrupo) {
     ops.push({ icono: 'ⓘ', texto: '¿Qué pasó con este mensaje?', accion: function () { verTraza(m); } });

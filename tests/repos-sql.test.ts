@@ -108,7 +108,7 @@ describe('contactos sobre MySQL', () => {
         ok: true,
         lat: 19.5,
         lng: -99.2,
-        source: 'bare_text',
+        source: 'query_param',
         confidence: 'medium',
         precisionMeters: 20,
         mapsUrl: 'https://maps',
@@ -142,7 +142,7 @@ describe('contactos sobre MySQL', () => {
 
   it('lista las ubicaciones recientes con su contacto', async () => {
     const recent = await repos.locations.listRecent({ limit: 10, offset: 0 });
-    expect(recent[0]).toMatchObject({ phone: '5215510000001', source: 'bare_text', confirmed: false });
+    expect(recent[0]).toMatchObject({ phone: '5215510000001', source: 'query_param', confirmed: false });
 
     await repos.locations.confirm(recent[0]!.id);
     const filtered = await repos.locations.listRecent({ limit: 10, offset: 0, phone: '5215510000002' });

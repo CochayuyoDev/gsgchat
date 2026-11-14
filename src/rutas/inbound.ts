@@ -26,6 +26,7 @@ import type { Solicitud } from '../db/rutas.js';
 import { despacharReportes, encolarProblemaGsg, payloadIncidencia, payloadUbicacionDelPedido, type PuertoGsg } from './gsg.js';
 import { INCIDENCIAS, type CodigoIncidencia } from './incidencias.js';
 import { diaEnZona, resolverPorUbicacion, solicitudesAbiertasDe, ubicacionYaRegistrada } from '../entregas/ubicacion-unica.js';
+import { canonicalMapsUrl } from '../geo/extract.js';
 import { despertarMotorRutas } from './despertador.js';
 import { derivarSolicitud, plazoVencido } from './motor.js';
 
@@ -244,12 +245,18 @@ async function corregirUbicacion(
         : [];
       const trackings = [...new Set(ligadas.map((e) => e.datosEnvio?.tracking ?? e.referencia).filter(Boolean))];
       if (!trackings.length && resuelta.referencia) trackings.push(resuelta.referencia);
-      const detalle = `mandó otra ubicación (${ubicacion.lat.toFixed(5)}, ${ubicacion.lng.toFixed(5)}; ${ubicacion.fuente ?? 'whatsapp'}): no se cambió, se queda la registrada`;
-      for (const tracking of trackings) {
-        await encolarProblemaGsg(deps.repos.rutas, { tracking, referencia: resuelta.referencia, codigo: 'cambio_ubicacion', telefono: resuelta.phone, titulo: 'El cliente pidió cambiar su ubicación', detalle }, { solicitudId: resuelta.id, loteId: lote.id, en: momento }).catch(() => false);
+      // Con pedidos del día, el cambio lo atienden las entregas (regla del dueño,
+      // 28/10: hasta 2 cambios antes de la hora límite) y ellas reportan a GSG
+      // lo que no se pudo cambiar. Sin pedidos del día, como siempre: se reporta aquí.
+      if (!ligadas.length) {
+        // A GSG solo el enlace de la ubicación que mandó (regla del dueño, 29/10).
+        const detalle = canonicalMapsUrl(ubicacion.lat, ubicacion.lng);
+        for (const tracking of trackings) {
+          await encolarProblemaGsg(deps.repos.rutas, { tracking, referencia: resuelta.referencia, codigo: 'cambio_ubicacion', telefono: resuelta.phone, titulo: 'El cliente pidió cambiar su ubicación', detalle }, { solicitudId: resuelta.id, loteId: lote.id, en: momento }).catch(() => false);
+        }
       }
     }
-    await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `mandó otra ubicación (${ubicacion.fuente ?? 'whatsapp'}): no se cambia, se le reporta a GSG como cambio de ubicación`).catch(() => undefined);
+    await deps.repos.rutas.registrarEvento(resuelta.id, 'respuesta', `mandó otra ubicación (${ubicacion.fuente ?? 'whatsapp'}): la atienden las entregas del día (cambio de ubicación)`).catch(() => undefined);
     return { atendida: true, resultado: 'cambio_reportado', solicitud: resuelta, ubicacionNueva: { lat: ubicacion.lat, lng: ubicacion.lng, mapsUrl: ubicacion.mapsUrl ?? null, fuente: ubicacion.fuente ?? 'whatsapp' } };
   }
 }
@@ -484,7 +491,7 @@ export async function cerradaPorPlazo(deps: RutaInboundDeps, contact: Contact, m
       return null;
     } else if (
       s.estado === 'derivado' &&
-      (s.incidencia === 'sin_respuesta' || s.incidencia === 'respondio_sin_ubicacion') &&
+      (s.incidencia === 'sin_respuesta' || s.incidencia === 'respondio_sin_ubicacion' || s.incidencia === 'no_se_le_escribio') &&
       // Lo derivo el plazo (agoto sus mensajes), no una persona a mano. Sin
       // ajustes legibles (NaN) se da por agotado.
       !(s.intentos < maxIntentos) &&

@@ -42,7 +42,8 @@ const puertoLibre = () =>
     });
   });
 
-describe('Módulo desarrollador: ver el flujo en vivo', () => {
+// Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): desarrollador.
+describe.skip('Módulo desarrollador: ver el flujo en vivo', () => {
   let raiz: string;
   let tienda: TiendaViva;
   let b: BaseDePrueba;

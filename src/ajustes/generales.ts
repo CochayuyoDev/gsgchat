@@ -22,6 +22,7 @@ import { z } from 'zod';
 import type { Pool } from '../db/pool.js';
 import type { Config } from '../config.js';
 import type { Politica } from '../salud/politica.js';
+import { horaLocal } from '../salud/ritmo.js';
 
 export const AJUSTES_GENERALES_KEY = 'ajustes.generales';
 
@@ -30,17 +31,6 @@ const horaONada = z.coerce.number().int().min(0).max(24).nullable();
 const enteroONada = (max: number) => z.coerce.number().int().min(0).max(max).nullable();
 
 export const ajustesGeneralesSchema = z.object({
-  /** Catálogo exclusivo del reporte manual; no alimenta la automatización. */
-  erroresManuales: z.array(z.object({
-    id: z.string().regex(/^manual-[a-z0-9-]{1,70}$/),
-    nombre: z.string().trim().min(1).max(100),
-    activo: z.boolean(),
-  })).max(100).superRefine((lista, ctx) => {
-    if (new Set(lista.map(e => e.id)).size !== lista.length)
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Los identificadores de errores no pueden repetirse.' });
-    if (new Set(lista.map(e => e.nombre.normalize('NFKC').toLocaleLowerCase('es'))).size !== lista.length)
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Ya existe un error manual con ese nombre.' });
-  }).default([]),
   /** Como se presenta el negocio en los mensajes y en las pantallas. */
   nombreNegocio: z.string().trim().min(1).max(80).nullable(),
   /**
@@ -92,6 +82,8 @@ export const ajustesGeneralesSchema = z.object({
     fin: horaONada,
     /** 0 = domingo ... 6 = sabado. null = lo del servidor. */
     dias: z.array(z.number().int().min(0).max(6)).max(7).nullable(),
+    /** «Enviar aunque sea domingo»: ese dia (AAAA-MM-DD, hora del negocio) se escribe aunque no toque. */
+    diaExtra: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
   }),
   ritmo: z.object({
     maxPorMinuto: enteroONada(60),
@@ -102,6 +94,20 @@ export const ajustesGeneralesSchema = z.object({
     maxPorContactoDia: enteroONada(20),
     separacionContactoMin: enteroONada(24 * 60),
   }),
+  /**
+   * Envio por tandas, SOLO para las lineas de la API oficial de Meta: en vez de
+   * una pausa entre cada cliente, salen hasta `tamano` mensajes seguidos y
+   * despues se espera `pausaMin` minutos. Entre tanda y tanda el monitor ve los
+   * rechazos de Meta y puede frenar. Las lineas normales (QR) siguen siempre
+   * con la pausa entre clientes de siempre. null o activo:false = apagado.
+   */
+  tandasApi: z
+    .object({
+      activo: z.boolean(),
+      tamano: z.number().int().min(1).max(80).default(50),
+      pausaMin: z.number().int().min(2).max(60).default(3),
+    })
+    .nullable(),
   avisos: z.object({
     /** A quien se avisa por WhatsApp (nivel del numero, resumen del reparto). */
     supervisor: telefono.nullable().or(z.literal('').transform(() => null)),
@@ -183,7 +189,7 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
   guardados: null,
   resumenes: null,
   modoPrueba: { activo: false, numeros: [] },
-  horario: { inicio: null, fin: null, dias: null },
+  horario: { inicio: null, fin: null, dias: null, diaExtra: null },
   ritmo: {
     maxPorMinuto: null,
     maxPorHora: null,
@@ -193,11 +199,11 @@ export const AJUSTES_GENERALES_VACIOS: AjustesGenerales = {
     maxPorContactoDia: null,
     separacionContactoMin: null,
   },
+  tandasApi: null,
   avisos: { supervisor: null },
   humanizar: null,
   autoPausa: null,
   pedirVerUnaVezNormal: null,
-  erroresManuales: [],
   atajos: null,
   stickers: null,
   embebido: null,
@@ -215,11 +221,11 @@ export const ajustesGeneralesPatchSchema = z.object({
   modoPrueba: ajustesGeneralesSchema.shape.modoPrueba.partial().refine(() => false, 'El modo de prueba fue retirado').optional(),
   horario: ajustesGeneralesSchema.shape.horario.partial().optional(),
   ritmo: ajustesGeneralesSchema.shape.ritmo.partial().optional(),
+  tandasApi: ajustesGeneralesSchema.shape.tandasApi.optional(),
   avisos: ajustesGeneralesSchema.shape.avisos.partial().optional(),
   humanizar: ajustesGeneralesSchema.shape.humanizar.optional(),
   autoPausa: ajustesGeneralesSchema.shape.autoPausa.optional(),
   pedirVerUnaVezNormal: ajustesGeneralesSchema.shape.pedirVerUnaVezNormal.optional(),
-  erroresManuales: ajustesGeneralesSchema.shape.erroresManuales.optional(),
   atajos: ajustesGeneralesSchema.shape.atajos.optional(),
   stickers: ajustesGeneralesSchema.shape.stickers.optional(),
   embebido: ajustesGeneralesSchema.shape.embebido.optional(),
@@ -239,11 +245,11 @@ export function fusionarAjustes(base: AjustesGenerales, patch: Partial<AjustesGe
     modoPrueba: { ...base.modoPrueba, ...(patch.modoPrueba ?? {}) },
     horario: { ...base.horario, ...(patch.horario ?? {}) },
     ritmo: { ...base.ritmo, ...(patch.ritmo ?? {}) },
+    tandasApi: patch.tandasApi !== undefined ? patch.tandasApi : base.tandasApi,
     avisos: { ...base.avisos, ...(patch.avisos ?? {}) },
     humanizar: patch.humanizar !== undefined ? patch.humanizar : base.humanizar,
     autoPausa: patch.autoPausa !== undefined ? patch.autoPausa : base.autoPausa,
     pedirVerUnaVezNormal: patch.pedirVerUnaVezNormal !== undefined ? patch.pedirVerUnaVezNormal : base.pedirVerUnaVezNormal,
-    erroresManuales: patch.erroresManuales !== undefined ? patch.erroresManuales : base.erroresManuales,
     atajos: patch.atajos !== undefined ? patch.atajos : base.atajos,
     stickers: patch.stickers !== undefined ? patch.stickers : base.stickers,
     embebido: patch.embebido !== undefined ? patch.embebido : base.embebido,
@@ -321,6 +327,7 @@ export interface ServicioAjustes {
   zonaHoraria(): string;
   /** A cuantos dias sin movimiento se guarda sola una conversacion (0 = nunca). */
   guardadosDias(): number;
+  /** Cuantos minutos se espera a una linea sin conexion antes de pasar sus clientes a otra. */
   /** El resumen del dia por WhatsApp: si esta encendido y a que horas (HH:MM). */
   resumenes(): { activo: boolean; horaManana: string; horaTarde: string };
   supervisor(): string;
@@ -400,6 +407,11 @@ export async function crearServicioAjustes(deps: {
       if (a.horario.fin !== null) p.horaFin = a.horario.fin;
       if (a.horario.dias && a.horario.dias.length) p.diasPermitidos = [...a.horario.dias];
       if (a.zonaHoraria) p.timezone = a.zonaHoraria;
+      // Pulsaron «Enviar aunque sea domingo»: hoy se escribe aunque el dia no toque. Mañana ya no vale.
+      if (a.horario.diaExtra && a.horario.diaExtra === fechaDelNegocio(new Date(ahora()), p.timezone)) {
+        const { dia } = horaLocal(new Date(ahora()), p.timezone);
+        if (!p.diasPermitidos.includes(dia)) p.diasPermitidos = [...p.diasPermitidos, dia];
+      }
       if (p.horaFin <= p.horaInicio) p.horaFin = Math.min(24, p.horaInicio + 1);
       for (const ampliar of ampliaciones) {
         const extra = ampliar();
@@ -421,6 +433,11 @@ export async function crearServicioAjustes(deps: {
       if (a.avisos.supervisor !== null) p.avisarA = a.avisos.supervisor;
       if (a.humanizar !== null) p.humanizar = a.humanizar;
       if (a.autoPausa !== null) p.autoPausa = a.autoPausa;
+      // Las tandas son solo de la API oficial: una linea normal (perfil no_oficial)
+      // nunca las recibe y sigue con su pausa entre clientes.
+      p.tandas = p.perfil === 'cloud' && a.tandasApi?.activo
+        ? { tamano: a.tandasApi.tamano, ventanaMs: a.tandasApi.pausaMin * 60_000 }
+        : null;
       return p;
     },
     soloNumeros: () => [],
@@ -482,5 +499,14 @@ export function zonaHorariaValida(zona: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** La fecha de hoy (AAAA-MM-DD) en la zona del negocio, no la del servidor. */
+export function fechaDelNegocio(fecha: Date, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(fecha);
+  } catch {
+    return fecha.toISOString().slice(0, 10);
   }
 }

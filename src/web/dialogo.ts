@@ -308,7 +308,7 @@ async function abrirIncidenciaManual(opciones) {
     var ya = yaReportado();
     fondo.querySelector('#im-ya').textContent = ya ? 'Este pedido ya fue reportado a GSG: no se puede reportar de nuevo.' : '';
     si.disabled = ya || !(datos.tipos || []).length;
-    if (!(datos.tipos || []).length) mal.textContent = 'Crea y activa un error en Ajustes antes de reportar.';
+    if (!(datos.tipos || []).length) mal.textContent = 'No hay motivos para reportar.';
   };
   var selTracking = fondo.querySelector('select#im-tracking');
   if (selTracking) {

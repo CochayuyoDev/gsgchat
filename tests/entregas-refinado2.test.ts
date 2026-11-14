@@ -48,7 +48,8 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
   });
   afterAll(() => e.cerrar());
 
-  it('a quien mandó su ubicación hace poco se le propone esa dirección; "sí" la registra sin pedir el pin', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('a quien mandó su ubicación hace poco se le propone esa dirección; "sí" la registra sin pedir el pin', async () => {
     // Rosa mando un pin la semana pasada (queda en la tabla de ubicaciones).
     const contacto = await e.repos.contacts.upsertFromInbound(conPais('987222222'), 'Rosa Recurrente');
     const id = await e.repos.locations.save(contacto.id, { ok: true, lat: pinDe(30).lat, lng: pinDe(30).lng, source: 'whatsapp_location', confidence: 'high', precisionMeters: 10, mapsUrl: 'https://maps.google.com/?q=x', warnings: [] } as never, 'pin');
@@ -82,7 +83,8 @@ describe('cliente recurrente, tiempo dudoso, puntualidad y el día entero en un 
     expect(e.simulador.recibido.some((r) => r.tipo === 'ubicacion' && r.cuerpo.referencia === 'R-1')).toBe(true);
   });
 
-  it('"es otra" pide el pin; sin respuesta en el plazo, el reparto se la pide como siempre', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('"es otra" pide el pin; sin respuesta en el plazo, el reparto se la pide como siempre', async () => {
     const contacto = await e.repos.contacts.upsertFromInbound(conPais('987222233'), 'Tomás Recurrente');
     const id = await e.repos.locations.save(contacto.id, { ok: true, lat: pinDe(31).lat, lng: pinDe(31).lng, source: 'whatsapp_location', confidence: 'high', precisionMeters: 10, mapsUrl: 'https://maps.google.com/?q=y', warnings: [] } as never, 'pin');
     await e.repos.locations.confirm(id);

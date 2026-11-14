@@ -144,7 +144,8 @@ describe('POST /conectores/:id (lo que pega la tienda)', () => {
     return app.inject({ method: 'POST', url: `/conectores/${id}`, headers: { 'content-type': 'application/json', 'x-wc-webhook-topic': topic, 'x-wc-webhook-signature': firma ?? firmaBase64(secreto, raw) }, payload: raw });
   };
 
-  it('WooCommerce: pedido nuevo → plantilla con las variables rellenas, consentimiento escrito y entrada anotada', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conectores.
+  it.skip('WooCommerce: pedido nuevo → plantilla con las variables rellenas, consentimiento escrito y entrada anotada', async () => {
     const { conector, secreto } = await crear('woocommerce', [{ evento: 'pedido.creado', plantilla: { nombre: 'confirmacion_pedido' }, variables: ['{nombre}', '{numero}'] }]);
     expect(secreto.startsWith('wcs_')).toBe(true);
     expect(conector.url).toBe(`http://localhost:3000/conectores/${conector.id}`);
@@ -165,7 +166,8 @@ describe('POST /conectores/:id (lo que pega la tienda)', () => {
     expect(JSON.stringify(lista.json())).not.toContain(secreto);
   });
 
-  it('firma mala → 401 y no sale nada; el ping de alta → 200', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conectores.
+  it.skip('firma mala → 401 y no sale nada; el ping de alta → 200', async () => {
     const { conector, secreto } = await crear('woocommerce', [{ evento: 'pedido.creado', texto: 'hola' }]);
     const mal = await mandarWoo(conector.id, secreto, 'order.created', PEDIDO_WOO, 'firma-falsa');
     expect(mal.statusCode).toBe(401);
@@ -175,7 +177,8 @@ describe('POST /conectores/:id (lo que pega la tienda)', () => {
     expect((await app.inject({ method: 'POST', url: '/conectores/no-existe', payload: {} })).statusCode).toBe(404);
   });
 
-  it('sin regla para ese evento, sin telefono o conector pausado: se apunta y se contesta 200', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conectores.
+  it.skip('sin regla para ese evento, sin telefono o conector pausado: se apunta y se contesta 200', async () => {
     const { conector, secreto } = await crear('woocommerce', [{ evento: 'pedido.creado', plantilla: { nombre: 'confirmacion_pedido' }, variables: ['{nombre}', '{numero}'] }]);
     const sinRegla = await mandarWoo(conector.id, secreto, 'order.updated', { ...PEDIDO_WOO, status: 'completed' });
     expect(sinRegla.json()).toMatchObject({ resultado: 'sin_regla' });
@@ -193,7 +196,8 @@ describe('POST /conectores/:id (lo que pega la tienda)', () => {
     expect(entradas.map((e) => e.resultado)).toEqual(['ignorado', 'sin_telefono', 'sin_telefono', 'sin_regla']);
   });
 
-  it('Shopify: se usa el secreto que da Shopify, el topic manda y el pedido sale', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conectores.
+  it.skip('Shopify: se usa el secreto que da Shopify, el topic manda y el pedido sale', async () => {
     const { conector, secreto } = await crear('shopify', [{ evento: 'pedido.enviado', plantilla: { nombre: 'confirmacion_pedido' }, variables: ['{nombre}', '{numero} ({seguimiento})'] }], 'shpss_secreto_de_shopify_123');
     expect(secreto).toBe('shpss_secreto_de_shopify_123');
     const raw = JSON.stringify(PEDIDO_SHOPIFY);
@@ -209,7 +213,8 @@ describe('POST /conectores/:id (lo que pega la tienda)', () => {
     expect(JSON.stringify(wa.sent[0])).toContain('1001 (https://courier.test/TRK-9)');
   });
 
-  it('una regla con plantilla que no existe deja error, no un 500', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conectores.
+  it.skip('una regla con plantilla que no existe deja error, no un 500', async () => {
     const { conector, secreto } = await crear('woocommerce', [{ evento: 'pedido.creado', plantilla: { nombre: 'no_existe' } }]);
     const r = await mandarWoo(conector.id, secreto, 'order.created', PEDIDO_WOO);
     expect(r.statusCode).toBe(200);
@@ -219,7 +224,8 @@ describe('POST /conectores/:id (lo que pega la tienda)', () => {
 });
 
 describe('gestion por la API', () => {
-  it('opciones, crear, cambiar reglas, secreto nuevo, probar y borrar', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conectores.
+  it.skip('opciones, crear, cambiar reglas, secreto nuevo, probar y borrar', async () => {
     const op = await app.inject({ method: 'GET', url: '/api/v1/conectores/opciones', headers: con(TODO) });
     expect(op.json()).toMatchObject({ tipos: ['woocommerce', 'shopify'] });
     expect(op.json().plantillas.map((p: { nombre: string }) => p.nombre)).toEqual(['confirmacion_pedido']);
@@ -251,7 +257,8 @@ describe('gestion por la API', () => {
     expect((await app.inject({ method: 'GET', url: `/api/v1/conectores/${id}`, headers: con(TODO) })).statusCode).toBe(404);
   });
 
-  it('exige el permiso conectores:gestionar', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): conectores.
+  it.skip('exige el permiso conectores:gestionar', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/v1/conectores', headers: { 'x-api-key': 'wak_noExiste00000000000000000000000000' } });
     expect(r.statusCode).toBe(401);
   });

@@ -39,6 +39,17 @@
       "item": [
         {
           "name": "Crear un pedido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200 o 201', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -100,6 +111,17 @@
         },
         {
           "name": "Error: falta el teléfono",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 400', function () { pm.expect(pm.response.code).to.be.oneOf([400]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -148,6 +170,17 @@
         },
         {
           "name": "Error: sin la API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 401', function () { pm.expect(pm.response.code).to.be.oneOf([401]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "auth": {
@@ -200,248 +233,22 @@
       ]
     },
     {
-      "name": "2. Cancelar o reintentar (API 2)",
-      "description": "GSG pide dejar de escribirle a un tracking (CANCELAR) o volver a escribirle (REINTENTAR) en POST /api/v1/flujo. Actúa sobre un pedido que ya existe: primero se crea con la API 1. Misma clave que la API 1.",
-      "item": [
-        {
-          "name": "Simular cancelar (no cambia nada)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"CANCELAR\",\n  \"simular\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/flujo",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "flujo"
-              ]
-            },
-            "description": "Con «simular: true» dice lo que haría sin tocar el pedido."
-          },
-          "response": [
-            {
-              "name": "Simulado",
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json; charset=utf-8"
-                }
-              ],
-              "body": "{\n  \"ok\": true,\n  \"simulado\": true,\n  \"accion\": \"CANCELAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"detalle\": \"Dejaría de escribirle por este tracking.\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "Cancelar",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"CANCELAR\",\n  \"motivo\": \"El cliente anuló el pedido\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/flujo",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "flujo"
-              ]
-            },
-            "description": "El bot deja de escribirle por ese tracking. Repetirlo responde 200 con «sinCambios: true»."
-          },
-          "response": [
-            {
-              "name": "Cancelado",
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json; charset=utf-8"
-                }
-              ],
-              "body": "{\n  \"ok\": true,\n  \"accion\": \"CANCELAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"detalle\": \"Flujo cancelado.\"\n}"
-            },
-            {
-              "name": "Ya estaba cancelado",
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json; charset=utf-8"
-                }
-              ],
-              "body": "{\n  \"ok\": true,\n  \"accion\": \"CANCELAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"sinCambios\": true,\n  \"detalle\": \"El flujo ya estaba cancelado.\"\n}"
-            },
-            {
-              "name": "No hay pedido con ese tracking",
-              "status": "Not Found",
-              "code": 404,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json; charset=utf-8"
-                }
-              ],
-              "body": "{\n  \"ok\": false,\n  \"codigo\": \"NO_EXISTE\",\n  \"error\": \"Lo que se pide no existe (o ya no).\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "Reintentar con el teléfono corregido",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"REINTENTAR\",\n  \"telefono\": \"987654321\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/flujo",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "flujo"
-              ]
-            },
-            "description": "Corrige el número y le escribe al nuevo. Sin «telefono», reinicia la solicitud de ese pedido."
-          },
-          "response": [
-            {
-              "name": "Reintentado",
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json; charset=utf-8"
-                }
-              ],
-              "body": "{\n  \"ok\": true,\n  \"accion\": \"REINTENTAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"telefonoCorregido\": \"51987654321\",\n  \"detalle\": \"Se le vuelve a escribir.\"\n}"
-            },
-            {
-              "name": "Ya entregado o cancelado",
-              "status": "Conflict",
-              "code": 409,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json; charset=utf-8"
-                }
-              ],
-              "body": "{\n  \"ok\": false,\n  \"codigo\": \"CONFLICTO\",\n  \"error\": \"Choca con el estado actual.\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "Error: acción no válida",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"BORRAR\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/flujo",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "flujo"
-              ]
-            },
-            "description": "La acción solo puede ser CANCELAR o REINTENTAR."
-          },
-          "response": [
-            {
-              "name": "Acción no válida",
-              "status": "Bad Request",
-              "code": 400,
-              "_postman_previewlanguage": "json",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json; charset=utf-8"
-                }
-              ],
-              "body": "{\n  \"ok\": false,\n  \"codigo\": \"VALIDACION\",\n  \"error\": \"Algún campo falta o no tiene el formato esperado.\"\n}"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "3. Consultar",
+      "name": "2. Consultar",
       "description": "Lo que GSG puede leer cuando quiera. GSGchat nunca se lo empuja.",
       "item": [
         {
           "name": "Un pedido de hoy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -490,6 +297,17 @@
         },
         {
           "name": "Lo hecho por WhatsApp con cada tracking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -530,6 +348,17 @@
         },
         {
           "name": "Números reportados pendientes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -571,11 +400,22 @@
       ]
     },
     {
-      "name": "4. Corregir datos",
+      "name": "3. Corregir datos",
       "description": "Cambiar los datos de un pedido de hoy o corregir un número reportado.",
       "item": [
         {
           "name": "Cambiar la dirección de un pedido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "PATCH",
             "header": [
@@ -638,6 +478,17 @@
         },
         {
           "name": "Corregir un número reportado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -686,6 +537,287 @@
             },
             {
               "name": "Nada reportado con ese tracking",
+              "status": "Not Found",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"ok\": false,\n  \"codigo\": \"NO_EXISTE\",\n  \"error\": \"Lo que se pide no existe (o ya no).\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Cancelar o reintentar (API 2)",
+      "description": "GSG pide dejar de escribirle a un tracking (CANCELAR) o volver a escribirle (REINTENTAR) en POST /api/v1/flujo. Actúa sobre un pedido que ya existe: primero se crea con la API 1. Misma clave que la API 1.",
+      "item": [
+        {
+          "name": "Simular cancelar (no cambia nada)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"CANCELAR\",\n  \"simular\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/flujo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "flujo"
+              ]
+            },
+            "description": "Con «simular: true» dice lo que haría sin tocar el pedido."
+          },
+          "response": [
+            {
+              "name": "Simulado",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"simulado\": true,\n  \"accion\": \"CANCELAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"detalle\": \"Dejaría de escribirle por este tracking.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Reintentar con el teléfono corregido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"REINTENTAR\",\n  \"telefono\": \"987654321\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/flujo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "flujo"
+              ]
+            },
+            "description": "Corrige el número y le escribe al nuevo. Sin «telefono», reinicia la solicitud de ese pedido."
+          },
+          "response": [
+            {
+              "name": "Reintentado",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"accion\": \"REINTENTAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"telefonoCorregido\": \"51987654321\",\n  \"detalle\": \"Se le vuelve a escribir.\"\n}"
+            },
+            {
+              "name": "Ya entregado o cancelado",
+              "status": "Conflict",
+              "code": 409,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"ok\": false,\n  \"codigo\": \"CONFLICTO\",\n  \"error\": \"Choca con el estado actual.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Error: acción no válida",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 400', function () { pm.expect(pm.response.code).to.be.oneOf([400]); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"BORRAR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/flujo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "flujo"
+              ]
+            },
+            "description": "La acción solo puede ser CANCELAR o REINTENTAR."
+          },
+          "response": [
+            {
+              "name": "Acción no válida",
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"ok\": false,\n  \"codigo\": \"VALIDACION\",\n  \"error\": \"Algún campo falta o no tiene el formato esperado.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cancelar",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', function () { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tracking\": \"{{tracking}}\",\n  \"accion\": \"CANCELAR\",\n  \"motivo\": \"El cliente anuló el pedido\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/flujo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "flujo"
+              ]
+            },
+            "description": "El bot deja de escribirle por ese tracking. Repetirlo responde 200 con «sinCambios: true»."
+          },
+          "response": [
+            {
+              "name": "Cancelado",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"accion\": \"CANCELAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"detalle\": \"Flujo cancelado.\"\n}"
+            },
+            {
+              "name": "Ya estaba cancelado",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "body": "{\n  \"ok\": true,\n  \"accion\": \"CANCELAR\",\n  \"tracking\": \"GSG-E-205\",\n  \"sinCambios\": true,\n  \"detalle\": \"El flujo ya estaba cancelado.\"\n}"
+            },
+            {
+              "name": "No hay pedido con ese tracking",
               "status": "Not Found",
               "code": 404,
               "_postman_previewlanguage": "json",

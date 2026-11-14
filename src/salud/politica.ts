@@ -55,6 +55,12 @@ export interface Politica {
   /** Pausa entre dos envios iniciados por la empresa, en ms; se sortea. */
   pausaMinMs: number;
   pausaMaxMs: number;
+  /**
+   * Envio por tandas (solo lineas de la API, ver ajustes `tandasApi`): hasta
+   * `tamano` envios en cualquier ventana de `ventanaMs`, sin pausa entre ellos.
+   * Reemplaza a la pausa entre envios. null/ausente = la pausa de siempre.
+   */
+  tandas?: { tamano: number; ventanaMs: number } | null;
   /** Contactos a los que se escribe por primera vez, por dia. 0 = sin limite. */
   nuevosContactosPorDia: number;
   /** Mensajes iniciados por la empresa al mismo contacto por dia. */

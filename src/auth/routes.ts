@@ -26,7 +26,7 @@ import { cookieDeCierre, cookieDeSesion, COOKIE_SESION, firmarSesion, leerCookie
 import type { ClavesApiRepo } from './claves-api.js';
 import { ETIQUETAS, type ActividadRepo } from './actividad.js';
 import { claveApiVigente, generarClaveApi, hashClaveApi, nombreDeClaveAceptable, pareceClaveApi, prefijoDeClave } from './claves-api.js';
-import { permisosAceptables, tienePermiso, type Permiso } from './permisos.js';
+import { permisosAceptables, permisosGsgQueFaltan, tienePermiso, type Permiso } from './permisos.js';
 import { leerTokenEmbebido, pareceTokenEmbebido, secretoDeEmbebido } from '../embed/token.js';
 import { loginPage } from '../web/login-page.js';
 import { landingPage } from '../web/landing-page.js';
@@ -116,13 +116,14 @@ export function secretoDeSesion(config: Config): string {
   return createHmac('sha256', config.TRACKING_SECRET).update('sesion-de-usuario').digest('hex');
 }
 
-const PAGINAS_PRIVADAS = ['/conexion-gsg', '/api-gsgchat', '/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/numeros', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/cuentas', '/mapa', '/salud', '/automatizacion-gsg', '/fiabilidad'];
+const PAGINAS_PRIVADAS = ['/conexion-gsg', '/api-gsgchat', '/panel', '/chat', '/rutas', '/setup', '/manual', '/soporte', '/entregas', '/hoy', '/numeros', '/guardados', '/envio-automatico', '/entrenamiento', '/tiendas', '/cuentas', '/mapa', '/salud', '/automatizacion-gsg', '/fiabilidad', '/embudo-chats'];
 
 /** Lo que solo toca una persona con rol admin: nunca una clave de API. */
 const SOLO_ADMIN_PERSONA = ['/admin/usuarios', '/admin/claves-api', '/admin/actividad', '/admin/codigos-conexion', '/admin/membresia', '/admin/tiendas'];
 
 /** Rutas de la API publica que no piden clave. */
-const API_SIN_CLAVE = ['/api/v1/conexion/canjear', '/api/v1/errores'];
+// El webhook de rutas entra sin clave de API: su llave es el header x-webhook-secret (src/rutas-gsg/routes.ts).
+const API_SIN_CLAVE = ['/api/v1/conexion/canjear', '/api/v1/errores', '/api/v1/rutas/estado'];
 
 /** Cada cuanto se anota el "ultimo uso" de una clave: no una escritura por peticion. */
 const ANOTAR_USO_CADA_MS = 60_000;
@@ -580,6 +581,20 @@ export async function registerAuth(app: FastifyInstance, deps: AuthDeps): Promis
     const registro = await claves.actualizar(request.params.id, { ...body, permisos: permisos && 'permisos' in permisos ? permisos.permisos : undefined, venceAt: body.venceAt === undefined ? undefined : body.venceAt === null ? null : new Date(body.venceAt) });
     if (!registro) return reply.code(404).send({ error: 'Clave no disponible, revocada o vencida para activación.' });
     return { ok: true, registro };
+  });
+  /**
+   * Le añade a la clave los permisos del paquete de GSG que le faltan (los de
+   * una API nueva). La clave no cambia: GSG sigue usando la misma y vale al
+   * instante. Los permisos que ya tenía se conservan.
+   */
+  app.post<{ Params: { id: string } }>('/admin/claves-api/:id/poner-al-dia', async (request, reply) => {
+    const actual = (await claves.listar()).find((c) => c.id === request.params.id);
+    if (!actual || actual.revocadaAt) return reply.code(404).send({ error: 'Clave no disponible o revocada.' });
+    const agregados = permisosGsgQueFaltan(actual.permisos);
+    if (!agregados.length) return { ok: true, agregados, registro: actual };
+    const registro = await claves.actualizar(actual.id, { permisos: [...actual.permisos, ...agregados] });
+    if (!registro) return reply.code(404).send({ error: 'Clave no disponible o revocada.' });
+    return { ok: true, agregados, registro };
   });
   app.post<{ Params: { id: string } }>('/admin/claves-api/:id/renovar', async (request, reply) => {
     const clave = generarClaveApi();

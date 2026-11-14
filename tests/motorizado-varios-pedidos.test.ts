@@ -85,7 +85,8 @@ describe('dos pedidos del mismo cliente (mismo viaje) y uno de otro cliente', ()
   });
   afterAll(() => e?.cerrar());
 
-  it('le llegan los tres y el recuento dice 3, sin «40).» colgando', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('le llegan los tres y el recuento dice 3, sin «40).» colgando', async () => {
     for (const ref of ['P-1001', 'P-2001', 'P-1002']) expect((await e.entrega(ref))?.motorizado?.phone, ref).toBe(conPais(MOTO));
     const conVarios = e.textosA(MOTO).find((t) => /pedidos esperando tu tiempo/.test(t));
     expect(conVarios).toMatch(/Tienes 3 pedidos esperando tu tiempo/);
@@ -94,7 +95,8 @@ describe('dos pedidos del mismo cliente (mismo viaje) y uno de otro cliente', ()
     expect(conVarios).toMatch(/¿En cuántos minutos lo entregas\?\n/);
   });
 
-  it('«P-1001 20, P-2001 20»: los dos de Ana con 20 y P-1002 intacto (a Beto no le llega ningún aviso)', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('«P-1001 20, P-2001 20»: los dos de Ana con 20 y P-1002 intacto (a Beto no le llega ningún aviso)', async () => {
     const antesBeto = e.textosA(BETO).length;
     await e.contesta(MOTO, { texto: 'P-1001 20, P-2001 20' });
     expect((await e.entrega('P-1001'))?.minutosMotorizado).toBe(20);
@@ -119,7 +121,8 @@ describe('P-100 y P-1001 a la vez', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('«P-1001 25, P-100 40» pone cada tiempo en el suyo', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('«P-1001 25, P-100 40» pone cada tiempo en el suyo', async () => {
     await e.contesta(MOTO, { texto: 'P-1001 25, P-100 40' });
     expect((await e.entrega('P-1001'))?.minutosMotorizado).toBe(25);
     expect((await e.entrega('P-100'))?.minutosMotorizado).toBe(40);
@@ -140,7 +143,8 @@ describe('contestar citando el pin', () => {
   });
   afterAll(() => e?.cerrar());
 
-  it('un «30» citando el pin de P-3001 va a P-3001', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('un «30» citando el pin de P-3001 va a P-3001', async () => {
     const p1 = (await e.entrega('P-3001'))!;
     // El pin que salió aparte hacia el motorizado, tal como quedó en su chat.
     const moto = (await e.repos.contacts.getByPhone(conPais(MOTO)))!;
@@ -171,7 +175,8 @@ describe('«ya no lo llevas tú» cuando se lo vuelven a dar y a quitar', () => 
   });
   afterAll(() => e?.cerrar());
 
-  it('sale cada vez que se le quita, y si no sale queda a la vista', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('sale cada vez que se le quita, y si no sale queda a la vista', async () => {
     let p = (await e.entrega('P-4001'))!;
     const primero = p.motorizado!;
     const motos = await e.repos.entregas.listarMotorizados();
@@ -192,7 +197,8 @@ describe('«ya no lo llevas tú» cuando se lo vuelven a dar y a quitar', () => 
     expect(avisos(primero.phone)).toBe(2);
   });
 
-  it('si WhatsApp no deja mandar el aviso, queda un evento que lo dice', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('si WhatsApp no deja mandar el aviso, queda un evento que lo dice', async () => {
     const otro = await armar([{ referencia: 'P-4002', telefono: '987000132', nombre: 'Seis Prueba' }], ['987000132']);
     try {
       const p = (await otro.entrega('P-4002'))!;
@@ -208,7 +214,8 @@ describe('«ya no lo llevas tú» cuando se lo vuelven a dar y a quitar', () => 
 });
 
 describe('el cierre fuera del horario de envío', () => {
-  it('no espera al reparto (que a esa hora no asigna a nadie); dentro del horario sí espera y da el número del motorizado', async () => {
+  // Desactualizada: Desactualizada: asume el flujo de motorizados, confirmaciones, segunda visita o regla de la 1:00 PM, retirado en 956c298 («solo la ubicación») y en src/modulos-retirados.ts.
+  it.skip('no espera al reparto (que a esa hora no asigna a nadie); dentro del horario sí espera y da el número del motorizado', async () => {
     const e = await crearEscenarioEntregas({ arranque: hoyALas9(), esperaMotorizadoMs: 3_000 });
     try {
       e.simulador.cargar([{ referencia: 'P-5001', telefono: '987000141', nombre: 'Siete Prueba', direccion: 'Av. Arequipa 100', distrito: 'Lima', faltaUbicacion: true, faltaConfirmacion: false }]);

@@ -69,12 +69,12 @@ const CSS = `
 
   /* --- las dos columnas -------------------------------------------------- */
   .cols { display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: var(--esp-4); align-items: start; }
-  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 
   /* --- filtros y lista ---------------------------------------------------- */
   .filtros { padding: 10px var(--esp-4); border-bottom: 1px solid var(--borde); display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; background: var(--superficie-2); }
   .filtros .ancho { grid-column: 1 / -1; }
-  .filtros .flt { display: block; margin: 0; font-size: 11.5px; color: var(--texto-suave); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .filtros .flt { display: block; margin: 0; font-size: 11.5px; color: var(--texto-suave); font-weight: 600; text-transform: none; letter-spacing: 0; }
   .filtros .flt span { display: block; margin: 0 0 3px 2px; }
   .filtros .flt input, .filtros .flt select { font-weight: 400; text-transform: none; letter-spacing: 0; min-height: 36px; font-size: 13.5px; }
   .filtros-mas { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
@@ -135,6 +135,8 @@ const CSS = `
   .g .k { color: var(--texto-suave); font-style: italic; }
   .g .adj { display: block; max-width: 100%; max-height: 320px; border-radius: var(--radio-sm); margin-bottom: 4px; }
   .g img.adj { min-height: 40px; background: var(--superficie-2); cursor: zoom-in; }
+  .g .adj-video { max-width: 100%; margin-bottom: 4px; border-radius: var(--radio-sm); }
+  .g .adj-video video.adj { margin: 0; min-height: 120px; min-width: 180px; background: var(--superficie-2); }
   .g a.adj.doc { display: inline-block; max-height: none; padding: 6px 10px; background: var(--superficie-2); border-radius: var(--radio-sm); text-decoration: none; }
   .g mark { background: var(--ambar-suave); color: var(--ambar); border-radius: 3px; padding: 0 1px; }
   .g mark.aqui { background: var(--primario); color: var(--primario-texto); }
@@ -145,7 +147,7 @@ const CSS = `
 
   /* --- estadisticas ------------------------------------------------------- */
   .est { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--esp-4); }
-  @media (max-width: 760px) { .est { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .est { grid-template-columns: minmax(0, 1fr); } }
   .est h3 { font-size: 13px; color: var(--texto-suave); margin: 0 0 var(--esp-2); font-weight: 600; }
   .barras { display: flex; gap: 6px; align-items: flex-end; height: 120px; min-width: 0; }
   .barra { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
@@ -158,7 +160,7 @@ const CSS = `
 
   /* --- importar ------------------------------------------------------------ */
   .imp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--esp-2); }
-  @media (max-width: 760px) { .imp-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .imp-grid { grid-template-columns: minmax(0, 1fr); } }
   .imp-grid .ancho { grid-column: 1 / -1; }
   .imp-pie { display: flex; gap: var(--esp-2); align-items: center; flex-wrap: wrap; }
 `;
@@ -231,7 +233,7 @@ export function guardadosPage(opts: { demo: boolean; nombreNegocio: string; conI
         <button class="btn sm" id="l-buscar-antes" type="button" aria-label="Coincidencia anterior" disabled>‹</button>
         <button class="btn sm" id="l-buscar-despues" type="button" aria-label="Coincidencia siguiente" disabled>›</button>
       </div>
-      <div class="hilo" id="l-hilo"></div>
+      <div class="hilo" id="l-hilo" data-visor-grupo></div>
       <div class="notas">
         <label for="l-notas">Notas internas (no salen en el enlace de evidencia)</label>
         <textarea id="l-notas" placeholder="Ej.: se quejó del motorizado; se le ofreció descuento en el siguiente pedido"></textarea>
@@ -303,7 +305,14 @@ function resaltar(texto, busca) {
 }
 
 /* Cada etiqueta con el tono del armazon: nunca un color a pelo. */
-var TONO_ETIQUETA = { reclamo: 'rojo', cancelacion: 'rojo', entrega: 'verde', venta: 'verde', cambio: 'ambar', sin_respuesta: 'ambar', motorizado: 'azul', pago: 'azul', consulta: 'gris', otro: 'gris' };
+var TONO_ETIQUETA = {
+  reclamo: 'rojo', cancelar_entrega: 'rojo', pedido_no_reconocido: 'rojo',
+  reagendar_entrega: 'ambar', cambiar_ubicacion: 'ambar', ubicaciones_multiples: 'ambar', fuera_de_horario: 'ambar', problema_de_pago: 'ambar',
+  horario_fijo: 'azul', franja_horaria: 'azul', hora_limite: 'azul', solicitar_espera: 'azul', coordinar_con_tercero: 'azul', consultar_entrega: 'azul',
+  confirmar_recepcion: 'verde', otro: 'gris',
+  /* Las del catalogo de antes, para las conversaciones que ya las tienen. */
+  cancelacion: 'rojo', entrega: 'verde', venta: 'verde', cambio: 'ambar', sin_respuesta: 'ambar', motorizado: 'azul', pago: 'azul', consulta: 'gris'
+};
 var TIPO = { image: '🖼 foto', audio: '🎤 audio', video: '🎬 video', document: '📄 documento', sticker: 'sticker', location: '📍 ubicación' };
 /* Cuerpos que WhatsApp pone como relleno de un adjunto: no aportan nada junto al propio adjunto. */
 var CUERPOS_GENERICOS = ['(foto)', '(sticker)', '(audio)', '(video)', '(documento)', '(adjunto)', '(ubicacion)', '(ubicación)'];
@@ -312,6 +321,7 @@ var SIN_FICHERO = ['text', 'location', 'interactive', 'template', 'unknown'];
 
 /* ------------------------------------------------------------------- estado */
 var ETIQUETAS = [];
+var ETIQUETAS_ANTERIORES = [];
 var NOMBRE_ETIQUETA = {};
 var datos = null;
 var abierta = null;
@@ -350,8 +360,11 @@ function filtrosActuales() {
 }
 
 function pintarEtiquetasEnSelectores() {
-  var opciones = ETIQUETAS.map(function (e) { return '<option value="' + esc(e.id) + '">' + esc(e.nombre) + '</option>'; }).join('');
-  $('f-etiqueta').innerHTML = '<option value="">Cualquier etiqueta</option>' + opciones;
+  var aOpciones = function (lista) { return lista.map(function (e) { return '<option value="' + esc(e.id) + '">' + esc(e.nombre) + '</option>'; }).join(''); };
+  var opciones = aOpciones(ETIQUETAS);
+  /* Por las de antes se puede buscar, pero ya no se ponen. */
+  $('f-etiqueta').innerHTML = '<option value="">Cualquier etiqueta</option>' + opciones +
+    (ETIQUETAS_ANTERIORES.length ? '<optgroup label="Etiquetas anteriores">' + aOpciones(ETIQUETAS_ANTERIORES) + '</optgroup>' : '');
   $('l-etiqueta-add').innerHTML = '<option value="">Añadir etiqueta…</option>' + opciones;
 }
 
@@ -373,7 +386,8 @@ async function cargar() {
   lista.setAttribute('aria-busy', 'false');
   if (!ETIQUETAS.length && (datos.etiquetas || []).length) {
     ETIQUETAS = datos.etiquetas;
-    ETIQUETAS.forEach(function (e) { NOMBRE_ETIQUETA[e.id] = e.nombre; });
+    ETIQUETAS_ANTERIORES = datos.etiquetasAnteriores || [];
+    ETIQUETAS.concat(ETIQUETAS_ANTERIORES).forEach(function (e) { NOMBRE_ETIQUETA[e.id] = e.nombre; });
     pintarEtiquetasEnSelectores();
   }
   /* Si al borrar o al filtrar la última página se queda vacía, se retrocede en vez de enseñar un vacío falso. */
@@ -468,7 +482,9 @@ function filaHtml(a) {
   var detalle = a.messageCount + ' ' + plural(a.messageCount, 'mensaje', 'mensajes') +
     (adj ? ' · 📎 ' + adj : '') +
     ' · ' + (a.origen === 'importado_txt' ? 'importada del teléfono' : motivoTexto(a.reason) + (a.cerradoPor ? ' por ' + a.cerradoPor : ''));
-  var chips = (a.pedido ? '<span class="chip tono-azul">' + esc(a.pedido) + '</span>' : '') + (a.etiquetas || []).map(function (e) { return chipEtiqueta(e); }).join('');
+  var chips = (a.pedido ? '<span class="chip tono-azul">' + esc(a.pedido) + '</span>' : '') + (a.etiquetas || []).map(function (e) { return chipEtiqueta(e); }).join('') +
+    /* Con resumen y sin etiqueta: la IA falló al clasificarla (no es lo mismo que «Otro»). */
+    (a.resumen && !(a.etiquetas || []).length ? '<span class="chip tono-gris" title="No se pudo clasificar al guardarla. «Volver a resumir» lo intenta de nuevo.">Sin clasificar</span>' : '');
   return '<button class="fila" type="button" data-id="' + a.id + '"' + (abierta && abierta.id === a.id ? ' aria-current="true"' : '') + '>' +
     '<span class="top"><b>' + esc(quien) + '</b><span class="cuando">' + esc(fechaHora(a.createdAt)) + '</span></span>' +
     '<span class="det">' + esc(detalle) + '</span>' +
@@ -519,9 +535,13 @@ function adjuntoHtml(m) {
   if (!adj) return '<span class="k">' + tipo + ' (no se guardó' + (datos && datos.conAdjuntos === false ? ': este arranque no copia ficheros' : '') + ')</span>';
   if (adj.omitido) return '<span class="k">' + tipo + ' (no se guardó: ' + esc(adj.omitido) + ')</span>';
   var attrs = ' data-adj="' + esc(adj.id) + '" data-kind="' + esc(adj.kind) + '"';
-  if (adj.kind === 'image') return '<img class="adj"' + attrs + ' alt="Foto de la conversación" title="Abrir en grande">';
+  /* Foto y video se abren en el visor de la misma pagina (visor-medios.ts). La
+     direccion la pone cargarAdjuntos cuando llega el fichero; antes no abre nada. */
+  var titulo = esc((adj.kind === 'video' ? 'Video' : 'Foto') + (m.direction === 'in' ? ' del cliente' : ' enviado') + (m.createdAt ? ' · ' + fechaCorta(m.createdAt) : ''));
+  var visor = ' data-visor-titulo="' + titulo + '" data-visor-nombre="' + esc(adj.nombre || (adj.kind === 'video' ? 'video' : 'foto')) + '"';
+  if (adj.kind === 'image') return '<img class="adj"' + attrs + visor + ' data-visor="imagen" tabindex="0" role="button" alt="Foto de la conversación" title="Ver en grande">';
   if (adj.kind === 'audio') return '<audio class="adj"' + attrs + ' controls preload="none"></audio>';
-  if (adj.kind === 'video') return '<video class="adj"' + attrs + ' controls playsinline preload="none"></video>';
+  if (adj.kind === 'video') return '<button type="button" class="visor-video adj-video" data-visor="video"' + visor + ' title="Ver el video" aria-label="Ver el video"><video class="adj"' + attrs + ' muted playsinline preload="metadata"></video></button>';
   /* Sin href hasta que llega el fichero: asi el enlace nunca lleva a ninguna parte. */
   return '<a class="adj doc"' + attrs + ' download="' + esc(adj.nombre || 'documento') + '">📄 ' + esc(adj.nombre || 'documento') + ' <span class="k">(' + peso(adj.bytes) + ')</span></a>';
 }
@@ -529,7 +549,7 @@ function adjuntoHtml(m) {
 function ponerAdjunto(el, url) {
   if (el.tagName === 'A') el.href = url;
   else el.src = url;
-  if (el.tagName === 'IMG') el.onclick = function () { window.open(url, '_blank'); };
+  /* Abrir en grande lo hace el visor (data-visor): ya no se abre otra pestaña. */
 }
 
 /* Se sueltan los ficheros de la conversacion anterior: si no, el navegador los guarda hasta recargar. */
@@ -590,6 +610,7 @@ function pintarChips() {
     (a.deletedAt ? '<span class="chip tono-ambar">En la papelera</span>' : '') +
     (a.pedido ? '<span class="chip tono-azul">' + esc(a.pedido) + '</span>' : '') +
     (a.origen === 'importado_txt' ? '<span class="chip tono-gris">Importada</span>' : '') +
+    (a.resumen && !etiquetasEdit.length ? '<span class="chip tono-gris" title="No se pudo clasificar al guardarla. «Volver a resumir» lo intenta de nuevo.">Sin clasificar</span>' : '') +
     etiquetasEdit.map(function (e) { return chipEtiqueta(e, ' <button class="quitar" type="button" data-quitar-etiqueta="' + esc(e) + '" aria-label="Quitar la etiqueta ' + esc(NOMBRE_ETIQUETA[e] || e) + '">✕</button>'); }).join('');
 }
 

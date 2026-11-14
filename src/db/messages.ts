@@ -5,6 +5,7 @@
  * `Repos` lo expone como `repos.messages`.
  */
 
+import { seguirLineaDelMensaje } from './lineas-contacto.js';
 import type { Pool } from './pool.js';
 
 export type Direction = 'in' | 'out';
@@ -33,6 +34,10 @@ export interface Message {
   deliveryId: number | null;
   createdAt: Date;
   storedAt?: Date;
+  /** La linea de WhatsApp del mensaje y su etiqueta y numero de ese momento. */
+  lineaId?: string | null;
+  lineaEtiqueta?: string | null;
+  lineaNumero?: string | null;
 }
 
 export interface ActividadDia {
@@ -52,6 +57,12 @@ export interface NewMessage {
   status?: string | null;
   deliveryId?: number | null;
   createdAt?: Date;
+  /** La linea de WhatsApp del mensaje, con su etiqueta y numero de ese momento. */
+  lineaId?: string | null;
+  lineaEtiqueta?: string | null;
+  lineaNumero?: string | null;
+  /** El sistema ya decidio la linea de este cliente: guardar este mensaje no se la cambia. */
+  conservarLinea?: boolean;
 }
 
 /** Una fila de la lista de chats. */
@@ -70,6 +81,10 @@ export interface Conversation {
     body: string | null;
     status: string | null;
     createdAt: Date;
+    /** La linea de WhatsApp de ese ultimo mensaje (etiqueta y numero de entonces). */
+    lineaId?: string | null;
+    lineaEtiqueta?: string | null;
+    lineaNumero?: string | null;
   } | null;
   unread: number;
   /** true si el cliente escribio en las ultimas 24 h. */
@@ -103,8 +118,16 @@ export interface MessagesRepo {
   finalizarAccionWhatsapp(key: string, estado: 'aceptado' | 'fallido' | 'incierto', wamidSaliente?: string | null): Promise<void>;
   limpiarAccionesWhatsappAntes(ahora: Date): Promise<number>;
   add(message: NewMessage): Promise<number>;
+  /**
+   * La linea con la que se lleva la conversacion de este cliente: la que tiene
+   * asignada (ver src/db/lineas-contacto.ts) o, si no, la del ultimo
+   * mensaje, entrante o saliente. Se recuerda en el contacto, asi que sigue
+   * valiendo cuando los mensajes ya caducaron. Null = nunca se uso una linea.
+   */
+  lineaDeLaConversacion(contactId: string): Promise<string | null>;
   /** Estado de entrega que llega por webhook. */
-  setStatusByWamid(wamid: string, status: string): Promise<void>;
+  /** El error de Meta (si lo hay) no se guarda aqui (va en deliveries): se pasa para quien observa el cambio. */
+  setStatusByWamid(wamid: string, status: string, error?: { code?: string; title?: string }): Promise<void>;
   listConversations(query: { q?: string; limit: number; offset: number; incluirApartados?: boolean; desde?: Date | null; alcance?: { afterId: string; retenidosDesde: Date } }): Promise<Conversation[]>;
   listMessages(contactId: string, limit: number, beforeId?: number, desde?: Date | null, alcance?: { afterId: string; retenidosDesde: Date }): Promise<Message[]>;
   /** Novedades posteriores al cursor más estados vigentes de IDs conocidos. */
@@ -113,6 +136,8 @@ export interface MessagesRepo {
   iniciadaEnAlcance(contactId: string, alcance: { afterId: string; retenidosDesde: Date }): Promise<boolean>;
   referenciaVisiblePorWamid(wamid: string, retenidosDesde: Date): Promise<{ contactId: string; id: string } | null>;
   limpiarAntes(desde: Date): Promise<number>;
+  /** Los adjuntos que todavia nombra algun mensaje: lo que la limpieza no puede borrar. */
+  mediaReferenciada(): Promise<Array<{ id: string; kind: string; mimeType: string | null }>>;
   markRead(contactId: string, at: Date): Promise<void>;
   /** Total de mensajes entrantes sin leer, para el globo del menu. */
   unreadTotal(desde?: Date | null, alcance?: { afterId: string; retenidosDesde: Date }): Promise<number>;
@@ -233,6 +258,9 @@ interface Row {
   status: string | null;
   delivery_id: number | null;
   created_at: Date;
+  whatsapp_number_id?: string | null;
+  linea_etiqueta?: string | null;
+  linea_numero?: string | null;
 }
 
 const toMessage = (r: Row): Message => ({
@@ -247,6 +275,9 @@ const toMessage = (r: Row): Message => ({
   deliveryId: r.delivery_id,
   createdAt: r.created_at,
   storedAt: (r as Row & { stored_at?: Date }).stored_at ?? r.created_at,
+  lineaId: r.whatsapp_number_id ?? null,
+  lineaEtiqueta: r.linea_etiqueta ?? null,
+  lineaNumero: r.linea_numero ?? null,
 });
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -270,7 +301,93 @@ function reaccionDe(message: NewMessage): { emoji: string; sobre: string } | nul
   return { emoji: String(reaction.emoji ?? ''), sobre: reaction.message_id };
 }
 
+/** sent < delivered < read; cualquier otro (null, pendiente) vale 0. `failed` se trata aparte. */
+const RANGO_ESTADO_SQL = (expr: string) => `(case ${expr} when 'read' then 3 when 'delivered' then 2 when 'sent' then 1 else 0 end)`;
+
+const RANGO_ESTADO: Record<string, number> = { sent: 1, delivered: 2, read: 3 };
+
+/**
+ * Acuses que llegaron antes que su mensaje.
+ *
+ * El sender guarda la fila DESPUES de que el proveedor acepta el envio, y el
+ * acuse de WhatsApp (sobre todo un «failed» de Meta o el «sent» de un WhatsApp
+ * normal) puede adelantarse. Antes ese acuse se perdia y el mensaje se quedaba
+ * para siempre como enviado aunque no hubiera llegado. Aqui se aparta unos
+ * minutos, con tope de tamaño para no crecer sin limite, y se conserva el mas
+ * informativo (un «failed» manda; si no, el de mas rango).
+ */
+export interface EstadoAdelantado {
+  status: string;
+  /** Con `failed`: el codigo y el texto de Meta, para que el motivo no se pierda. */
+  error?: { code?: string; title?: string };
+}
+
+export class EstadosAdelantados {
+  private readonly mapa = new Map<string, EstadoAdelantado & { at: number }>();
+  constructor(
+    private readonly vidaMs = 15 * 60_000,
+    private readonly tope = 5_000,
+    private readonly reloj: () => number = Date.now,
+  ) {}
+
+  guardar(wamid: string, status: string, error?: { code?: string; title?: string }): void {
+    if (!wamid || !status) return;
+    const ahora = this.reloj();
+    const vivo = this.mapa.get(wamid);
+    const previo = vivo && vivo.at + this.vidaMs > ahora ? vivo : undefined;
+    let mejor: EstadoAdelantado;
+    if (!previo) mejor = { status, ...(error ? { error } : {}) };
+    else if (previo.status === 'failed') mejor = { status: 'failed', ...(previo.error ?? error ? { error: previo.error ?? error } : {}) };
+    else if (status === 'failed') mejor = { status: 'failed', ...(error ? { error } : {}) };
+    else mejor = (RANGO_ESTADO[status] ?? 0) > (RANGO_ESTADO[previo.status] ?? 0) ? { status } : { status: previo.status };
+    this.mapa.delete(wamid);
+    this.mapa.set(wamid, { ...mejor, at: ahora });
+    // Lo mas viejo sale primero (un Map conserva el orden de insercion).
+    while (this.mapa.size > this.tope) {
+      const primero = this.mapa.keys().next().value;
+      if (primero === undefined) break;
+      this.mapa.delete(primero);
+    }
+  }
+
+  /** El estado apartado para ese mensaje (y lo quita), o null si no hay o caduco. */
+  tomar(wamid: string): EstadoAdelantado | null {
+    const e = this.mapa.get(wamid);
+    if (!e) return null;
+    this.mapa.delete(wamid);
+    if (e.at + this.vidaMs <= this.reloj()) return null;
+    const { at: _at, ...estado } = e;
+    return estado;
+  }
+
+  get tamano(): number {
+    return this.mapa.size;
+  }
+}
+
 export function createMessagesRepo(pool: Pool): MessagesRepo {
+  const estadosAdelantados = new EstadosAdelantados();
+
+  /**
+   * El doble check no retrocede: un "sent" reenviado tras un "read" no puede
+   * quitarle el azul al mensaje. Un "failed" si se impone. Devuelve si la fila existe.
+   */
+  async function actualizarEstado(wamid: string, status: string): Promise<boolean> {
+    const { rowCount } = await pool.query(
+      `update messages
+          set status = case
+                when $2 = 'failed' then 'failed'
+                when ${RANGO_ESTADO_SQL('status')} >= ${RANGO_ESTADO_SQL('$2')} then status
+                else $2 end
+        where wamid = $1`,
+      [wamid, status],
+    );
+    if (rowCount) return true;
+    // MySQL cuenta solo las filas que CAMBIAN: un acuse repetido da 0 aunque la fila exista.
+    const { rows } = await pool.query<{ existe: number }>('select 1 as existe from messages where wamid = $1 limit 1', [wamid]);
+    return rows.length > 0;
+  }
+
   const repo: MessagesRepo = {
     async ultimoId() {
       const { rows } = await pool.query<{ id: string | number | bigint }>('select coalesce(max(id), 0) as id from messages');
@@ -353,12 +470,20 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       }
 
       // Si el wamid ya estaba, se actualiza el estado y `last_insert_id(id)`
-      // hace que insertId sea el id de la fila que ya existia.
+      // hace que insertId sea el id de la fila que ya existia. El estado no
+      // retrocede (igual que en setStatusByWamid): volver a guardar un mensaje
+      // ya entregado no lo devuelve a «enviado», ni borra un «no llegó».
       const { insertId } = await pool.query(
         `insert into messages
-           (contact_id, direction, wamid, kind, body, payload, status, delivery_id, created_at, stored_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8, coalesce($9, now(3)), now(3))
-         on duplicate key update id = last_insert_id(id), status = coalesce(values(status), status)`,
+           (contact_id, direction, wamid, kind, body, payload, status, delivery_id, created_at, stored_at, whatsapp_number_id, linea_etiqueta, linea_numero)
+         values ($1,$2,$3,$4,$5,$6,$7,$8, coalesce($9, now(3)), now(3), $10,$11,$12)
+         on duplicate key update id = last_insert_id(id), status = case
+                  when values(status) is null then status
+                  when status is null then values(status)
+                  when values(status) = 'failed' then 'failed'
+                  when status = 'failed' then status
+                  when ${RANGO_ESTADO_SQL('values(status)')} > ${RANGO_ESTADO_SQL('status')} then values(status)
+                  else status end`,
         [
           message.contactId,
           message.direction,
@@ -369,24 +494,59 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           message.status ?? null,
           message.deliveryId ?? null,
           message.createdAt ?? null,
+          message.lineaId ?? null,
+          message.lineaEtiqueta ?? null,
+          message.lineaNumero ?? null,
         ],
       );
+      // La confirmacion de WhatsApp pudo llegar antes que esta fila (el acuse
+      // viaja mientras el sender todavia guarda): se aplica ahora.
+      if (message.direction === 'out' && message.wamid) {
+        const pendiente = estadosAdelantados.tomar(message.wamid);
+        if (pendiente) {
+          await actualizarEstado(message.wamid, pendiente.status).catch(() => undefined);
+          // El envio tambien: es de donde la API y el panel sacan el porque.
+          if (pendiente.status === 'failed' && message.deliveryId) {
+            await pool
+              .query(
+                `update deliveries
+                    set status = 'failed', error_code = coalesce($2, error_code), error_title = coalesce($3, error_title),
+                        failed_at = coalesce(failed_at, now(3))
+                  where id = $1`,
+                [message.deliveryId, pendiente.error?.code ?? null, pendiente.error?.title?.slice(0, 500) ?? null],
+              )
+              .catch(() => undefined);
+          }
+        }
+      }
+      // Si el cliente escribe por otra linea o una persona elige otra, se sigue por esa.
+      if (message.lineaId && !message.conservarLinea) {
+        await seguirLineaDelMensaje(pool, { contactId: message.contactId, lineaId: message.lineaId, direction: message.direction, createdAt: message.createdAt });
+      }
       return insertId;
     },
 
-    async setStatusByWamid(wamid, status) {
-      // El doble check no retrocede: un "sent" reenviado tras un "read" no
-      // puede quitarle el azul al mensaje. Un "failed" si se impone.
-      await pool.query(
-        `update messages
-            set status = case
-                  when $2 = 'failed' then 'failed'
-                  when (case status when 'read' then 3 when 'delivered' then 2 when 'sent' then 1 else 0 end)
-                    >= (case $2 when 'read' then 3 when 'delivered' then 2 when 'sent' then 1 else 0 end) then status
-                  else $2 end
-          where wamid = $1`,
-        [wamid, status],
+    async lineaDeLaConversacion(contactId) {
+      const { rows } = await pool.query<{ whatsapp_number_id: string | null }>(
+        'select whatsapp_number_id from contacts where id = $1',
+        [contactId],
       );
+      if (rows[0]?.whatsapp_number_id) return rows[0].whatsapp_number_id;
+      // Contactos de antes de recordarla en el contacto: la del ultimo mensaje que la tenga.
+      const ultimo = await pool.query<{ whatsapp_number_id: string | null }>(
+        `select whatsapp_number_id from messages
+          where contact_id = $1 and whatsapp_number_id is not null
+          order by created_at desc, id desc limit 1`,
+        [contactId],
+      );
+      return ultimo.rows[0]?.whatsapp_number_id ?? null;
+    },
+
+    async setStatusByWamid(wamid, status, error) {
+      const encontrada = await actualizarEstado(wamid, status);
+      // Sin fila todavia: el acuse llego antes de que se guardara el mensaje.
+      // Se aparta y `add` lo aplica al guardarlo (ver EstadosAdelantados).
+      if (!encontrada) estadosAdelantados.guardar(wamid, status, error);
     },
 
     async listConversations(query) {
@@ -403,7 +563,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           and coalesce(json_unquote(json_extract(${alias}.payload, '$.autorNombre')), '') <> 'Teléfono'`;
       };
       const desde = query.desde ? (params.push(query.desde), `$${params.length}`) : null;
-      if (alcance) condiciones.push(`exists (select 1 from messages s where s.contact_id = c.id and s.direction = 'out' and s.wamid is not null and coalesce(s.status,'') not in ('failed','blocked_by_gate') and ${visibilidad('s', alcance)})`);
+      if (alcance) condiciones.push(`exists (select 1 from messages s where s.contact_id = c.id and s.direction = 'out' and s.wamid is not null and coalesce(s.status,'') <> 'blocked_by_gate' and ${visibilidad('s', alcance)})`);
       else if (desde) condiciones.push(`exists (select 1 from messages s where s.contact_id = c.id and ${inicioSistema('s', desde)})`);
       if (query.q?.trim()) {
         params.push(`%${query.q.trim()}%`);
@@ -434,10 +594,14 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         message_at: Date | null;
         message_id: number | null;
         unread: number;
+        whatsapp_number_id: string | null;
+        linea_etiqueta: string | null;
+        linea_numero: string | null;
       }>(
         `select c.id as contact_id, c.phone, c.name, c.tipo, c.opt_in_at, c.opt_out_at, c.last_inbound_at,
                 c.chat_fijado_at, c.chat_silenciado_at, c.chat_apartado_at,
                 m.direction, m.kind, m.body, m.status, m.created_at as message_at, m.id as message_id,
+                m.whatsapp_number_id, m.linea_etiqueta, m.linea_numero,
                 (select count(*)
                    from messages u
                   where u.contact_id = c.id and u.direction = 'in'
@@ -482,6 +646,9 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
               body: r.body,
               status: r.status,
               createdAt: r.message_at,
+              lineaId: r.whatsapp_number_id ?? null,
+              lineaEtiqueta: r.linea_etiqueta ?? null,
+              lineaNumero: r.linea_numero ?? null,
             }
           : null,
         unread: Number(r.unread ?? 0),
@@ -498,7 +665,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
     },
     async iniciadaEnAlcance(contactId, alcance) {
       const { rows } = await pool.query<{ existe: number }>(
-        `select 1 as existe from messages s where s.contact_id=$1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') not in ('failed','blocked_by_gate') and s.id > $2 and s.stored_at > $3 and coalesce(json_unquote(json_extract(s.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(s.payload, '$.autorNombre')), '') <> 'Teléfono' limit 1`,
+        `select 1 as existe from messages s where s.contact_id=$1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') <> 'blocked_by_gate' and s.id > $2 and s.stored_at > $3 and coalesce(json_unquote(json_extract(s.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(s.payload, '$.autorNombre')), '') <> 'Teléfono' limit 1`,
         [contactId, alcance.afterId, alcance.retenidosDesde],
       );
       return rows.length > 0;
@@ -509,6 +676,13 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
         [wamid, retenidosDesde],
       );
       return rows[0] ? { contactId: rows[0].contact_id, id: String(rows[0].id) } : null;
+    },
+    async mediaReferenciada() {
+      const { rows } = await pool.query<{ id: string; kind: string; mime: string | null }>(
+        `select json_unquote(json_extract(payload, '$.media.id')) as id, kind, json_unquote(json_extract(payload, '$.media.mimeType')) as mime
+           from messages where json_extract(payload, '$.media.id') is not null`,
+      );
+      return rows.map((r) => ({ id: r.id, kind: r.kind, mimeType: r.mime }));
     },
     async limpiarAntes(desde) {
       const { rowCount } = await pool.query('delete from messages where stored_at is null or stored_at <= $1 order by stored_at, id limit 1000', [desde]);
@@ -532,7 +706,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
           params.push(alcance.retenidosDesde); const at = `$${params.length}`;
           return `${alias}.id > ${id} and ${alias}.stored_at > ${at} and coalesce(json_unquote(json_extract(${alias}.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(${alias}.payload, '$.autorNombre')), '') <> 'Teléfono'`;
         };
-        cursor += ` and ${visibilidad('messages')} and exists (select 1 from messages s where s.contact_id = $1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') not in ('failed','blocked_by_gate') and ${visibilidad('s')})`;
+        cursor += ` and ${visibilidad('messages')} and exists (select 1 from messages s where s.contact_id = $1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') <> 'blocked_by_gate' and ${visibilidad('s')})`;
       }
       const { rows } = await pool.query<Row>(
         // Lo "eliminado para mi" no se pinta, pero sigue en la tabla: el
@@ -566,7 +740,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
             and id > ${scopeId} and stored_at > ${retained}
             and coalesce(json_unquote(json_extract(payload, '$.historial')), 'false') <> 'true'
             and coalesce(json_unquote(json_extract(payload, '$.autorNombre')), '') <> 'Teléfono'
-            and exists (select 1 from messages s where s.contact_id=$1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') not in ('failed','blocked_by_gate') and s.id > ${scopeId} and s.stored_at > ${retained} and coalesce(json_unquote(json_extract(s.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(s.payload, '$.autorNombre')), '') <> 'Teléfono')
+            and exists (select 1 from messages s where s.contact_id=$1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') <> 'blocked_by_gate' and s.id > ${scopeId} and s.stored_at > ${retained} and coalesce(json_unquote(json_extract(s.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(s.payload, '$.autorNombre')), '') <> 'Teléfono')
             and not json_contains_path(coalesce(payload, '{}'), 'one', '$.eliminadoAqui')
           order by id asc limit $${params.length}`,
         params,
@@ -585,7 +759,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       if (alcance) {
         params.push(alcance.afterId); const id = `$${params.length}`;
         params.push(alcance.retenidosDesde); const at = `$${params.length}`;
-        filtro += `and m.id > ${id} and m.stored_at > ${at} and coalesce(json_unquote(json_extract(m.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(m.payload, '$.autorNombre')), '') <> 'Teléfono' and exists (select 1 from messages s where s.contact_id=c.id and s.direction='out' and s.wamid is not null and coalesce(s.status,'') not in ('failed','blocked_by_gate') and s.id > ${id} and s.stored_at > ${at})`;
+        filtro += `and m.id > ${id} and m.stored_at > ${at} and coalesce(json_unquote(json_extract(m.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(m.payload, '$.autorNombre')), '') <> 'Teléfono' and exists (select 1 from messages s where s.contact_id=c.id and s.direction='out' and s.wamid is not null and coalesce(s.status,'') <> 'blocked_by_gate' and s.id > ${id} and s.stored_at > ${at})`;
       }
       const { rows } = await pool.query<{ total: number }>(
         `select count(*) as total
@@ -828,7 +1002,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       if (query.alcance) {
         params.push(query.alcance.afterId); const id = `$${params.length}`;
         params.push(query.alcance.retenidosDesde); const at = `$${params.length}`;
-        alcanceSql += ` and messages.id > ${id} and messages.stored_at > ${at} and coalesce(json_unquote(json_extract(messages.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(messages.payload, '$.autorNombre')), '') <> 'Teléfono' and exists (select 1 from messages s where s.contact_id=$1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') not in ('failed','blocked_by_gate') and s.id > ${id} and s.stored_at > ${at})`;
+        alcanceSql += ` and messages.id > ${id} and messages.stored_at > ${at} and coalesce(json_unquote(json_extract(messages.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(messages.payload, '$.autorNombre')), '') <> 'Teléfono' and exists (select 1 from messages s where s.contact_id=$1 and s.direction='out' and s.wamid is not null and coalesce(s.status,'') <> 'blocked_by_gate' and s.id > ${id} and s.stored_at > ${at})`;
       }
       const { rows } = await pool.query<Row>(
         `select * from messages
@@ -858,7 +1032,7 @@ export function createMessagesRepo(pool: Pool): MessagesRepo {
       if (query.alcance) {
         params.push(query.alcance.afterId); const id = `$${params.length}`;
         params.push(query.alcance.retenidosDesde); const at = `$${params.length}`;
-        filtro += ` and m.id > ${id} and m.stored_at > ${at} and coalesce(json_unquote(json_extract(m.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(m.payload, '$.autorNombre')), '') <> 'Teléfono' and exists (select 1 from messages s where s.contact_id=m.contact_id and s.direction='out' and s.wamid is not null and coalesce(s.status,'') not in ('failed','blocked_by_gate') and s.id > ${id} and s.stored_at > ${at})`;
+        filtro += ` and m.id > ${id} and m.stored_at > ${at} and coalesce(json_unquote(json_extract(m.payload, '$.historial')), 'false') <> 'true' and coalesce(json_unquote(json_extract(m.payload, '$.autorNombre')), '') <> 'Teléfono' and exists (select 1 from messages s where s.contact_id=m.contact_id and s.direction='out' and s.wamid is not null and coalesce(s.status,'') <> 'blocked_by_gate' and s.id > ${id} and s.stored_at > ${at})`;
       }
       const { rows } = await pool.query<Row & { phone: string; name: string | null }>(
         `select m.*, c.phone, c.name

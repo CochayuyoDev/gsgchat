@@ -214,7 +214,8 @@ async function sesion(rol: 'admin' | 'operador' = 'admin'): Promise<Record<strin
 }
 
 describe('desde la pantalla', () => {
-  it('el semaforo empieza en rojo por los dos lados y explica que falta', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): Stoky.
+  it.skip('el semaforo empieza en rojo por los dos lados y explica que falta', async () => {
     const h = await sesion();
     const r = await app.inject({ method: 'GET', url: '/admin/integraciones/stoky', headers: h });
     expect(r.statusCode).toBe(200);
@@ -224,7 +225,8 @@ describe('desde la pantalla', () => {
     expect(j.haciaStoky).toMatchObject({ configurada: false, origen: 'ninguna' });
   });
 
-  it('la clave para Stoky se crea con un boton, con todos los permisos, y sustituye a la anterior', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): Stoky.
+  it.skip('la clave para Stoky se crea con un boton, con todos los permisos, y sustituye a la anterior', async () => {
     const h = await sesion();
     const ope = await sesion('operador');
     expect((await app.inject({ method: 'POST', url: '/admin/integraciones/stoky/clave', headers: ope, payload: {} })).statusCode).toBe(403);
@@ -244,7 +246,8 @@ describe('desde la pantalla', () => {
     expect(s.json().haciaAqui.claves).toHaveLength(1);
   });
 
-  it('guardar la direccion y el token conecta al momento: el asistente pasa a ofrecer pedidos con el catalogo', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): Stoky.
+  it.skip('guardar la direccion y el token conecta al momento: el asistente pasa a ofrecer pedidos con el catalogo', async () => {
     const h = await sesion();
     const c = await repos.contacts.upsertFromInbound('51987654321', 'Maria');
     await repos.contacts.setOptIn('51987654321', 'prueba');
@@ -280,7 +283,8 @@ describe('desde la pantalla', () => {
     expect((await app.inject({ method: 'GET', url: `/admin/leads/${c.id}/derivar`, headers: h })).statusCode).toBe(409);
   });
 
-  it('Stoky se presenta por la API con su clave y todo queda conectado; sin el permiso no', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): Stoky.
+  it.skip('Stoky se presenta por la API con su clave y todo queda conectado; sin el permiso no', async () => {
     const h = await sesion();
     const sin = await crearClaveDePrueba(repos, ['estado:leer']);
     const con = await crearClaveDePrueba(repos, ['stoky:conectar'], 'Stoky');
@@ -326,7 +330,8 @@ describe('desde la pantalla', () => {
     await suelto.close();
   });
 
-  it('el semaforo ve el aviso hacia Stoky y si recibe mensajes', async () => {
+  // Desactualizada: Módulo retirado (src/modulos-retirados.ts, tests/modulos-reducidos.test.ts): Stoky.
+  it.skip('el semaforo ve el aviso hacia Stoky y si recibe mensajes', async () => {
     const h = await sesion();
     const wh = await repos.webhooks.crear({ url: 'https://stoky.pe/webhooks/wa-locator/abc', descripcion: 'Stoky360', eventos: ['mensaje.recibido'], secreto: 's', creadoPor: null });
     let r = await app.inject({ method: 'GET', url: '/admin/integraciones/stoky', headers: h });

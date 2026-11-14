@@ -27,8 +27,17 @@ export interface AnuncioEntrada {
   origen: string | null;
 }
 
+/** La linea de WhatsApp por la que llego o saldra un mensaje (ver src/whatsapp/lineas.ts). */
+export interface LineaDeMensaje {
+  id: string;
+  etiqueta: string;
+  numero: string;
+}
+
 export interface InboundMessage {
   id: string;
+  /** La linea que lo recibio. Sin ella se lee como la principal. */
+  linea?: LineaDeMensaje;
   /** Fuente del wamid para deduplicar aunque expire la fila temporal del chat. */
   provider?: 'meta' | 'waha' | 'local' | 'web' | 'whatsapp';
   from: string;
@@ -131,6 +140,8 @@ export interface StatusUpdate {
 
 export interface ChangeValue {
   messaging_product?: string;
+  /** La linea que origino el aviso, cuando el transporte la sabe (WAHA por sesion, local por socket). */
+  lineaId?: string;
   metadata?: { display_phone_number?: string; phone_number_id?: string };
   contacts?: Array<{ wa_id: string; profile?: { name?: string } }>;
   messages?: InboundMessage[];
@@ -164,6 +175,14 @@ export interface ChangeValue {
   /** Desde Graph v24: por portafolio de Meta (compartido por todos sus numeros). */
   max_daily_conversations_per_business?: number;
   max_phone_numbers_per_business?: number;
+  // account_alerts
+  entity_type?: string;
+  entity_id?: string | number;
+  alert_info?: { alert_severity?: string; alert_status?: string; alert_type?: string; alert_description?: string };
+  // account_review_update y phone_number_name_update
+  decision?: string;
+  requested_verified_name?: string;
+  rejection_reason?: string | null;
   // user_preferences
   user_preferences?: Array<{
     wa_id?: string;

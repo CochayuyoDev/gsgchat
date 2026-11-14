@@ -12,6 +12,8 @@ import { createDesarrolladorRepo, type DesarrolladorRepo } from './desarrollador
 import type { ExtractionSuccess } from '../types.js';
 import { createAutomationRepo, type AutomationRepo } from './automation.js';
 import { createMessagesRepo, type MessagesRepo } from './messages.js';
+import { createLineasContactoRepo, type LineasContactoRepo } from './lineas-contacto.js';
+import { createUsoLineasRepo, type UsoLineasRepo } from './uso-lineas.js';
 import { createLeadsRepo, type LeadsRepo } from './leads.js';
 import { createArchivesRepo, type ArchivesRepo } from './archives.js';
 import { createRutasRepo, type RutasRepo } from './rutas.js';
@@ -21,6 +23,7 @@ import { createAjustesGeneralesRepo, type AjustesGeneralesRepo } from '../ajuste
 import { createActividadRepo, type ActividadRepo } from '../auth/actividad.js';
 import { createStickersRepo, type StickersRepo } from '../stickers/stickers.js';
 import { createWebhooksRepo, type WebhooksRepo } from '../webhooks/repo.js';
+import { createRutasGsgRepo, type RutasGsgRepo } from '../rutas-gsg/repo.js';
 import { createConectoresRepo, type ConectoresRepo } from '../conectores/repo.js';
 import { createEnvioAutomaticoRepo, type EnvioAutomaticoRepo } from '../envio-automatico/repo.js';
 import { createPedidosRepo, type PedidosRepo } from '../pedidos/repo.js';
@@ -31,6 +34,8 @@ import { createEntregasRepo, type EntregasRepo } from '../entregas/repo.js';
 import { createProcesosRepo, type ProcesosRepo } from '../procesos/repo.js';
 import { crearReportadosRepo, type ReportadosRepo } from '../entregas/reportados.js';
 import { crearMensajesGsgRepo, type MensajesGsgRepo } from './mensajes-gsg.js';
+import { crearPrivacidadRepo, type PrivacidadRepo } from '../privacidad/repo.js';
+import { crearChatEtiquetasRepo, type ChatEtiquetasRepo } from './chat-etiquetas.js';
 import type { ComoSeDecidio, DecisionBot, IntencionGsg, NuevaDecision } from '../ia/decision.js';
 
 // ---------------------------------------------------------------- modelos
@@ -424,6 +429,10 @@ export interface DeliveriesRepo {
     variables?: unknown;
     /** Fuera de ventana o con plantilla: lo que cuenta para el limite de Meta. */
     businessInitiated?: boolean;
+    /** La linea de WhatsApp por la que sale. Null = la principal (envios anteriores a las lineas). */
+    whatsappNumberId?: string | null;
+    /** Por que se eligio esa linea: asignacion_original, limite_alcanzado u original_no_disponible. */
+    lineaMotivo?: string | null;
   }): Promise<number>;
   markSent(id: number, wamid: string): Promise<void>;
   markBlocked(id: number, reason: string): Promise<void>;
@@ -594,6 +603,9 @@ export interface Repos {
   campaigns: CampaignsRepo;
   automation: AutomationRepo;
   messages: MessagesRepo;
+  lineasContacto: LineasContactoRepo;
+  /** Maximo de mensajes por dia de cada linea y reserva de cupo por envio. Ver src/db/uso-lineas.ts. */
+  usoLineas: UsoLineasRepo;
   leads: LeadsRepo;
   /** Indice de conversaciones respaldadas. Ver src/archive. */
   archives: ArchivesRepo;
@@ -613,6 +625,8 @@ export interface Repos {
   stickers: StickersRepo;
   /** Webhooks salientes: a quien se le cuenta lo que pasa. Ver src/webhooks. */
   webhooks: WebhooksRepo;
+  /** El webhook de estados de rutas de GSG: rutas, chats cerrados por ruta y su bitacora. Ver src/rutas-gsg. */
+  rutasGsg: RutasGsgRepo;
   /** Conectores de tiendas (WooCommerce, Shopify). Ver src/conectores. */
   conectores: ConectoresRepo;
   /** La lista de numeros a los que el sistema escribe solo. Ver src/envio-automatico. */
@@ -637,6 +651,10 @@ export interface Repos {
   reportados?: ReportadosRepo;
   /** Los mensajes que escribe un usuario de GSG, con su id para no duplicar (migracion 012). Ver src/db/mensajes-gsg.ts. */
   mensajesGsg?: MensajesGsgRepo;
+  /** Las etiquetas que la IA pone a las conversaciones del dia en Chats (migracion 013). Ver src/chat/etiquetar.ts. */
+  chatEtiquetas?: ChatEtiquetasRepo;
+  /** Lo que el cliente pide sobre sus datos (BAJA, borrarlos) y el borrado (migracion 020). Ver src/privacidad. */
+  privacidad?: PrivacidadRepo;
 }
 
 /** Deja solo digitos: "+52 1 55 1234 5678" y "5215512345678" son el mismo numero. */
@@ -1238,8 +1256,8 @@ export function createRepos(pool: Pool): Repos {
     async create(input) {
       const { insertId } = await pool.query(
         `insert into deliveries
-           (contact_id, campaign_id, kind, template_name, category, variables, business_initiated)
-         values ($1,$2,$3,$4,$5,$6,$7)`,
+           (contact_id, campaign_id, kind, template_name, category, variables, business_initiated, whatsapp_number_id, linea_motivo)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           input.contactId,
           input.campaignId ?? null,
@@ -1248,6 +1266,8 @@ export function createRepos(pool: Pool): Repos {
           input.category,
           input.variables ? JSON.stringify(input.variables) : null,
           input.businessInitiated ?? false,
+          input.whatsappNumberId ?? null,
+          input.lineaMotivo ?? null,
         ],
       );
       return insertId;
@@ -2044,6 +2064,8 @@ export function createRepos(pool: Pool): Repos {
     campaigns,
     automation: createAutomationRepo(pool),
     messages: createMessagesRepo(pool),
+    lineasContacto: createLineasContactoRepo(pool),
+    usoLineas: createUsoLineasRepo(pool),
     leads: createLeadsRepo(pool),
     archives: createArchivesRepo(pool),
     rutas: createRutasRepo(pool),
@@ -2054,6 +2076,7 @@ export function createRepos(pool: Pool): Repos {
     actividad: createActividadRepo(pool),
     stickers: createStickersRepo(pool),
     webhooks: createWebhooksRepo(pool),
+    rutasGsg: createRutasGsgRepo(pool),
     conectores: createConectoresRepo(pool),
     envioAutomatico: createEnvioAutomaticoRepo(pool),
     pedidos: createPedidosRepo(pool),
@@ -2063,6 +2086,8 @@ export function createRepos(pool: Pool): Repos {
     entregas: createEntregasRepo(pool),
     reportados: crearReportadosRepo(pool),
     mensajesGsg: crearMensajesGsgRepo(pool),
+    chatEtiquetas: crearChatEtiquetasRepo(pool),
+    privacidad: crearPrivacidadRepo(pool),
     desarrollador: createDesarrolladorRepo(pool),
     procesos: createProcesosRepo(pool),
     decisiones,

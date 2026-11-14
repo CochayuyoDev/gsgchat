@@ -91,7 +91,7 @@ export function createFakeArchives(): FakeArchives {
       if (!a) return null;
       if (a.resumen === null) {
         a.resumen = resumen;
-        a.etiquetas = [...etiquetas];
+        if (!a.etiquetas.length) a.etiquetas = [...etiquetas];
       }
       return { ...a };
     },

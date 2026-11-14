@@ -128,7 +128,8 @@ export interface ArchivesRepo {
   /**
    * Pone el resumen y las etiquetas SOLO si aun no tiene resumen, en una sola
    * sentencia: el resumen automatico (que llega en segundo plano) nunca pisa
-   * el que una persona puso entre medias. Devuelve como quedo.
+   * el que una persona puso entre medias. Las etiquetas, igual: si una
+   * persona ya puso alguna, no se tocan. Devuelve como quedo.
    */
   ponerResumenSiFalta(id: number, resumen: string, etiquetas: string[]): Promise<ChatArchive | null>;
   remove(id: number): Promise<void>;
@@ -352,7 +353,13 @@ export function createArchivesRepo(pool: Pool): ArchivesRepo {
     },
 
     async ponerResumenSiFalta(id, resumen, etiquetas) {
-      await pool.query('update chat_archives set resumen = $1, etiquetas = $2 where id = $3 and resumen is null', [resumen, JSON.stringify(etiquetas), id]);
+      await pool.query(
+        `update chat_archives
+            set etiquetas = case when coalesce(json_length(etiquetas), 0) > 0 then etiquetas else $1 end,
+                resumen = $2
+          where id = $3 and resumen is null`,
+        [JSON.stringify(etiquetas), resumen, id],
+      );
       return repo.get(id);
     },
 
