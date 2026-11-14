@@ -808,14 +808,16 @@ export interface ServicioEntregas {
    * GSG corrigio el telefono de un pedido: se cambia, se suelta lo que se le
    * pedia al numero viejo y, si aun falta la ubicacion, se le pide al nuevo
    * por el flujo normal (o queda esperando «Confirmar y enviar» si ese ajuste
-   * esta encendido).
+   * esta encendido). Con `reabrirCancelada`, un pedido cancelado que nunca
+   * dio su ubicacion se reabre con el numero nuevo (GSG lo reenvio con el
+   * mismo tracking y otro telefono, p. ej. tras un «sin WhatsApp»).
    */
   /**
    * WhatsApp rechazo despues el numero de ese telefono (sin WhatsApp / no valido): sus pedidos de GSG
    * pasan a su segundo numero si lo tienen. «agotado»: ya se probo o tampoco sirve (numero inaccesible).
    */
   segundoNumeroTrasRechazo(phone: string, codigo: string, motivo: string): Promise<{ accion: 'cambiado' | 'agotado' | 'nada'; detalle?: string }>;
-  corregirTelefono(id: number, telefono: string, quien: string, opciones?: { retener?: boolean }): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }>;
+  corregirTelefono(id: number, telefono: string, quien: string, opciones?: { retener?: boolean; reabrirCancelada?: boolean }): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }>;
   /** Lo que ya se hizo por WhatsApp con cada tracking de `dia` (todos, o solo esos ids). */
   fichasTrackings(dia: string, soloIds?: number[]): Promise<FichaTracking[]>;
   /** La bandeja de errores de mensajes de esta tienda. */
@@ -5053,14 +5055,19 @@ ${lista}
   }
 
   /** GSG corrigio el telefono (ver ServicioEntregas.corregirTelefono). */
-  async function corregirTelefono(id: number, telefono: string, quien: string, opciones: { retener?: boolean } = {}): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }> {
+  async function corregirTelefono(id: number, telefono: string, quien: string, opciones: { retener?: boolean; reabrirCancelada?: boolean } = {}): Promise<{ ok: true; entrega: Entrega; cambiado: boolean } | { ok: false; codigo: 'no_existe' | 'cerrada' | 'telefono_invalido' | 'telefono_de_motorizado'; motivo: string }> {
     const e = await repo.entrega(id);
     if (!e) return { ok: false, codigo: 'no_existe', motivo: 'el pedido no existe' };
-    if (ESTADOS_FINALES.includes(e.estado)) return { ok: false, codigo: 'cerrada', motivo: `el pedido ${e.referencia} ya está cerrado (${e.estado})` };
+    // Cancelado sin ubicacion y GSG lo reenvia con otro numero: se reabre (cambio de numero, 14/11).
+    const reabre = Boolean(opciones.reabrirCancelada) && e.estado === 'cancelada' && e.ubicacionEstado === 'pendiente';
+    if (ESTADOS_FINALES.includes(e.estado) && !reabre) return { ok: false, codigo: 'cerrada', motivo: `el pedido ${e.referencia} ya está cerrado (${e.estado})` };
     const revision = revisarTelefono(String(telefono ?? ''), plan);
     if (!revision.ok) return { ok: false, codigo: 'telefono_invalido', motivo: motivoTelefono(revision) };
     if (await repo.motorizadoPorTelefono(revision.phone).catch(() => null)) return { ok: false, codigo: 'telefono_de_motorizado', motivo: `el ${revision.phone} es el teléfono de un motorizado, no de un cliente` };
-    if (revision.phone === e.phone) return { ok: true, entrega: e, cambiado: false };
+    if (revision.phone === e.phone) {
+      if (reabre) return { ok: false, codigo: 'cerrada', motivo: `el pedido ${e.referencia} está cancelado y llegó con el mismo teléfono` };
+      return { ok: true, entrega: e, cambiado: false };
+    }
     const viejo = e.phone;
     // Lo que se le pedia al numero viejo se suelta (salvo que otro pedido suyo siga esperando).
     await soltarDeLaEntrega(e, `GSG corrigió el teléfono del pedido ${e.referencia}`);
@@ -5092,7 +5099,7 @@ ${lista}
       mensajeWamid: null,
       ...SIN_ERROR,
     })) ?? e;
-    await evento(act, 'sincronizada', `${quien} corrigió el teléfono: ${viejo} → ${revision.phone}${retener ? ' (espera «Confirmar y enviar»)' : ''}`);
+    await evento(act, 'sincronizada', `${quien} corrigió el teléfono: ${viejo} → ${revision.phone}${reabre ? ' y reabrió el pedido cancelado' : ''}${retener ? ' (espera «Confirmar y enviar»)' : ''}`);
     const contacto = await repos.contacts.upsertFromInbound(act.phone, act.nombre ?? undefined);
     if (!contacto.optInAt) await repos.contacts.setOptIn(act.phone, `entrega: pedido ${act.referencia} (teléfono corregido por GSG)`);
     if (!retener) {
