@@ -523,12 +523,17 @@ export async function registerApiEntregasGsg(app: FastifyInstance, deps: ApiEntr
         aceptados.push(p);
         continue;
       }
-      const otro = delDia.find((e) => e.estado !== 'cancelada' && e.phone !== phone && (e.referencia.toLowerCase() === p.referencia.toLowerCase() || String(e.datosEnvio?.tracking ?? '').toLowerCase() === k));
+      const mismoTracking = (e: Entrega) => e.referencia.toLowerCase() === p.referencia.toLowerCase() || String(e.datosEnvio?.tracking ?? '').toLowerCase() === k;
+      // Si el de hoy esta cancelado y nunca dio su ubicacion (GSG o una persona
+      // lo cancelo tras el «sin WhatsApp»), el reenvio con otro numero lo reabre.
+      const vivo = delDia.find((e) => e.estado !== 'cancelada' && mismoTracking(e));
+      const cancelado = vivo ? undefined : delDia.find((e) => e.estado === 'cancelada' && e.ubicacionEstado === 'pendiente' && e.phone !== phone && mismoTracking(e));
+      const otro = vivo && vivo.phone !== phone ? vivo : cancelado;
       if (otro) {
         // El mismo tracking de hoy con otro telefono: GSG corrigio el numero
-        // desde su sistema (p. ej. tras un «numero invalido»). Se cambia el
-        // telefono del pedido y se le escribe al numero nuevo.
-        const r = await entregas.corregirTelefono(otro.id, String(p.telefono), quien);
+        // desde su sistema (p. ej. tras un «numero invalido» o «sin WhatsApp»).
+        // Se cambia el telefono del pedido y se le pide la ubicacion al nuevo.
+        const r = await entregas.corregirTelefono(otro.id, String(p.telefono), quien, cancelado ? { reabrirCancelada: true } : undefined);
         if (r.ok) {
           if (!repetidas.includes(otro.referencia)) repetidas.push(otro.referencia);
           telefonosCorregidos.push({ referencia: otro.referencia, tracking, antes: otro.phone, ahora: r.entrega.phone });
