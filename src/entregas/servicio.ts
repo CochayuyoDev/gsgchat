@@ -292,7 +292,7 @@ export interface FilaEntrega extends Entrega {
   /** Que puede hacer una persona con ella. */
   acciones: string[];
   /** Si el reparto la tiene entre manos, su solicitud. */
-  solicitud?: (Pick<Solicitud, 'id' | 'estado' | 'intentos' | 'incidencia' | 'loteId'> & { esperaEnvio?: EsperaEnvio | null }) | null;
+  solicitud?: (Pick<Solicitud, 'id' | 'estado' | 'intentos' | 'incidencia' | 'loteId'> & { esperaEnvio?: EsperaEnvio | null; primeraRespuestaAt?: Date | null }) | null;
   /** Las referencias de los OTROS pedidos vivos de hoy del mismo cliente (mismo telefono). */
   mismoCliente: string[];
   /** «cambió su ubicación (10:42)»: la marca que ven Hoy, Números del día y la ficha. null = nunca la cambió. */
@@ -5238,7 +5238,7 @@ ${lista}
     let solicitud: FilaEntrega['solicitud'] = null;
     if (e.loteId && e.ubicacionEstado === 'pendiente') {
       const s = solicitudes.get(`${e.loteId}\u0000${e.phone}`);
-      if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId, esperaEnvio: esperaDeEnvio(repos.rutas, s, ahora().getTime()) };
+      if (s) solicitud = { id: s.id, estado: s.estado, intentos: s.intentos, incidencia: s.incidencia, loteId: s.loteId, primeraRespuestaAt: s.primeraRespuestaAt ?? null, esperaEnvio: esperaDeEnvio(repos.rutas, s, ahora().getTime()) };
     }
     return { ...e, motorizado: m ? { id: m.id, nombre: m.nombre, phone: m.phone, placa: m.placa } : null, situacion: situacionDe(e, m, ajustes, tz(), reglaGsgActiva()), acciones: accionesDe(e), solicitud, mismoCliente: [], cambioUbicacion: marcaCambioUbicacion(e, tz()) };
   }
