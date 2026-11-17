@@ -36,6 +36,7 @@ import { crearReportadosRepo, type ReportadosRepo } from '../entregas/reportados
 import { crearMensajesGsgRepo, type MensajesGsgRepo } from './mensajes-gsg.js';
 import { crearPrivacidadRepo, type PrivacidadRepo } from '../privacidad/repo.js';
 import { crearChatEtiquetasRepo, type ChatEtiquetasRepo } from './chat-etiquetas.js';
+import { crearFlujoDisposicionRepo, type FlujoDisposicionRepo } from './flujo-disposicion.js';
 import type { ComoSeDecidio, DecisionBot, IntencionGsg, NuevaDecision } from '../ia/decision.js';
 
 // ---------------------------------------------------------------- modelos
@@ -653,6 +654,8 @@ export interface Repos {
   mensajesGsg?: MensajesGsgRepo;
   /** Las etiquetas que la IA pone a las conversaciones del dia en Chats (migracion 013). Ver src/chat/etiquetar.ts. */
   chatEtiquetas?: ChatEtiquetasRepo;
+  /** Donde dejo cada cuadro del flujo de Inicio el administrador (tabla settings). Ver src/db/flujo-disposicion.ts. */
+  flujoDisposicion?: FlujoDisposicionRepo;
   /** Lo que el cliente pide sobre sus datos (BAJA, borrarlos) y el borrado (migracion 020). Ver src/privacidad. */
   privacidad?: PrivacidadRepo;
 }
@@ -2087,6 +2090,7 @@ export function createRepos(pool: Pool): Repos {
     reportados: crearReportadosRepo(pool),
     mensajesGsg: crearMensajesGsgRepo(pool),
     chatEtiquetas: crearChatEtiquetasRepo(pool),
+    flujoDisposicion: crearFlujoDisposicionRepo(pool),
     privacidad: crearPrivacidadRepo(pool),
     desarrollador: createDesarrolladorRepo(pool),
     procesos: createProcesosRepo(pool),

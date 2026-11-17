@@ -16,7 +16,7 @@
  * cuenta (`contarFlujo`) es pura para poder probarla sin servidor.
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Repos } from '../db/repos.js';
 import type { EstadoSolicitud } from '../db/rutas.js';
 import type { EstadoEntrega, EstadoMensaje, EstadoUbicacion } from '../entregas/repo.js';
@@ -28,6 +28,7 @@ import { nombreDeEtiqueta } from '../archive/clasificar.js';
 import { catalogoVigente } from '../chat/etiquetar.js';
 import { esQuejaDePedido } from '../ia/consulta-pedido.js';
 import type { RegistroClientes } from '../whatsapp/registro.js';
+import type { DisposicionFlujo } from '../db/flujo-disposicion.js';
 
 /** Lo mínimo de un pedido de hoy que hace falta para contarlo en el flujo. */
 export interface PedidoEnFlujo {
@@ -429,8 +430,61 @@ export interface LineaEnFlujo {
 
 export const tipoDeLinea = (p: Provider): LineaEnFlujo['tipo'] => (p === 'cloud' ? 'api' : 'business');
 
+/**
+ * Los cuadros del flujo que el administrador puede mover (los ids de
+ * `nodo({id:…})` en src/web/flujo-inicio.ts; una prueba comprueba que coinciden).
+ */
+export const NODOS_DEL_FLUJO = [
+  'gsg', 'revisar', 'confirmar', 'cola', 'primero', 'estado', 'responde',
+  'empresa', 'reportado', 'reporte1', 'lineas', 'ia', 'errorEnvio',
+  'ubicacion', 'esahi', 'segundo', 'agsg', 'listo', 'cambia',
+  'otra', 'chat', 'chat2', 'queja',
+  'insiste', 'agoto', 'persona', 'reporte2',
+] as const;
+const NODOS_CONOCIDOS = new Set<string>(NODOS_DEL_FLUJO);
+/** Hasta dónde se puede llevar un cuadro (el lienzo mide 1600 × 1430). */
+export const LIMITES_DISPOSICION = { min: -400, maxX: 3200, maxY: 3200 };
+
+export class DisposicionInvalida extends Error {}
+
+/**
+ * Valida lo que manda el panel: un objeto `{ id: [x, y] }` con ids conocidos y
+ * números finitos dentro del lienzo. Devuelve las posiciones redondeadas a
+ * la rejilla de 10 px. Lanza DisposicionInvalida si algo no cuadra.
+ */
+export function limpiarDisposicion(entrada: unknown): DisposicionFlujo {
+  if (!entrada || typeof entrada !== 'object' || Array.isArray(entrada)) throw new DisposicionInvalida('Falta la posición de los cuadros.');
+  const pares = Object.entries(entrada as Record<string, unknown>);
+  if (pares.length > NODOS_DEL_FLUJO.length) throw new DisposicionInvalida('Hay más cuadros de los que tiene el flujo.');
+  const salida: DisposicionFlujo = {};
+  for (const [id, pos] of pares) {
+    if (!NODOS_CONOCIDOS.has(id)) throw new DisposicionInvalida(`El flujo no tiene un cuadro «${id.slice(0, 40)}».`);
+    if (!Array.isArray(pos) || pos.length !== 2) throw new DisposicionInvalida(`La posición de «${id}» no es válida.`);
+    const [x, y] = pos;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) throw new DisposicionInvalida(`La posición de «${id}» no es válida.`);
+    const { min, maxX, maxY } = LIMITES_DISPOSICION;
+    if (x < min || x > maxX || y < min || y > maxY) throw new DisposicionInvalida(`«${id}» quedó fuera del lienzo.`);
+    salida[id] = [Math.round(x / 10) * 10, Math.round(y / 10) * 10];
+  }
+  return salida;
+}
+
+/** Lo guardado, sin los cuadros que ya no existen ni posiciones raras (por si cambió el flujo). */
+function disposicionLegible(d: DisposicionFlujo | null): DisposicionFlujo {
+  const salida: DisposicionFlujo = {};
+  for (const [id, pos] of Object.entries(d ?? {})) {
+    if (!NODOS_CONOCIDOS.has(id) || !Array.isArray(pos)) continue;
+    try {
+      Object.assign(salida, limpiarDisposicion({ [id]: pos }));
+    } catch {
+      // Una posición que ya no vale se ignora: el cuadro vuelve a su sitio de fábrica.
+    }
+  }
+  return salida;
+}
+
 export interface FlujoDeps {
-  repos: Pick<Repos, 'usuarios' | 'contacts' | 'deliveries' | 'messages' | 'reportados' | 'chatEtiquetas'>;
+  repos: Pick<Repos, 'usuarios' | 'contacts' | 'deliveries' | 'messages' | 'reportados' | 'chatEtiquetas' | 'flujoDisposicion'>;
   settings: SettingsService;
   fuentes: FuentesConexion;
   nombreNegocio: () => string;
@@ -477,7 +531,33 @@ async function lineasDelFlujo(deps: FlujoDeps): Promise<LineaEnFlujo[]> {
 }
 
 export async function registerFlujoRoutes(app: FastifyInstance, deps: FlujoDeps): Promise<void> {
-  app.get('/admin/flujo', async () => {
+  // El orden de los cuadros lo decide un administrador de la tienda y lo ve todo su equipo.
+  const puedeOrdenar = (request: FastifyRequest) => request.usuario?.rol === 'admin' && !request.usuario.porToken;
+  const sinAlmacen = { error: 'Esta instalación no puede guardar el orden del flujo.' };
+  app.put('/admin/flujo/disposicion', { bodyLimit: 8 * 1024 }, async (request, reply) => {
+    const almacen = deps.repos.flujoDisposicion;
+    if (!almacen) return reply.code(404).send(sinAlmacen);
+    if (!puedeOrdenar(request)) return reply.code(403).send({ error: 'Solo un administrador puede ordenar el flujo.' });
+    let nodos: DisposicionFlujo;
+    try {
+      nodos = limpiarDisposicion((request.body as { nodos?: unknown } | undefined)?.nodos);
+    } catch (e) {
+      if (e instanceof DisposicionInvalida) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+    if (Object.keys(nodos).length) await almacen.guardar(nodos);
+    else await almacen.borrar();
+    return { disposicion: nodos };
+  });
+  app.delete('/admin/flujo/disposicion', async (request, reply) => {
+    const almacen = deps.repos.flujoDisposicion;
+    if (!almacen) return reply.code(404).send(sinAlmacen);
+    if (!puedeOrdenar(request)) return reply.code(403).send({ error: 'Solo un administrador puede ordenar el flujo.' });
+    await almacen.borrar();
+    return { disposicion: {} };
+  });
+
+  app.get('/admin/flujo', async (request) => {
     const inicioHoy = new Date();
     inicioHoy.setHours(0, 0, 0, 0);
     const [usuarios, lineas, resumen, mensajes, sinLeer, reportados] = await Promise.all([
@@ -525,6 +605,9 @@ export async function registerFlujoRoutes(app: FastifyInstance, deps: FlujoDeps)
       reportes: resumen?.gsgCola ?? null,
       ia: deps.ia ? { activa: deps.ia.activa() } : null,
       disponible: Boolean(deps.entregas),
+      // Dónde dejó el administrador cada cuadro (vacío = el orden de fábrica).
+      disposicion: disposicionLegible(deps.repos.flujoDisposicion ? await deps.repos.flujoDisposicion.leer().catch(() => null) : null),
+      puedeOrdenar: Boolean(deps.repos.flujoDisposicion) && puedeOrdenar(request),
     };
   });
 }

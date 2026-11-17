@@ -24,7 +24,7 @@ interface TiendaDePrueba {
   base: BaseDePrueba;
   raiz: string;
   cookie: string;
-  api: (method: 'GET' | 'POST', url: string, payload?: unknown, cookie?: string) => Promise<{ status: number; body: any; texto: string }>;
+  api: (method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: unknown, cookie?: string) => Promise<{ status: number; body: any; texto: string }>;
 }
 
 async function tiendaDePrueba(slug: string, nombre: string): Promise<TiendaDePrueba> {
@@ -141,5 +141,60 @@ describe('todas las tiendas ven su propio flujo de GSGchat', () => {
   it('sin sesión no se ve el flujo de nadie', async () => {
     const r = await a.tienda.app.inject({ method: 'GET', url: '/admin/flujo' });
     expect(r.statusCode).toBe(401);
+  });
+
+  it('el administrador ordena los cuadros a su gusto y queda guardado en su tienda', async () => {
+    const antes = await a.api('GET', '/admin/flujo');
+    expect(antes.body.disposicion).toEqual({});
+    expect(antes.body.puedeOrdenar).toBe(true);
+    const guardado = await a.api('PUT', '/admin/flujo/disposicion', { nodos: { gsg: [123, 456], queja: [1500, 1300.4] } });
+    expect(guardado.status, guardado.texto).toBe(200);
+    // Se ajusta a la rejilla de 10 px.
+    expect(guardado.body.disposicion).toEqual({ gsg: [120, 460], queja: [1500, 1300] });
+    expect((await a.api('GET', '/admin/flujo')).body.disposicion).toEqual({ gsg: [120, 460], queja: [1500, 1300] });
+    // La otra tienda sigue con el orden de fábrica.
+    expect((await b.api('GET', '/admin/flujo')).body.disposicion).toEqual({});
+    // Volver a guardar reemplaza todo (no se acumulan cuadros viejos).
+    await a.api('PUT', '/admin/flujo/disposicion', { nodos: { cola: [700, 100] } });
+    expect((await a.api('GET', '/admin/flujo')).body.disposicion).toEqual({ cola: [700, 100] });
+    // «Restablecer orden» lo borra.
+    expect((await a.api('DELETE', '/admin/flujo/disposicion')).status).toBe(200);
+    expect((await a.api('GET', '/admin/flujo')).body.disposicion).toEqual({});
+  }, 60_000 * LENTO);
+
+  it('no se guarda una disposición rara', async () => {
+    for (const nodos of [
+      { noExiste: [10, 10] },
+      { gsg: ['10', 10] },
+      { gsg: [10] },
+      { gsg: [99999, 10] },
+      { gsg: [10, -5000] },
+      [[10, 10]],
+      null,
+    ]) {
+      const r = await a.api('PUT', '/admin/flujo/disposicion', { nodos });
+      expect(r.status, JSON.stringify(nodos)).toBe(400);
+    }
+    // Un cuerpo enorme no entra.
+    const enorme = await a.api('PUT', '/admin/flujo/disposicion', { nodos: { gsg: [10, 10] }, relleno: 'x'.repeat(20_000) });
+    expect(enorme.status).toBe(413);
+    expect((await a.api('GET', '/admin/flujo')).body.disposicion).toEqual({});
+  });
+
+  it('un operador ve el orden del administrador pero no lo cambia; sin sesión, nada', async () => {
+    await a.api('PUT', '/admin/flujo/disposicion', { nodos: { estado: [1000, 200] } });
+    const login = await a.tienda.app.inject({ method: 'POST', url: '/login', payload: { usuario: 'rosa-op', clave: 'rosa-clave-2026' } });
+    const cookieOp = String(login.headers['set-cookie']).split(';')[0]!;
+    const flujo = await a.api('GET', '/admin/flujo', undefined, cookieOp);
+    expect(flujo.body.disposicion).toEqual({ estado: [1000, 200] });
+    expect(flujo.body.puedeOrdenar).toBe(false);
+    expect((await a.api('PUT', '/admin/flujo/disposicion', { nodos: {} }, cookieOp)).status).toBe(403);
+    expect((await a.api('DELETE', '/admin/flujo/disposicion', undefined, cookieOp)).status).toBe(403);
+    for (const method of ['PUT', 'DELETE'] as const) {
+      const r = await a.tienda.app.inject({ method, url: '/admin/flujo/disposicion', headers: { 'content-type': 'application/json' }, payload: method === 'PUT' ? '{"nodos":{}}' : undefined });
+      expect(r.statusCode).toBe(401);
+    }
+    expect((await a.api('GET', '/admin/flujo')).body.disposicion).toEqual({ estado: [1000, 200] });
+    await a.api('DELETE', '/admin/flujo/disposicion');
   });
 });

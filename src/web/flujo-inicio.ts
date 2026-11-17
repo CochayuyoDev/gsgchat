@@ -130,6 +130,12 @@ export const FLUJO_CSS = `
 .fl-herr{position:absolute;left:12px;bottom:12px;display:flex;gap:6px;z-index:2}
 .fl-herr button{width:34px;height:34px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--fl-borde);background:var(--fl-nodo);color:var(--fl-txt);cursor:pointer;padding:0}
 .fl-herr button:hover{border-color:var(--fl-txt)}.fl-herr svg{width:17px;height:17px}
+.fl-herr button.fl-texto{width:auto;padding:0 11px;font:inherit;font-size:12.5px;font-weight:600}.fl-herr button[hidden]{display:none}
+.fl-guardado{align-self:center;font-size:12px;color:var(--fl-sub);padding:0 4px;white-space:nowrap}.fl-guardado.mal{color:var(--fl-mal)}
+/* Ordenar a gusto: el administrador toma un cuadro y lo suelta donde quiera. */
+.fl[data-ordenar="1"] .fl-nodo{touch-action:none;cursor:grab}
+.fl-marco.moviendo,.fl-marco.moviendo .fl-nodo{cursor:grabbing}
+.fl-nodo.levantado{z-index:2}.fl-nodo.levantado .fl-caja{border-color:var(--fl-txt);box-shadow:0 12px 26px #0009,0 0 0 4px #ffffff26}
 .fl-zoom{position:absolute;right:12px;bottom:12px;z-index:2;font-size:11.5px;color:var(--fl-sub);background:#1f2023cc;padding:3px 8px;border-radius:6px}
 /* El detalle de un nodo: un panel a la derecha, como al abrir un nodo. */
 .fl-panel{position:absolute;top:0;right:0;bottom:0;width:min(360px,92%);z-index:3;background:#1f2023;border-left:1px solid #3a3b3f;box-shadow:-12px 0 30px #0006;display:flex;flex-direction:column;transform:translateX(105%);visibility:hidden;transition:transform .25s ease,visibility .25s;cursor:auto;user-select:text}
@@ -159,7 +165,7 @@ export const FLUJO_CSS = `
 export const FLUJO_HTML = `<section class="fl" id="flujo-gsg" data-abierto="0" aria-labelledby="flujo-titulo">
 <div class="fl-cab"><span class="fl-cab-ico" aria-hidden="true">${ico('rayo')}</span><div><h2 id="flujo-titulo">Flujo de GSGchat</h2><p>El recorrido completo de cada pedido: de GSG a tu WhatsApp, la respuesta del cliente y lo que vuelve a GSG.</p></div><div class="fl-acciones"><span class="fl-hora" id="flujo-hora"></span><button type="button" class="fl-boton fl-nov" id="flujo-novedades" aria-controls="flujo-panel">${ico('novedades')}<span id="flujo-novedades-txt">Novedades de hoy</span></button><button type="button" class="fl-boton" id="flujo-boton" aria-expanded="false" aria-controls="flujo-marco"><span id="flujo-boton-txt">Desplegar todo</span>${ico('chevron')}</button></div></div>
 <div class="fl-marco" id="flujo-marco"><div class="fl-lienzo" id="flujo-lienzo" aria-live="polite"><p style="margin:24px;color:#a3a5ab">Dibujando el flujo…</p></div>
-<div class="fl-herr" role="toolbar" aria-label="Mover el flujo"><button type="button" id="flujo-encajar" title="Encajar todo" aria-label="Encajar todo">${ico('encajar')}</button><button type="button" id="flujo-acercar" title="Acercar" aria-label="Acercar">${ico('mas')}</button><button type="button" id="flujo-alejar" title="Alejar" aria-label="Alejar">${ico('menos')}</button><button type="button" id="flujo-completa" title="Pantalla completa" aria-label="Pantalla completa">${ico('completa')}</button></div>
+<div class="fl-herr" role="toolbar" aria-label="Mover el flujo"><button type="button" id="flujo-encajar" title="Encajar todo" aria-label="Encajar todo">${ico('encajar')}</button><button type="button" id="flujo-acercar" title="Acercar" aria-label="Acercar">${ico('mas')}</button><button type="button" id="flujo-alejar" title="Alejar" aria-label="Alejar">${ico('menos')}</button><button type="button" id="flujo-completa" title="Pantalla completa" aria-label="Pantalla completa">${ico('completa')}</button><button type="button" class="fl-texto" id="flujo-restablecer" title="Devolver cada cuadro a su sitio de fábrica" hidden>Restablecer orden</button><span class="fl-guardado" id="flujo-guardado" role="status" aria-live="polite"></span></div>
 <span class="fl-zoom" id="flujo-zoom" aria-hidden="true"></span>
 <aside class="fl-panel" id="flujo-panel" aria-label="Detalle del paso" aria-hidden="true"></aside></div>
 <p class="fl-pie" id="flujo-pie">Toca un paso para ver su detalle. Arrastra para mover; <kbd>Ctrl</kbd> + rueda para acercar.</p>
@@ -172,7 +178,9 @@ export const FLUJO_HTML = `<section class="fl" id="flujo-gsg" data-abierto="0" a
 export const FLUJO_SCRIPT = String.raw`
 var FL_ICO=${JSON.stringify(Object.fromEntries(Object.keys(SVG).map((k) => [k, ico(k)])))};
 /* --- El lienzo: medidas fijas, con su vista (posición y zoom) --- */
-var FL={ancho:1600,altoPlegado:440,altoAbierto:1430,t:84,c:72,vista:{x:0,y:0,k:1},nodos:{},datos:null,elegido:null};
+var FL={ancho:1600,altoPlegado:440,altoAbierto:1430,t:84,c:72,vista:{x:0,y:0,k:1},nodos:{},datos:null,elegido:null,
+ /* pos: dónde dejó el administrador cada cuadro movido (se guarda en la tienda); fabrica: el sitio de fábrica. */
+ pos:{},fabrica:{},modelo:null,aj:null,puedeOrdenar:false,arrastrando:false,guardando:null,pendiente:false};
 function flX(i){return 80+i*205;}
 var FL_Y={a:70,sub:290,b:520,b2:640,c:850,c2:1020,d:1240};
 var flAbierto=false;try{flAbierto=localStorage.getItem('gsgchat:flujo-desplegado')==='1';}catch(e){}
@@ -304,31 +312,44 @@ linea({de:'insiste',a:'agoto',cuenta:r.esperando?String(r.esperando):'',tono:'',
 linea({de:'agoto',s:0,a:'persona',cuenta:r.noContesto?String(r.noContesto):'',tono:tono(r.noContesto,'ambar'),grupo:'abierto'});
 linea({de:'agoto',s:1,a:'insiste',grupo:'abierto',vuelta:true,ruta:function(a,b){return [[a.x,a.y],[a.x+26,a.y],[a.x+26,1395],[b.x-28,1395],[b.x-28,b.y],[b.x,b.y]];},cuentaEn:[flX(2),1395],cuenta:'vuelve a escribirle',tono:''});
 linea({de:'persona',a:'reporte2',tono:tono(r.noContesto,'ambar'),grupo:'abierto'});
+/* El orden que dejó el administrador: cada cuadro movido va a su sitio; el resto, al de fábrica. */
+N.forEach(function(n){FL.fabrica[n.id]=[n.x,n.y];var p=FL.pos[n.id];if(p&&isFinite(p[0])&&isFinite(p[1])){n.x=p[0];n.y=p[1];}});
 return {N:N,E:E};}
+/* --- Cuadros movidos: las líneas buscan su propio camino --- */
+function flMovido(n){var f=FL.fabrica[n.id];return !!f&&(f[0]!==n.x||f[1]!==n.y);}
+/* Si el destino queda detrás (o casi encima) del origen, se rodea por debajo de los dos cuadros. */
+function flRutaAuto(A,B,a,b){if(b.x-a.x>=60)return null;var lejos=Math.abs(a.y-b.y)>Math.max(flAlto(A),flAlto(B))+90;var my=lejos?Math.round((a.y+b.y)/2):Math.max(A.y+flAlto(A),B.y+flAlto(B))+70;var x1=a.x+24,x2=b.x-30;return {pts:[[a.x,a.y],[x1,a.y],[x1,my],[x2,my],[x2,b.y],[b.x,b.y]],cuenta:[(x1+x2)/2,my]};}
 /* --- Dibujo --- */
-function flClaseGrupo(g){return g?' fl-anima fl-g-'+g:'';}
-function flPintar(d,aj){FL.nodos={};var m=flModelo(d,aj),svg=[],html=[],cuentas=[];
+function flClaseGrupo(g){return g?' fl-anima fl-g-'+g+((g==='abierto'&&!flAbierto)||(g==='plegado'&&flAbierto)?' fl-oculto':''):'';}
+function flPintar(d,aj){FL.nodos={};FL.fabrica={};var m=flModelo(d,aj),html=[];FL.modelo=m;
+m.N.forEach(function(n){var marca=n.tono==='ok'?FL_ICO.ok:n.tono==='mal'||n.tono==='ambar'?FL_ICO.alerta:'';var cls=(n.forma==='disparo'?' disparo':'')+(n.forma==='circulo'?' circulo':'')+flClaseGrupo(n.grupo);
+ html.push('<button type="button" class="fl-nodo'+cls+'" data-nodo="'+n.id+'" data-tono="'+(n.tono||'')+'" style="left:'+n.x+'px;top:'+n.y+'px;--t:'+flTam(n)+'px;--h:'+flAlto(n)+'px;--c:'+n.color+'" aria-label="'+esc(n.nombre+'. '+String(n.sub||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' '))+'. Ver detalle">'+(n.forma==='disparo'?'<span class="fl-rayo">'+FL_ICO.rayo+'</span>':'')+'<span class="fl-caja">'+FL_ICO[n.ico]+(marca?'<span class="fl-marca">'+marca+'</span>':'')+'</span><span class="fl-nombre">'+esc(n.nombre)+(n.sub?'<span class="fl-sub">'+n.sub+'</span>':'')+'</span></button>');});
+/* Las etiquetas de cada rama, a la izquierda. */
+[['Ubicación',FL_Y.b,'ok'],['Otra cosa',FL_Y.c,'ambar'],['No contesta',FL_Y.d,'gris']].forEach(function(r){html.push('<span class="fl-rama '+r[2]+flClaseGrupo('abierto')+'" style="left:'+(flX(0)-10)+'px;top:'+(r[1]+FL.t/2)+'px">'+r[0]+'</span>');});
+$('flujo-lienzo').innerHTML='<svg class="fl-lineas" id="flujo-svg" width="'+FL.ancho+'" height="'+FL.altoAbierto+'" aria-hidden="true"></svg>'+html.join('')+'<div id="flujo-extras"></div>';
+$('flujo-lienzo').style.width=FL.ancho+'px';$('flujo-lienzo').style.height=FL.altoAbierto+'px';flLineas();}
+/* Las líneas, sus puertos y sus cifras: se vuelven a dibujar cada vez que se mueve un cuadro. */
+function flLineas(){var m=FL.modelo;if(!m||!$('flujo-svg'))return;var svg=[],html=[],cuentas=[];
 m.E.forEach(function(e){var A=FL.nodos[e.de],B=e.a?FL.nodos[e.a]:null,g=e.grupo||(B&&B.grupo)||A.grupo||'';var cls=flClaseGrupo(g);
  if(e.sub){var p1={x:A.x+FL.c/2,y:A.y},p2={x:B.x+(B.ancho||FL.t)/2,y:B.y+flAlto(B)};svg.push('<path class="sub'+cls+'" d="M'+p1.x+' '+p1.y+' L'+p2.x+' '+(p2.y+8)+'"/><path class="rombo'+cls+'" d="M'+p2.x+' '+(p2.y+1)+' l5 6 -5 6 -5 -6z"/>');return;}
  var a=flSalida(A,e.s||0),t=e.tono||'';svg.push('<circle class="puerto'+cls+'" cx="'+a.x+'" cy="'+a.y+'" r="5.5"/>');
  if(A.salidas&&A.salidas.length>1)svg.push('<text class="'+(e.cabo?t:'')+cls+'" x="'+(a.x+9)+'" y="'+(a.y-4)+'">'+esc(A.salidas[e.s||0])+(e.cabo&&e.cuenta?' · '+esc(e.cuenta):'')+'</text>');
  if(e.cabo){var fin=a.x+86;svg.push('<path class="'+t+cls+'" d="M'+a.x+' '+a.y+' L'+fin+' '+a.y+'"/>');html.push('<span class="fl-mas'+cls+'" style="left:'+fin+'px;top:'+a.y+'px" aria-hidden="true">+</span>');return;}
- var b=flEntrada(B),dd=e.ruta?flTramos(e.ruta(a,b)):flCurva(a,{x:b.x-2,y:b.y});
+ var b=flEntrada(B),mov=flMovido(A)||flMovido(B),pts=e.ruta&&!mov?e.ruta(a,b):null,cuentaEn=mov?null:e.cuentaEn;
+ if(mov&&!pts){var au=flRutaAuto(A,B,a,b);if(au){pts=au.pts;cuentaEn=au.cuenta;}}
+ var dd=pts?flTramos(pts):flCurva(a,{x:b.x-2,y:b.y});
  svg.push('<path class="'+t+(e.anda?' anda':'')+(e.vuelta?' vuelta':'')+cls+'" d="'+dd+'"/><path class="punta '+t+cls+'" d="M'+(b.x-9)+' '+(b.y-5)+' L'+b.x+' '+b.y+' L'+(b.x-9)+' '+(b.y+5)+' Z"/>');
- if(e.cuenta){var cx=e.cuentaEn?e.cuentaEn[0]:(a.x+b.x)/2,cy=e.cuentaEn?e.cuentaEn[1]:(a.y+b.y)/2;cuentas.push('<span class="fl-cuenta '+t+cls+'" style="left:'+cx+'px;top:'+cy+'px">'+esc(e.cuenta)+'</span>');}});
-/* Las salidas sin uso visible (las de la rama no contesta en el lienzo plegado no llevan puerto doble). */
-m.N.forEach(function(n){var marca=n.tono==='ok'?FL_ICO.ok:n.tono==='mal'||n.tono==='ambar'?FL_ICO.alerta:'';var cls=(n.forma==='disparo'?' disparo':'')+(n.forma==='circulo'?' circulo':'')+flClaseGrupo(n.grupo);
- html.push('<button type="button" class="fl-nodo'+cls+'" data-nodo="'+n.id+'" data-tono="'+(n.tono||'')+'" style="left:'+n.x+'px;top:'+n.y+'px;--t:'+flTam(n)+'px;--h:'+flAlto(n)+'px;--c:'+n.color+'" aria-label="'+esc(n.nombre+'. '+String(n.sub||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' '))+'. Ver detalle">'+(n.forma==='disparo'?'<span class="fl-rayo">'+FL_ICO.rayo+'</span>':'')+'<span class="fl-caja">'+FL_ICO[n.ico]+(marca?'<span class="fl-marca">'+marca+'</span>':'')+'</span><span class="fl-nombre">'+esc(n.nombre)+(n.sub?'<span class="fl-sub">'+n.sub+'</span>':'')+'</span></button>');});
-/* Las etiquetas de cada rama, a la izquierda. */
-[['Ubicación',FL_Y.b,'ok'],['Otra cosa',FL_Y.c,'ambar'],['No contesta',FL_Y.d,'gris']].forEach(function(r){html.push('<span class="fl-rama '+r[2]+flClaseGrupo('abierto')+'" style="left:'+(flX(0)-10)+'px;top:'+(r[1]+FL.t/2)+'px">'+r[0]+'</span>');});
-$('flujo-lienzo').innerHTML='<svg class="fl-lineas" width="'+FL.ancho+'" height="'+FL.altoAbierto+'" aria-hidden="true">'+svg.join('')+'</svg>'+html.join('')+cuentas.join('');
-$('flujo-lienzo').style.width=FL.ancho+'px';$('flujo-lienzo').style.height=FL.altoAbierto+'px';}
+ if(e.cuenta){var cx=cuentaEn?cuentaEn[0]:(a.x+b.x)/2,cy=cuentaEn?cuentaEn[1]:(a.y+b.y)/2;cuentas.push('<span class="fl-cuenta '+t+cls+'" style="left:'+cx+'px;top:'+cy+'px">'+esc(e.cuenta)+'</span>');}});
+$('flujo-svg').innerHTML=svg.join('');$('flujo-extras').innerHTML=html.join('')+cuentas.join('');}
 /* --- Vista: encajar, zoom y arrastre --- */
-function flAltoContenido(){return flAbierto?FL.altoAbierto:FL.altoPlegado;}
-function flKEncaje(){var marco=$('flujo-marco'),w=marco.clientWidth||FL.ancho;return Math.max(0.5,Math.min(1,(w-24)/FL.ancho));}
+/* Lo que ocupa lo visible: si un cuadro se llevó más abajo o más a la derecha, el lienzo crece con él. */
+function flVisibles(){var l=[];Object.keys(FL.nodos).forEach(function(id){var n=FL.nodos[id];if(flAbierto||n.grupo!=='abierto')l.push(n);});return l;}
+function flAltoContenido(){var base=flAbierto?FL.altoAbierto:FL.altoPlegado;return flVisibles().reduce(function(h,n){return Math.max(h,n.y+flAlto(n)+90);},base);}
+function flAnchoContenido(){return flVisibles().reduce(function(w,n){return Math.max(w,n.x+flAncho(n)+150);},FL.ancho);}
+function flKEncaje(){var marco=$('flujo-marco'),w=marco.clientWidth||FL.ancho;return Math.max(0.5,Math.min(1,(w-24)/flAnchoContenido()));}
 function flAltoMarco(){var sec=$('flujo-gsg');if(document.fullscreenElement===sec)return;$('flujo-marco').style.height=Math.round(flAltoContenido()*flKEncaje()+64)+'px';}
 function flVer(){var v=FL.vista;$('flujo-lienzo').style.transform='translate('+v.x+'px,'+v.y+'px) scale('+v.k+')';var z=$('flujo-zoom');if(z)z.textContent=Math.round(v.k*100)+'%';}
-function flEncajar(){var marco=$('flujo-marco'),w=marco.clientWidth||FL.ancho,h=marco.clientHeight||400,k=flKEncaje();if(document.fullscreenElement===$('flujo-gsg'))k=Math.max(0.3,Math.min(1.2,(w-24)/FL.ancho,(h-24)/flAltoContenido()));FL.vista={k:k,x:Math.max(12,(w-FL.ancho*k)/2),y:10};flVer();}
+function flEncajar(){var marco=$('flujo-marco'),w=marco.clientWidth||FL.ancho,h=marco.clientHeight||400,k=flKEncaje();if(document.fullscreenElement===$('flujo-gsg'))k=Math.max(0.3,Math.min(1.2,(w-24)/flAnchoContenido(),(h-24)/flAltoContenido()));FL.vista={k:k,x:Math.max(12,(w-flAnchoContenido()*k)/2),y:10};flVer();}
 function flZoom(f,cx,cy){var v=FL.vista,marco=$('flujo-marco');if(cx==null){cx=marco.clientWidth/2;cy=marco.clientHeight/2;}var k=Math.max(0.3,Math.min(2,v.k*f));v.x=cx-(cx-v.x)*k/v.k;v.y=cy-(cy-v.y)*k/v.k;v.k=k;flVer();}
 function flAplicar(){var sec=$('flujo-gsg');if(!sec)return;sec.setAttribute('data-abierto',flAbierto?'1':'0');$('flujo-boton').setAttribute('aria-expanded',String(flAbierto));$('flujo-boton-txt').textContent=flAbierto?'Plegar':'Desplegar todo';
 sec.querySelectorAll('.fl-g-abierto').forEach(function(e){e.classList.toggle('fl-oculto',!flAbierto);});sec.querySelectorAll('.fl-g-plegado').forEach(function(e){e.classList.toggle('fl-oculto',flAbierto);});
@@ -363,6 +384,14 @@ flMostrarPanel('<span class="fl-panel-ico" style="--c:#f5b84a">'+FL_ICO.novedade
 $('flujo-panel').querySelectorAll('[data-nov]').forEach(function(b){b.addEventListener('click',function(){flFiltroNov=b.getAttribute('data-nov');flNovedades();});});}
 function flTotalNovedades(){var cs=(FL.datos&&FL.datos.casos)||{};return FL_NOVEDADES.reduce(function(s,t){return s+((cs[t[0]]||{}).total||0);},0);}
 function flCerrarPanel(){var p=$('flujo-panel');if(!p)return;FL.verNov=false;var antes=FL.elegido;p.classList.remove('abierto');p.setAttribute('aria-hidden','true');FL.elegido=null;document.querySelectorAll('#flujo-lienzo .fl-nodo.elegido').forEach(function(b){b.classList.remove('elegido');});var b=antes&&document.querySelector('#flujo-lienzo [data-nodo="'+antes+'"]');if(b)b.focus({preventScroll:true});}
+/* --- El orden de los cuadros: se guarda en la tienda un momento después de soltar --- */
+function flAnotarPosiciones(){var pos={};Object.keys(FL.nodos).forEach(function(id){var n=FL.nodos[id];if(flMovido(n))pos[id]=[n.x,n.y];});FL.pos=pos;flBotonRestablecer();}
+function flBotonRestablecer(){var b=$('flujo-restablecer');if(b)b.hidden=!(FL.puedeOrdenar&&Object.keys(FL.pos).length);}
+function flEstadoOrden(t,mal){var s=$('flujo-guardado');if(!s)return;clearTimeout(FL.tEstado);s.textContent=t;s.classList.toggle('mal',!!mal);if(t&&!mal&&t!=='Guardando…')FL.tEstado=setTimeout(function(){s.textContent='';},2500);}
+function flGuardarOrden(){clearTimeout(FL.tGuardar);FL.pendiente=true;flEstadoOrden('Guardando…');FL.tGuardar=setTimeout(function(){FL.pendiente=false;var envio=FL.pos;
+ FL.guardando=api('/admin/flujo/disposicion','PUT',{nodos:envio}).then(function(){FL.guardando=null;if(!FL.pendiente)flEstadoOrden('Guardado');}).catch(function(e){FL.guardando=null;flEstadoOrden('No se guardó: '+e.message,true);});},600);}
+async function flRestablecerOrden(){clearTimeout(FL.tGuardar);FL.pendiente=false;try{await api('/admin/flujo/disposicion','DELETE');}catch(e){flEstadoOrden('No se pudo restablecer: '+e.message,true);return;}
+ FL.pos={};flPintar(FL.datos,FL.aj);flBotonRestablecer();flAltoMarco();flEncajar();if(FL.elegido&&FL.nodos[FL.elegido])flAbrirPanel(FL.elegido);flEstadoOrden('Orden de fábrica');}
 var flListo=false;
 function flPreparar(){if(flListo)return;flListo=true;var marco=$('flujo-marco'),arr=null;
 $('flujo-boton').addEventListener('click',function(){flAbierto=!flAbierto;try{localStorage.setItem('gsgchat:flujo-desplegado',flAbierto?'1':'0');}catch(e){}flAplicar();});
@@ -370,10 +399,16 @@ $('flujo-novedades').addEventListener('click',function(){if(FL.verNov){flCerrarP
 $('flujo-completa').addEventListener('click',function(){var sec=$('flujo-gsg');if(document.fullscreenElement)document.exitFullscreen();else if(sec.requestFullscreen)sec.requestFullscreen().catch(function(){});});
 document.addEventListener('fullscreenchange',function(){if(document.fullscreenElement!==$('flujo-gsg'))flAltoMarco();setTimeout(flEncajar,60);});
 /* Arrastrar el lienzo (no sobre un nodo ni las herramientas); un toque sin arrastre sobre un nodo abre su detalle. */
-marco.addEventListener('pointerdown',function(ev){if(ev.button!==0||ev.target.closest('.fl-herr,.fl-panel'))return;arr={x:ev.clientX,y:ev.clientY,vx:FL.vista.x,vy:FL.vista.y,movio:false,nodo:ev.target.closest('.fl-nodo'),id:ev.pointerId};});
-marco.addEventListener('pointermove',function(ev){if(!arr||ev.pointerId!==arr.id)return;var dx=ev.clientX-arr.x,dy=ev.clientY-arr.y;if(!arr.movio&&Math.hypot(dx,dy)<5)return;if(!arr.movio){arr.movio=true;marco.classList.add('arrastrando');try{marco.setPointerCapture(ev.pointerId);}catch(e){}}FL.vista.x=arr.vx+dx;FL.vista.y=arr.vy+dy;flVer();});
-function soltar(ev){if(!arr)return;var a=arr;arr=null;marco.classList.remove('arrastrando');if(!a.movio&&a.nodo)flAbrirPanel(a.nodo.getAttribute('data-nodo'));}
-marco.addEventListener('pointerup',soltar);marco.addEventListener('pointercancel',function(){arr=null;marco.classList.remove('arrastrando');});
+/* Un administrador, además, arrastra cada cuadro a donde quiera (se ajusta a una rejilla de 10 px y se guarda en la tienda). */
+marco.addEventListener('pointerdown',function(ev){if(ev.button!==0||ev.target.closest('.fl-herr,.fl-panel'))return;var nodo=ev.target.closest('.fl-nodo'),n=nodo&&FL.nodos[nodo.getAttribute('data-nodo')];arr={x:ev.clientX,y:ev.clientY,vx:FL.vista.x,vy:FL.vista.y,movio:false,nodo:nodo,n:FL.puedeOrdenar&&n?n:null,nx:n?n.x:0,ny:n?n.y:0,id:ev.pointerId};});
+marco.addEventListener('pointermove',function(ev){if(!arr||ev.pointerId!==arr.id)return;var dx=ev.clientX-arr.x,dy=ev.clientY-arr.y;if(!arr.movio&&Math.hypot(dx,dy)<4)return;if(!arr.movio){arr.movio=true;FL.arrastrando=true;marco.classList.add(arr.n?'moviendo':'arrastrando');if(arr.nodo&&arr.n)arr.nodo.classList.add('levantado');try{marco.setPointerCapture(ev.pointerId);}catch(e){}}
+ if(arr.n){var k=FL.vista.k||1,x=Math.max(0,Math.min(3000,Math.round((arr.nx+dx/k)/10)*10)),y=Math.max(0,Math.min(3000,Math.round((arr.ny+dy/k)/10)*10));if(x!==arr.n.x||y!==arr.n.y){arr.n.x=x;arr.n.y=y;arr.nodo.style.left=x+'px';arr.nodo.style.top=y+'px';flLineas();}return;}
+ FL.vista.x=arr.vx+dx;FL.vista.y=arr.vy+dy;flVer();});
+function soltar(ev){if(!arr)return;var a=arr;arr=null;FL.arrastrando=false;marco.classList.remove('arrastrando','moviendo');if(a.nodo)a.nodo.classList.remove('levantado');
+ if(a.movio&&a.n){if(a.n.x!==a.nx||a.n.y!==a.ny){flAnotarPosiciones();flGuardarOrden();flAltoMarco();}return;}
+ if(!a.movio&&a.nodo)flAbrirPanel(a.nodo.getAttribute('data-nodo'));}
+marco.addEventListener('pointerup',soltar);marco.addEventListener('pointercancel',function(){if(arr&&arr.n&&arr.movio){arr.n.x=arr.nx;arr.n.y=arr.ny;arr.nodo.style.left=arr.nx+'px';arr.nodo.style.top=arr.ny+'px';arr.nodo.classList.remove('levantado');flLineas();}arr=null;FL.arrastrando=false;marco.classList.remove('arrastrando','moviendo');});
+$('flujo-restablecer').addEventListener('click',flRestablecerOrden);
 /* Con teclado: Enter o espacio sobre un nodo abre su detalle. */
 marco.addEventListener('keydown',function(ev){var n=ev.target.closest&&ev.target.closest('.fl-nodo');if(n&&(ev.key==='Enter'||ev.key===' ')){ev.preventDefault();flAbrirPanel(n.getAttribute('data-nodo'));}if(ev.key==='Escape')flCerrarPanel();});
 marco.addEventListener('click',function(ev){if(ev.target.closest('.fl-nodo'))ev.preventDefault();});
@@ -382,11 +417,14 @@ marco.addEventListener('wheel',function(ev){if(!ev.ctrlKey&&!ev.metaKey)return;e
 var ancho=marco.clientWidth;window.addEventListener('resize',function(){if(marco.clientWidth===ancho)return;ancho=marco.clientWidth;flAltoMarco();flEncajar();});}
 async function cargarFlujo(){var lienzo=$('flujo-lienzo');if(!lienzo)return;flPreparar();var d,aj=null;
 try{var r=await Promise.all([api('/admin/flujo'),api('/admin/rutas/ajustes').catch(function(){return null;})]);d=r[0];aj=r[1]&&(r[1].ajustes||r[1]);}catch(e){lienzo.innerHTML='<p class="fl-error">No se pudo dibujar el flujo: '+esc(e.message)+'</p>';return;}
-var primera=!FL.datos;FL.datos=d;var elegido=FL.elegido;flPintar(d,aj);
+var primera=!FL.datos;FL.datos=d;FL.aj=aj;FL.puedeOrdenar=!!d.puedeOrdenar;$('flujo-gsg').setAttribute('data-ordenar',FL.puedeOrdenar?'1':'0');
+/* Mientras alguien arrastra o queda un guardado en camino, manda lo de esta pantalla; si no, lo guardado en la tienda. */
+if(FL.arrastrando)return;if(!FL.pendiente&&!FL.guardando)FL.pos=d.disposicion||{};
+var elegido=FL.elegido;flPintar(d,aj);flBotonRestablecer();if(!primera)flAltoMarco();
 var sec=$('flujo-gsg');sec.querySelectorAll('.fl-g-abierto').forEach(function(e){e.classList.toggle('fl-oculto',!flAbierto);});sec.querySelectorAll('.fl-g-plegado').forEach(function(e){e.classList.toggle('fl-oculto',flAbierto);});
 if(primera)flAplicar();else flVer();
 if(elegido&&FL.nodos[elegido])flAbrirPanel(elegido);else if(FL.verNov)flNovedades();
 var tn=flTotalNovedades(),bn=$('flujo-novedades');bn.classList.toggle('sin',!tn);$('flujo-novedades-txt').innerHTML='Novedades de hoy <b>'+esc(tn)+'</b>';
-$('flujo-pie').innerHTML=(d.dia?'Pedidos del '+esc(String(d.dia).split('-').reverse().join('/'))+'. ':'')+'Toca un paso para ver su detalle. Arrastra para mover; <kbd>Ctrl</kbd> + rueda para acercar.';
+$('flujo-pie').innerHTML=(d.dia?'Pedidos del '+esc(String(d.dia).split('-').reverse().join('/'))+'. ':'')+'Toca un paso para ver su detalle. '+(FL.puedeOrdenar?'Arrastra un cuadro para ordenarlo a tu gusto (lo ve todo tu equipo) o el fondo para mover el lienzo':'Arrastra para mover')+'; <kbd>Ctrl</kbd> + rueda para acercar.';
 var hora=$('flujo-hora');if(hora)hora.textContent='Actualizado a las '+new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'});}
 `;

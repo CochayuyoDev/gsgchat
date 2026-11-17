@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { armarCasos, contarFlujo, contarReportados, marcarQuienEscribio, quejasEscritasHoy, TOPE_CASOS, type PedidoConCaso, type PedidoEnFlujo } from '../src/admin/flujo-routes.js';
+import { armarCasos, contarFlujo, contarReportados, DisposicionInvalida, limpiarDisposicion, marcarQuienEscribio, NODOS_DEL_FLUJO, quejasEscritasHoy, TOPE_CASOS, type PedidoConCaso, type PedidoEnFlujo } from '../src/admin/flujo-routes.js';
 import { panelPage } from '../src/web/pages.js';
 import { crearEscenarioEntregas, OBLIGATORIOS_GSG, PIN_LIMA, type EscenarioEntregas } from './escenario-entregas.js';
 
@@ -224,4 +224,27 @@ describe('GET /admin/flujo con pedidos reales del día', () => {
     expect(r.noContesto).toBe(0);
     expect(flujo.body.cifras.conversacionDirecta).toBe(1);
   }, 60_000);
+});
+
+describe('el orden de los cuadros (lo que el administrador arrastra)', () => {
+  it('los cuadros que se pueden guardar son justo los que dibuja el flujo', async () => {
+    const { FLUJO_SCRIPT } = await import('../src/web/flujo-inicio.js');
+    const ids = [...FLUJO_SCRIPT.matchAll(/nodo\(\{id:'([a-zA-Z0-9]+)'/g)].map((m) => m[1]);
+    expect(new Set(ids)).toEqual(new Set(NODOS_DEL_FLUJO));
+  });
+
+  it('limpiarDisposicion ajusta a la rejilla y rechaza lo que no es del flujo', () => {
+    expect(limpiarDisposicion({ gsg: [14, 26], ia: [0, 0] })).toEqual({ gsg: [10, 30], ia: [0, 0] });
+    expect(limpiarDisposicion({})).toEqual({});
+    for (const malo of [null, [], 'x', { otro: [1, 2] }, { gsg: [1, Number.NaN] }, { gsg: [1, Infinity] }, { gsg: [1] }, { gsg: { x: 1, y: 2 } }, { gsg: [5000, 1] }]) {
+      expect(() => limpiarDisposicion(malo), JSON.stringify(malo)).toThrow(DisposicionInvalida);
+    }
+  });
+
+  it('el script del panel trae el arrastre, el guardado y «Restablecer orden»', () => {
+    const html = panelPage({ configured: true, nombreNegocio: 'Prueba' });
+    expect(html).toContain('id="flujo-restablecer"');
+    expect(html).toContain('/admin/flujo/disposicion');
+    expect(html).toContain('function flLineas()');
+  });
 });
