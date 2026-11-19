@@ -29,6 +29,7 @@ import { syncTemplates } from '../templates/registry.js';
 import { clienteDeMeta } from '../templates/cliente-meta.js';
 import { pushTemplates } from '../templates/push.js';
 import { registerAutomationRoutes } from './automation-routes.js';
+import { registerFlujoRoutes } from './flujo-routes.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { registerPrivacidadRoutes } from './privacidad-routes.js';
 import { responderLectura } from '../web/cache-lectura.js';
@@ -184,6 +185,17 @@ export async function registerAdminRoutes(app: FastifyInstance, deps: AdminDeps)
   // Quien entra lo decide registerAuth (cookie de sesion o clave de API).
 
   await registerAutomationRoutes(app, { repos, sender });
+  // El flujo de GSGchat que se ve arriba del Inicio (empresa → WhatsApp → 1.er mensaje → SÍ/NO → 2.º mensaje).
+  await registerFlujoRoutes(app, {
+    repos,
+    settings,
+    fuentes: fuentesConexion,
+    nombreNegocio: () => deps.ajustes?.nombreNegocio() ?? config.businessName,
+    entregas: deps.entregas,
+    lineas: deps.lineas,
+    registroClientes: deps.registroClientes,
+    ia: deps.ia ?? null,
+  });
   const gsg = deps.gsg ?? crearPuertoGsg(config);
   await registerChatRoutes(app, { repos, sender, config, settings, mediaDir: deps.mediaDir, voz: deps.voz, gsg, ajustes: deps.ajustes, ia: deps.ia, lineas: deps.lineas });
   // BAJA y «borren mis datos»: lo atiende el equipo (src/privacidad).

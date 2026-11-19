@@ -52,6 +52,7 @@ import { crearProcesosEnMemoria } from '../src/procesos/repo-memoria.js';
 import { crearReportadosEnMemoria } from '../src/entregas/reportados.js';
 import { crearMensajesGsgEnMemoria } from '../src/db/mensajes-gsg.js';
 import { crearChatEtiquetasEnMemoria } from '../src/db/chat-etiquetas.js';
+import { crearFlujoDisposicionEnMemoria } from '../src/db/flujo-disposicion.js';
 import { crearDecisionesEnMemoria, type DecisionesEnMemoria } from '../src/db/decisiones-memoria.js';
 import type { Usuario, UsuarioConClave, UsuariosRepo } from '../src/auth/usuarios.js';
 import type { ClaveApi, ClavesApiRepo } from '../src/auth/claves-api.js';
@@ -371,6 +372,7 @@ export function createFakeRepos(overrides: Partial<NumberState> = {}): FakeRepos
     entregas: createFakeEntregas(() => new Date(), r => repos.rutas.encolarReporte(r)),
     procesos: crearProcesosEnMemoria(),
     reportados: crearReportadosEnMemoria(),
+    flujoDisposicion: crearFlujoDisposicionEnMemoria(),
     mensajesGsg: crearMensajesGsgEnMemoria(),
     // Los mensajes de los repos falsos, con el telefono de su contacto (sin grupos).
     chatEtiquetas: crearChatEtiquetasEnMemoria(() => {
